@@ -1,0 +1,252 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - banner [ref=e4]:
+      - generic [ref=e5]:
+        - generic [ref=e6]:
+          - generic [ref=e7]:
+            - heading "focus.music" [level=1] [ref=e9]
+            - paragraph [ref=e12]:
+              - text: Test User•user@test.com•
+              - generic [ref=e13]: Version 1389
+          - button "Sign Out" [ref=e15] [cursor=pointer]:
+            - img [ref=e16]
+            - text: Sign Out
+        - navigation [ref=e21]:
+          - button "Channels" [ref=e22] [cursor=pointer]:
+            - img [ref=e23]
+            - text: Channels
+          - button "Profile" [ref=e29] [cursor=pointer]:
+            - img [ref=e30]
+            - text: Profile
+          - button "Slideshow" [ref=e33] [cursor=pointer]:
+            - img [ref=e34]
+            - text: Slideshow
+          - button "Settings" [ref=e37] [cursor=pointer]:
+            - img [ref=e38]
+            - text: Settings
+    - main [ref=e41]:
+      - generic [ref=e42]:
+        - generic [ref=e43]:
+          - button "Grid" [ref=e44] [cursor=pointer]:
+            - img [ref=e45]
+            - generic [ref=e47]: Grid
+          - button "List" [ref=e48] [cursor=pointer]:
+            - img [ref=e49]
+            - generic [ref=e50]: List
+        - button "Sort" [ref=e52] [cursor=pointer]:
+          - img [ref=e53]
+          - generic [ref=e56]: Sort
+          - img [ref=e57]
+      - generic [ref=e59]:
+        - generic [ref=e61] [cursor=pointer]:
+          - generic [ref=e62]:
+            - img "Aquascope" [ref=e63]
+            - img [ref=e65]
+          - generic [ref=e67]:
+            - heading "Aquascope" [level=3] [ref=e68]
+            - generic [ref=e69]:
+              - generic [ref=e70]:
+                - button "Low" [ref=e71]
+                - button "Medium" [ref=e72]
+                - button "High" [ref=e73]
+              - generic [ref=e74]:
+                - generic [ref=e75]: Unknown Artist
+                - generic [ref=e76]: No Track Playing
+              - generic [ref=e77]:
+                - button [ref=e78]:
+                  - img [ref=e79]
+                - button [ref=e81]:
+                  - img [ref=e82]
+        - generic [ref=e85] [cursor=pointer]:
+          - img "Chinchilla" [ref=e87]
+          - generic [ref=e88]:
+            - heading "Chinchilla" [level=3] [ref=e89]
+            - paragraph [ref=e90]: Lo Fi • Foot tapping lounge tunes for getting stuff done at your own speed.
+        - generic [ref=e92] [cursor=pointer]:
+          - img "The Grid" [ref=e94]
+          - generic [ref=e95]:
+            - heading "The Grid" [level=3] [ref=e96]
+            - paragraph [ref=e97]: Future Trance - Hypnotic, repetitive four to the floor 16th note beats for your subconscious
+        - generic [ref=e99] [cursor=pointer]:
+          - img "NatureBeat" [ref=e101]
+          - generic [ref=e102]:
+            - heading "NatureBeat" [level=3] [ref=e103]
+            - paragraph [ref=e104]: EDM, hybrid • Deep Electronica wrapped in rich nature soundscapes. Custom engineered for focus.
+        - generic [ref=e106] [cursor=pointer]:
+          - img "Haiku Robot" [ref=e108]
+          - generic [ref=e109]:
+            - heading "Haiku Robot" [level=3] [ref=e110]
+            - paragraph [ref=e111]: Future electronica • Japanese haiku meets space robot transport.
+        - generic [ref=e113] [cursor=pointer]:
+          - img "Tranquility" [ref=e115]
+          - generic [ref=e116]:
+            - heading "Tranquility" [level=3] [ref=e117]
+            - paragraph [ref=e118]: Focus Spa • Esoteric, mystical, and calming soundscapes for an ambient experience.
+        - generic [ref=e120] [cursor=pointer]:
+          - img "The Drop" [ref=e122]
+          - generic [ref=e123]:
+            - heading "The Drop" [level=3] [ref=e124]
+            - paragraph [ref=e125]: Uptempo EDM • Infectious, energetic, dance-floor beats to keep you engaged.
+        - generic [ref=e127] [cursor=pointer]:
+          - img "Zen Piano" [ref=e129]
+          - generic [ref=e130]:
+            - heading "Zen Piano" [level=3] [ref=e131]
+            - paragraph [ref=e132]: Piano, meditation • The focus magic happens in the space between the notes.
+        - generic [ref=e134] [cursor=pointer]:
+          - img "The Deep" [ref=e136]
+          - generic [ref=e137]:
+            - heading "The Deep" [level=3] [ref=e138]
+            - paragraph [ref=e139]: Alpha Chill • Deep, luscious downtempo beats. Find your flow on demand for sustained creativity.
+        - generic [ref=e141] [cursor=pointer]:
+          - img "Organica" [ref=e143]
+          - generic [ref=e144]:
+            - heading "Organica" [level=3] [ref=e145]
+            - paragraph [ref=e146]: Acoustical, organic • Natural, solo performances on guitar and piano by humans.
+        - generic [ref=e148] [cursor=pointer]:
+          - img "Turbo Drums" [ref=e150]
+          - generic [ref=e151]:
+            - heading "Turbo Drums" [level=3] [ref=e152]
+            - paragraph [ref=e153]: Just drums • Turbo faster tempo! Find your rhythm right here right now. Dial it right in.
+        - generic [ref=e155] [cursor=pointer]:
+          - img "The Duke" [ref=e157]
+          - generic [ref=e158]:
+            - heading "The Duke" [level=3] [ref=e159]
+            - paragraph [ref=e160]: Baroque Piano • 17th century Bach on a modern piano tuned for focus.
+        - generic [ref=e162] [cursor=pointer]:
+          - img "Symphonica" [ref=e164]
+          - generic [ref=e165]:
+            - heading "Symphonica" [level=3] [ref=e166]
+            - paragraph [ref=e167]: Classical Plus • Custom mastered orchestral music for improved focus.
+        - generic [ref=e169] [cursor=pointer]:
+          - img "Propeller Drone" [ref=e171]
+          - generic [ref=e172]:
+            - heading "Propeller Drone" [level=3] [ref=e173]
+            - paragraph [ref=e174]: Soundscape, FX • Strap in to the focus zone. Plane engines at 30,000 feet. Binaural surround.
+        - generic [ref=e176] [cursor=pointer]:
+          - img "PowerTool" [ref=e178]
+          - generic [ref=e179]:
+            - heading "PowerTool" [level=3] [ref=e180]
+            - paragraph [ref=e181]: ADHD, ADD • Industrial, glitch. Intense, noisy EDM channel scientifically proven to help.
+        - generic [ref=e183] [cursor=pointer]:
+          - img "Noise" [ref=e185]
+          - generic [ref=e186]:
+            - heading "Noise" [level=3] [ref=e187]
+            - paragraph [ref=e188]: Brown noise. Pink noise. White noise. Focus. Focus. Focus.
+        - generic [ref=e190] [cursor=pointer]:
+          - img "NeuroSpace" [ref=e192]
+          - generic [ref=e193]:
+            - heading "NeuroSpace" [level=3] [ref=e194]
+            - paragraph [ref=e195]: Electronic, sci-fi • Stretch out with future synth tones and textures. Micro tunings.
+        - generic [ref=e197] [cursor=pointer]:
+          - img "Neon 80s" [ref=e199]
+          - generic [ref=e200]:
+            - heading "Neon 80s" [level=3] [ref=e201]
+            - paragraph [ref=e202]: 80s Dance Rewind • A modern take on disco beats, nostalgic synths, and funky guitars straight out of the '80s.
+        - generic [ref=e204] [cursor=pointer]:
+          - img "Machines" [ref=e206]
+          - generic [ref=e207]:
+            - heading "Machines" [level=3] [ref=e208]
+            - paragraph [ref=e209]: Let the persistent rattle and hum of these machines keep your focus locked down.
+        - generic [ref=e211] [cursor=pointer]:
+          - img "Kora" [ref=e213]
+          - generic [ref=e214]:
+            - heading "Kora" [level=3] [ref=e215]
+            - paragraph [ref=e216]: World, ethnic • Unique, delicate, inviting African harp recordings. 75 min loop.
+        - generic [ref=e218] [cursor=pointer]:
+          - img "Jambient Jungle" [ref=e220]
+          - generic [ref=e221]:
+            - heading "Jambient Jungle" [level=3] [ref=e222]
+            - paragraph [ref=e223]: Drums. Bass. Old school meets new school. Exclusive new channel.
+        - generic [ref=e225] [cursor=pointer]:
+          - img "HumDrum" [ref=e227]
+          - generic [ref=e228]:
+            - heading "HumDrum" [level=3] [ref=e229]
+            - paragraph [ref=e230]: "Drums, entrainment: Find your rhythm with no tuned instrument distraction."
+        - generic [ref=e232] [cursor=pointer]:
+          - img "HumDrum Turbo" [ref=e234]
+          - generic [ref=e235]:
+            - heading "HumDrum Turbo" [level=3] [ref=e236]
+            - paragraph [ref=e237]: Drums. Isotone. • Faster tempo! Find your rhythm with no tuned instrument distraction.
+        - generic [ref=e239] [cursor=pointer]:
+          - img "Evolve" [ref=e241]
+          - generic [ref=e242]:
+            - heading "Evolve" [level=3] [ref=e243]
+            - paragraph [ref=e244]: Ketamine Flow • “Music is the language of the spirit.” Kahlil Gibran
+        - generic [ref=e246] [cursor=pointer]:
+          - img "Espresso" [ref=e248]
+          - generic [ref=e249]:
+            - heading "Espresso" [level=3] [ref=e250]
+            - paragraph [ref=e251]: Ambience, people • Our local coffee shop with binaural entrainment
+        - generic [ref=e253] [cursor=pointer]:
+          - img "Engines" [ref=e255]
+          - generic [ref=e256]:
+            - heading "Engines" [level=3] [ref=e257]
+            - paragraph [ref=e258]: The comforting rumble of engines idling.
+        - generic [ref=e260] [cursor=pointer]:
+          - img "Edwardian" [ref=e262]
+          - generic [ref=e263]:
+            - heading "Edwardian" [level=3] [ref=e264]
+            - paragraph [ref=e265]: Classical Piano • Custom engineered, remastered and re-edited for focus.
+        - generic [ref=e267] [cursor=pointer]:
+          - img "Drums" [ref=e269]
+          - generic [ref=e270]:
+            - heading "Drums" [level=3] [ref=e271]
+            - paragraph [ref=e272]: Just drums • Find your rhythm with no tuned instrument distraction. Dial it in.
+        - generic [ref=e274] [cursor=pointer]:
+          - img "Deep Space" [ref=e276]
+          - generic [ref=e277]:
+            - heading "Deep Space" [level=3] [ref=e278]
+            - paragraph [ref=e279]: Hypnotic Exploration • Celestial beats for deep daily creativity.
+        - generic [ref=e281] [cursor=pointer]:
+          - img "Cinematic" [ref=e283]
+          - generic [ref=e284]:
+            - heading "Cinematic" [level=3] [ref=e285]
+            - paragraph [ref=e286]: Classical, orchestral • Emotionally connecting and highly evocative.
+        - generic [ref=e288] [cursor=pointer]:
+          - img "Cappuccino" [ref=e290]
+          - generic [ref=e291]:
+            - heading "Cappuccino" [level=3] [ref=e292]
+            - paragraph [ref=e293]: Ambience, people • Our other local coffee shop with binaural entrainment
+        - generic [ref=e295] [cursor=pointer]:
+          - img "Bongo Turbo" [ref=e297]
+          - generic [ref=e298]:
+            - heading "Bongo Turbo" [level=3] [ref=e299]
+            - paragraph [ref=e300]: Percussion, entrainment • Turbo fast live hand drums. Find your rhythm with organic isochronic beats.
+        - generic [ref=e302] [cursor=pointer]:
+          - img "Bongo Flow" [ref=e304]
+          - generic [ref=e305]:
+            - heading "Bongo Flow" [level=3] [ref=e306]
+            - paragraph [ref=e307]: Percussion, entrainment • Live hand drums. Find your rhythm with organic isochronic beats.
+        - generic [ref=e309] [cursor=pointer]:
+          - img "Bach Beats" [ref=e311]
+          - generic [ref=e312]:
+            - heading "Bach Beats" [level=3] [ref=e313]
+            - paragraph [ref=e314]: Electro Bach • Preludes, fugues and DJ beats. 1720s chamber strings meet 2020s electronica.
+        - generic [ref=e316] [cursor=pointer]:
+          - img "Atmosphere" [ref=e318]
+          - generic [ref=e319]:
+            - heading "Atmosphere" [level=3] [ref=e320]
+            - paragraph [ref=e321]: Ambient, soundscapes • Peaceful, mellow, and subtle hypnotic spaces.
+        - generic [ref=e323] [cursor=pointer]:
+          - img "Motor Fan Drone" [ref=e325]
+          - generic [ref=e326]:
+            - heading "Motor Fan Drone" [level=3] [ref=e327]
+            - paragraph [ref=e328]: Electric motor with a fan knocking on something, Rich Bernett's genius.
+  - generic [ref=e330]:
+    - button "Aquascope Now playing... Aquascope Unknown Artist • No Track" [ref=e331] [cursor=pointer]:
+      - img "Aquascope" [ref=e332]
+      - generic [ref=e333]:
+        - generic [ref=e334]: Now playing...
+        - generic [ref=e335]: Aquascope
+        - generic [ref=e336]: Unknown Artist • No Track
+    - generic [ref=e337]:
+      - button "30:00" [ref=e339] [cursor=pointer]
+      - button [ref=e340] [cursor=pointer]:
+        - img [ref=e341]
+    - button "Slideshow" [ref=e344] [cursor=pointer]:
+      - img [ref=e345]
+      - generic [ref=e348]: Slideshow
+```

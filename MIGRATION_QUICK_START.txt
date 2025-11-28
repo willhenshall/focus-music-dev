@@ -1,0 +1,128 @@
+================================================================================
+DATABASE MIGRATION PACKAGE - QUICK START
+================================================================================
+Source: xewajlyswijmjxuajhif.supabase.co (Bolt)
+Target: Your new Supabase Pro account
+Export Date: 2025-11-16
+
+================================================================================
+FILES INCLUDED
+================================================================================
+
+1. COMPLETE_DATABASE_EXPORT.sql (6.4 MB)
+   - Complete schema (all 143 migrations combined)
+   - All tables, indexes, constraints
+   - All RLS policies
+   - All database functions and triggers
+   - Ready to apply directly to new database
+
+2. DATABASE_MIGRATION_GUIDE.md (7.0 KB)
+   - Detailed step-by-step instructions
+   - Troubleshooting guide
+   - Post-migration checklist
+
+3. This file (quick reference)
+
+================================================================================
+FASTEST MIGRATION PATH (3 STEPS)
+================================================================================
+
+STEP 1: Apply Schema to New Database
+-------------------------------------
+1. Create new Supabase Pro project
+2. Go to SQL Editor
+3. Upload/paste COMPLETE_DATABASE_EXPORT.sql
+4. Execute
+5. Verify all 19 tables created
+
+STEP 2: Export Data from Current Database
+------------------------------------------
+Visit: https://supabase.com/dashboard/project/xewajlyswijmjxuajhif
+
+Go to Table Editor and export these 19 tables to CSV:
+  ☐ user_profiles
+  ☐ audio_channels (37 channels)
+  ☐ audio_tracks
+  ☐ channel_recommendations
+  ☐ quiz_questions
+  ☐ quiz_answer_options
+  ☐ quiz_results
+  ☐ user_preferences
+  ☐ system_preferences
+  ☐ user_image_preferences
+  ☐ image_sets
+  ☐ image_set_images
+  ☐ slot_strategies
+  ☐ slot_strategy_slots
+  ☐ saved_slot_sequences
+  ☐ track_analytics
+  ☐ user_playback_tracking
+  ☐ test_registry
+  ☐ test_runs
+
+STEP 3: Import Data to New Database
+------------------------------------
+1. Go to Table Editor in new project
+2. Select each table
+3. Import corresponding CSV file
+4. Repeat for all tables
+
+================================================================================
+WHY API EXPORT DOESN'T WORK
+================================================================================
+
+The Bolt-managed Supabase instance has restricted API access for security.
+Direct queries return "Invalid API key" even with service_role key.
+
+Solution: Use Supabase Dashboard (web UI) for data export.
+
+================================================================================
+WHAT'S NOT INCLUDED
+================================================================================
+
+❌ Audio files (they're on Cloudflare R2 CDN, not in database)
+❌ Edge Functions (deploy separately from supabase/functions/)
+❌ Storage bucket files (only bucket definitions are in schema)
+
+✅ But you DON'T need to migrate audio files - they're already on R2!
+   Just keep using: pub-16f9274cf01948468de2d5af8a6fdb23.r2.dev
+
+================================================================================
+AFTER MIGRATION
+================================================================================
+
+Update .env file:
+  SUPABASE_URL=https://your-new-ref.supabase.co
+  SUPABASE_ANON_KEY=your-new-anon-key
+  SUPABASE_SERVICE_ROLE_KEY=your-new-service-role-key
+
+  VITE_SUPABASE_URL=https://your-new-ref.supabase.co
+  VITE_SUPABASE_ANON_KEY=your-new-anon-key
+  VITE_SUPABASE_SERVICE_ROLE_KEY=your-new-service-role-key
+
+Then test:
+  npm run build
+  # Start dev server and test all features
+
+================================================================================
+NEED HELP?
+================================================================================
+
+Read: DATABASE_MIGRATION_GUIDE.md (detailed instructions)
+
+Key URLs:
+- Current DB: https://supabase.com/dashboard/project/xewajlyswijmjxuajhif
+- New DB: https://supabase.com/dashboard (your new project)
+
+================================================================================
+ESTIMATED TIME
+================================================================================
+
+Schema import:     5 minutes
+Data export:       20-30 minutes (19 tables)
+Data import:       20-30 minutes
+Testing:           30-60 minutes
+------------------------
+Total:             1.5-2 hours
+
+================================================================================

@@ -1,0 +1,7 @@
+{
+  "supabase": {
+    "url": "https://eafyytltuwuxuuoevavo.supabase.co",
+    "anonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVhZnl5dGx0dXd1eHV1b2V2YXZvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA1NDQ4MDMsImV4cCI6MjA3NjEyMDgwM30.nWItpL2946Q5GxhE5mk80sfFKr3BiaKqnOA-vGr1JWM",
+    "serviceRoleKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVhZnl5dGx0dXd1eHV1b2V2YXZvIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MDU0NDgwMywiZXhwIjoyMDc2MTIwODAzfQ.tIu_7VgOJvRb1QU-YHKvT1TbNaxOGZgOt_hdbkUQQ64"
+  }
+}

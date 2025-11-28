@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio File Uploader</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 2rem;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        h1 {
+            color: #1a202c;
+            margin-bottom: 1rem;
+            font-size: 2rem;
+        }
+        .upload-area {
+            border: 3px dashed #cbd5e0;
+            border-radius: 8px;
+            padding: 3rem;
+            text-align: center;
+            background: #f7fafc;
+            margin: 2rem 0;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .upload-area:hover {
+            border-color: #667eea;
+            background: #edf2f7;
+        }
+        .upload-area.dragging {
+            border-color: #667eea;
+            background: #e6fffa;
+        }
+        input[type="file"] { display: none; }
+        .btn {
+            background: #667eea;
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 6px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .btn:hover {
+            background: #5a67d8;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        .btn:disabled {
+            background: #cbd5e0;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .progress-container {
+            margin-top: 2rem;
+            display: none;
+        }
+        .progress-bar {
+            height: 8px;
+            background: #e2e8f0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 1rem;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            width: 0%;
+            transition: width 0.3s;
+        }
+        .file-list {
+            margin-top: 1.5rem;
+        }
+        .file-item {
+            padding: 0.75rem;
+            background: #f7fafc;
+            border-radius: 6px;
+            margin-bottom: 0.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .file-status {
+            font-size: 0.875rem;
+            color: #718096;
+        }
+        .success { color: #48bb78; }
+        .error { color: #f56565; }
+        .info { color: #4299e1; margin-bottom: 1rem; padding: 1rem; background: #bee3f8; border-radius: 6px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Audio File Uploader</h1>
+        <div class="info">
+            Upload your audio files (.mp3) and their matching JSON sidecar files.
+            The system will automatically pair them and upload to Supabase storage.
+        </div>
+
+        <div class="upload-area" id="uploadArea">
+            <p style="font-size: 1.25rem; color: #4a5568; margin-bottom: 1rem;">
+                Drag & drop files here or click to browse
+            </p>
+            <button class="btn" onclick="document.getElementById('fileInput').click()">
+                Select Files
+            </button>
+            <input type="file" id="fileInput" multiple accept=".mp3,.json">
+        </div>
+
+        <button class="btn" id="uploadBtn" style="display: none;" onclick="startUpload()">
+            Upload Files
+        </button>
+
+        <div class="progress-container" id="progressContainer">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <p id="progressText" style="color: #4a5568;"></p>
+        </div>
+
+        <div class="file-list" id="fileList"></div>
+    </div>
+
+    <script type="module">
+        import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+
+        const SUPABASE_URL = 'https://xewajlyswijmjxuajhif.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVhZnl5dGx0dXd1eHV1b2V2YXZvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA1NDQ4MDMsImV4cCI6MjA3NjEyMDgwM30.nWItpL2946Q5GxhE5mk80sfFKr3BiaKqnOA-vGr1JWM';
+
+        const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        let selectedFiles = [];
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressFill = document.getElementById('progressFill');
+        const progressText = document.getElementById('progressText');
+        const fileList = document.getElementById('fileList');
+
+        // Drag and drop handlers
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragging');
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragging');
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragging');
+            handleFiles(e.dataTransfer.files);
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+        });
+
+        function handleFiles(files) {
+            selectedFiles = Array.from(files);
+            displayFiles();
+            uploadBtn.style.display = 'block';
+        }
+
+        function displayFiles() {
+            fileList.innerHTML = '';
+            selectedFiles.forEach((file, index) => {
+                const item = document.createElement('div');
+                item.className = 'file-item';
+                item.innerHTML = `
+                    <span>${file.name}</span>
+                    <span class="file-status" id="status-${index}">Ready</span>
+                `;
+                fileList.appendChild(item);
+            });
+        }
+
+        window.startUpload = async function() {
+            uploadBtn.disabled = true;
+            progressContainer.style.display = 'block';
+
+            const audioFiles = selectedFiles.filter(f => f.name.endsWith('.mp3'));
+            const jsonFiles = selectedFiles.filter(f => f.name.endsWith('.json'));
+
+            let uploaded = 0;
+            const total = audioFiles.length + jsonFiles.length;
+
+            // Upload audio files
+            for (let i = 0; i < audioFiles.length; i++) {
+                const file = audioFiles[i];
+                const statusEl = document.getElementById(`status-${selectedFiles.indexOf(file)}`);
+
+                try {
+                    statusEl.textContent = 'Uploading...';
+                    statusEl.className = 'file-status';
+
+                    const { error } = await supabase.storage
+                        .from('audio-files')
+                        .upload(`audio/${file.name}`, file, {
+                            upsert: true,
+                            contentType: 'audio/mpeg'
+                        });
+
+                    if (error) throw error;
+
+                    statusEl.textContent = 'Uploaded ✓';
+                    statusEl.className = 'file-status success';
+                } catch (error) {
+                    statusEl.textContent = `Error: ${error.message}`;
+                    statusEl.className = 'file-status error';
+                }
+
+                uploaded++;
+                const percent = Math.round((uploaded / total) * 100);
+                progressFill.style.width = percent + '%';
+                progressText.textContent = `Uploaded ${uploaded} of ${total} files (${percent}%)`;
+            }
+
+            // Upload JSON files
+            for (let i = 0; i < jsonFiles.length; i++) {
+                const file = jsonFiles[i];
+                const statusEl = document.getElementById(`status-${selectedFiles.indexOf(file)}`);
+
+                try {
+                    statusEl.textContent = 'Uploading...';
+                    statusEl.className = 'file-status';
+
+                    const { error } = await supabase.storage
+                        .from('audio-files')
+                        .upload(`json/${file.name}`, file, {
+                            upsert: true,
+                            contentType: 'application/json'
+                        });
+
+                    if (error) throw error;
+
+                    statusEl.textContent = 'Uploaded ✓';
+                    statusEl.className = 'file-status success';
+                } catch (error) {
+                    statusEl.textContent = `Error: ${error.message}`;
+                    statusEl.className = 'file-status error';
+                }
+
+                uploaded++;
+                const percent = Math.round((uploaded / total) * 100);
+                progressFill.style.width = percent + '%';
+                progressText.textContent = `Uploaded ${uploaded} of ${total} files (${percent}%)`;
+            }
+
+            uploadBtn.disabled = false;
+            alert('Upload complete! Files uploaded to Supabase storage.');
+        }
+    </script>
+</body>
+</html>

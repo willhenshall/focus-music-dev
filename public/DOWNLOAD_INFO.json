@@ -1,0 +1,36 @@
+{
+  "package": {
+    "name": "audio-engine-complete-package.tar.gz",
+    "version": "1.0.0",
+    "build": 1406,
+    "created": "2025-11-16",
+    "size_compressed": "47 KB",
+    "size_uncompressed": "220 KB",
+    "md5": "c2c7318eb5631902c337091b8b68eb82"
+  },
+  "location": {
+    "filesystem": "/tmp/cc-agent/58694584/project/public/audio-engine-complete-package.tar.gz",
+    "web_url_if_dev_server_running": "http://localhost:5173/audio-engine-complete-package.tar.gz"
+  },
+  "contents": {
+    "total_files": 18,
+    "source_files": 6,
+    "documentation_files": 6,
+    "total_lines_of_code": 3634
+  },
+  "features": [
+    "Enterprise Audio Engine (1,148 lines)",
+    "Multi-CDN Storage Adapters",
+    "5 Playlist Strategies",
+    "Advanced Slot-Based Algorithm",
+    "Complete Analytics System",
+    "Gapless Playback & Crossfading",
+    "Circuit Breaker & Retry Logic",
+    "Comprehensive Documentation"
+  ],
+  "installation": {
+    "extract": "tar -xzf audio-engine-complete-package.tar.gz",
+    "install": "cd MIGRATION_EXPORT && ./install.sh /path/to/your-project",
+    "dependencies": "npm install @supabase/supabase-js"
+  }
+}

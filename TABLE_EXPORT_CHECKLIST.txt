@@ -1,0 +1,204 @@
+================================================================================
+TABLE EXPORT CHECKLIST
+================================================================================
+Database: https://supabase.com/dashboard/project/xewajlyswijmjxuajhif
+Export Method: Table Editor → Select Table → Export to CSV
+
+================================================================================
+PRIORITY 1: CORE DATA (Export First)
+================================================================================
+
+☐ audio_channels
+  → 37 channels with configurations
+  → Required for: All audio playback
+  → Export filename: audio_channels.csv
+
+☐ quiz_questions
+  → Complete quiz question set
+  → Required for: Cognitive profiling
+  → Export filename: quiz_questions.csv
+
+☐ quiz_answer_options
+  → Answer options for quiz questions
+  → Required for: Quiz functionality
+  → Export filename: quiz_answer_options.csv
+
+☐ user_profiles
+  → User account information
+  → Required for: Authentication & user management
+  → Export filename: user_profiles.csv
+
+================================================================================
+PRIORITY 2: CONFIGURATION DATA
+================================================================================
+
+☐ system_preferences
+  → System-wide settings
+  → Required for: App configuration
+  → Export filename: system_preferences.csv
+
+☐ user_preferences
+  → User-specific settings
+  → Required for: Personalization
+  → Export filename: user_preferences.csv
+
+☐ image_sets
+  → Image set definitions
+  → Required for: Visual slideshows
+  → Export filename: image_sets.csv
+
+☐ image_set_images
+  → Individual images in sets
+  → Required for: Slideshow content
+  → Export filename: image_set_images.csv
+
+☐ user_image_preferences
+  → User slideshow preferences
+  → Required for: Personalized visuals
+  → Export filename: user_image_preferences.csv
+
+================================================================================
+PRIORITY 3: PLAYLIST & STRATEGY DATA
+================================================================================
+
+☐ audio_tracks
+  → Individual track records
+  → Required for: Music playback
+  → Export filename: audio_tracks.csv
+  → Note: This will be a large file
+
+☐ channel_recommendations
+  → Personalized channel recommendations
+  → Required for: Smart recommendations
+  → Export filename: channel_recommendations.csv
+
+☐ slot_strategies
+  → Playlist generation strategies
+  → Required for: Advanced playlist features
+  → Export filename: slot_strategies.csv
+
+☐ slot_strategy_slots
+  → Individual slots in strategies
+  → Required for: Slot-based playlists
+  → Export filename: slot_strategy_slots.csv
+
+☐ saved_slot_sequences
+  → Saved playlist sequences
+  → Required for: Preset playlists
+  → Export filename: saved_slot_sequences.csv
+
+================================================================================
+PRIORITY 4: ANALYTICS & HISTORY (Optional)
+================================================================================
+
+☐ quiz_results
+  → Historical quiz completions
+  → Optional: Can start fresh
+  → Export filename: quiz_results.csv
+
+☐ track_analytics
+  → Track play statistics
+  → Optional: Can start fresh
+  → Export filename: track_analytics.csv
+
+☐ user_playback_tracking
+  → User playback history
+  → Optional: Can start fresh
+  → Export filename: user_playback_tracking.csv
+
+================================================================================
+PRIORITY 5: TESTING DATA (Optional)
+================================================================================
+
+☐ test_registry
+  → Playwright test registry
+  → Optional: Development data only
+  → Export filename: test_registry.csv
+
+☐ test_runs
+  → Test execution history
+  → Optional: Development data only
+  → Export filename: test_runs.csv
+
+================================================================================
+EXPORT INSTRUCTIONS
+================================================================================
+
+For each table:
+
+1. Go to: https://supabase.com/dashboard/project/xewajlyswijmjxuajhif
+2. Click: Table Editor (left sidebar)
+3. Select: The table name
+4. Click: "..." menu (top right)
+5. Select: "Export to CSV"
+6. Save: As the filename shown above
+7. Check: This checkbox ☐
+
+Tips:
+- Export in order (Priority 1 → 5)
+- Verify CSV file isn't empty before moving on
+- Keep all CSV files in one folder
+- Name files exactly as shown for easy tracking
+
+================================================================================
+AFTER EXPORT
+================================================================================
+
+You should have 19 CSV files:
+  - Priority 1: 4 files (REQUIRED)
+  - Priority 2: 5 files (REQUIRED)
+  - Priority 3: 5 files (REQUIRED)
+  - Priority 4: 3 files (OPTIONAL)
+  - Priority 5: 2 files (OPTIONAL)
+
+Minimum required: 14 files (Priorities 1-3)
+Complete export: 19 files (All priorities)
+
+================================================================================
+IMPORT ORDER
+================================================================================
+
+When importing to new database, follow this order:
+
+1. user_profiles (users must exist first)
+2. system_preferences
+3. audio_channels
+4. audio_tracks
+5. quiz_questions
+6. quiz_answer_options
+7. image_sets
+8. image_set_images
+9. All remaining tables (order doesn't matter)
+
+This ensures foreign key constraints are satisfied.
+
+================================================================================
+VERIFICATION
+================================================================================
+
+After import, run in new database:
+
+SELECT
+  'audio_channels' as table_name, COUNT(*) as rows FROM audio_channels
+UNION ALL SELECT 'audio_tracks', COUNT(*) FROM audio_tracks
+UNION ALL SELECT 'user_profiles', COUNT(*) FROM user_profiles
+UNION ALL SELECT 'quiz_questions', COUNT(*) FROM quiz_questions
+UNION ALL SELECT 'quiz_answer_options', COUNT(*) FROM quiz_answer_options
+UNION ALL SELECT 'channel_recommendations', COUNT(*) FROM channel_recommendations
+UNION ALL SELECT 'user_preferences', COUNT(*) FROM user_preferences
+UNION ALL SELECT 'system_preferences', COUNT(*) FROM system_preferences
+UNION ALL SELECT 'image_sets', COUNT(*) FROM image_sets
+UNION ALL SELECT 'image_set_images', COUNT(*) FROM image_set_images
+UNION ALL SELECT 'user_image_preferences', COUNT(*) FROM user_image_preferences
+UNION ALL SELECT 'slot_strategies', COUNT(*) FROM slot_strategies
+UNION ALL SELECT 'slot_strategy_slots', COUNT(*) FROM slot_strategy_slots
+UNION ALL SELECT 'saved_slot_sequences', COUNT(*) FROM saved_slot_sequences
+UNION ALL SELECT 'quiz_results', COUNT(*) FROM quiz_results
+UNION ALL SELECT 'track_analytics', COUNT(*) FROM track_analytics
+UNION ALL SELECT 'user_playback_tracking', COUNT(*) FROM user_playback_tracking
+UNION ALL SELECT 'test_registry', COUNT(*) FROM test_registry
+UNION ALL SELECT 'test_runs', COUNT(*) FROM test_runs;
+
+Compare counts with source database to ensure complete migration.
+
+================================================================================

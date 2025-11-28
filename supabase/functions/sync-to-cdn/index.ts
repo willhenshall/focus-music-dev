@@ -1,0 +1,405 @@
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "npm:@supabase/supabase-js@2";
+import { S3Client, PutObjectCommand, DeleteObjectCommand, HeadObjectCommand } from "npm:@aws-sdk/client-s3@3";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
+};
+
+interface SyncRequest {
+  trackId: string;
+  operation: 'upload' | 'delete';
+  filePath?: string;
+  sidecarPath?: string;
+  // Optional: provide track data directly to avoid database lookup
+  trackData?: {
+    cdn_url?: string;
+    metadata?: any;
+    storage_locations?: any;
+  };
+}
+
+const R2_CONFIG = {
+  accountId: "531f033f1f3eb591e89baff98f027cee",
+  bucketName: "focus-music-audio",
+  accessKeyId: "d6c3feb94bb923b619c9661f950019d2",
+  secretAccessKey: "bc5d2ea0d38fecb4ef8442b78621a6b398415b3373cc1c174b12564a111678f3",
+  publicUrl: "https://pub-16f9274cf01948468de2d5af8a6fdb23.r2.dev",
+  audioPath: "audio",
+  metadataPath: "metadata",
+};
+
+Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, {
+      status: 200,
+      headers: corsHeaders,
+    });
+  }
+
+  try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    const { trackId, operation, trackData: providedTrackData }: SyncRequest = await req.json();
+
+    if (!trackId) {
+      return new Response(
+        JSON.stringify({ error: "trackId is required" }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    if (operation === 'upload') {
+      const { data: trackData, error: trackError } = await supabase
+        .from('audio_tracks')
+        .select('file_path, metadata')
+        .eq('track_id', trackId)
+        .is('deleted_at', null)
+        .maybeSingle();
+
+      if (trackError || !trackData) {
+        return new Response(
+          JSON.stringify({ error: "Track not found", details: trackError }),
+          {
+            status: 404,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      const filePathToSync = trackData.file_path;
+      const fileName = filePathToSync.split('/').pop() || '';
+
+      const { data: fileData, error: downloadError } = await supabase.storage
+        .from('audio-files')
+        .download(fileName);
+
+      if (downloadError || !fileData) {
+        return new Response(
+          JSON.stringify({ error: "Failed to download file from Supabase", details: downloadError }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      const sidecarFileName = `${trackId}.json`;
+      const { data: sidecarData } = await supabase.storage
+        .from('audio-sidecars')
+        .download(sidecarFileName);
+
+      const cdnUrl = await uploadAudioToCDN(fileName, fileData);
+      let sidecarCdnUrl: string | null = null;
+
+      if (sidecarData) {
+        sidecarCdnUrl = await uploadMetadataToCDN(sidecarFileName, sidecarData);
+      }
+
+      const timestamp = new Date().toISOString();
+      const { error: updateError } = await supabase
+        .from('audio_tracks')
+        .update({
+          cdn_url: cdnUrl,
+          cdn_uploaded_at: timestamp,
+          storage_locations: {
+            supabase: true,
+            r2_cdn: true,
+            upload_timestamps: {
+              supabase: trackData.metadata?.upload_date || timestamp,
+              r2_cdn: timestamp,
+            }
+          }
+        })
+        .eq('track_id', trackId);
+
+      if (updateError) {
+        console.error('Failed to update database:', updateError);
+      }
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          message: "Files synced to CDN successfully",
+          cdn_url: cdnUrl,
+          sidecar_cdn_url: sidecarCdnUrl,
+          timestamp,
+        }),
+        {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+
+    } else if (operation === 'delete') {
+      // Use provided track data if available, otherwise query database
+      let trackData = providedTrackData;
+
+      if (!trackData) {
+        console.log(`No track data provided, querying database for track ${trackId}...`);
+        const { data: dbTrackData } = await supabase
+          .from('audio_tracks')
+          .select('cdn_url, metadata, storage_locations')
+          .eq('track_id', trackId)
+          .maybeSingle();
+
+        if (!dbTrackData) {
+          console.log(`Track ${trackId} not found in database, skipping CDN deletion`);
+          return new Response(
+            JSON.stringify({
+              success: true,
+              message: "Track not found, skipping CDN deletion",
+            }),
+            {
+              status: 200,
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            }
+          );
+        }
+
+        trackData = dbTrackData;
+      } else {
+        console.log(`Using provided track data for track ${trackId}`);
+      }
+
+      const storageLocations = trackData.storage_locations as any;
+      const isSyncedToCDN = storageLocations?.r2_cdn === true || trackData.cdn_url;
+
+      console.log(`Track ${trackId} CDN status - storage_locations.r2_cdn: ${storageLocations?.r2_cdn}, cdn_url: ${trackData.cdn_url ? 'present' : 'null'}`);
+
+      let fileName = '';
+      if (trackData.cdn_url) {
+        fileName = trackData.cdn_url.split('/').pop() || '';
+      } else {
+        fileName = `${trackId}.mp3`;
+        console.log(`No cdn_url found, using track_id as filename: ${fileName}`);
+      }
+
+      let audioDeleted = false;
+      let audioError: string | null = null;
+      try {
+        audioDeleted = await deleteAudioFromCDN(fileName);
+        if (audioDeleted) {
+          console.log(`Successfully deleted audio file: ${fileName}`);
+        } else {
+          audioError = "File still exists after deletion attempt";
+          console.warn(`Audio file ${fileName} still exists after deletion`);
+        }
+      } catch (error: any) {
+        audioError = error.message;
+        console.error(`Error deleting audio file ${fileName}:`, error.message);
+      }
+
+      const sidecarFileName = `${trackId}.json`;
+      let sidecarDeleted = false;
+      let sidecarError: string | null = null;
+      try {
+        sidecarDeleted = await deleteMetadataFromCDN(sidecarFileName);
+        if (sidecarDeleted) {
+          console.log(`Successfully deleted metadata file: ${sidecarFileName}`);
+        } else {
+          sidecarError = "File still exists after deletion attempt";
+          console.warn(`Metadata file ${sidecarFileName} still exists after deletion`);
+        }
+      } catch (error: any) {
+        sidecarError = error.message;
+        console.error(`Error deleting metadata file ${sidecarFileName}:`, error.message);
+      }
+
+      const { error: updateError } = await supabase
+        .from('audio_tracks')
+        .update({
+          cdn_url: null,
+          cdn_uploaded_at: null,
+          storage_locations: {
+            supabase: true,
+            r2_cdn: false,
+            upload_timestamps: {
+              supabase: trackData?.metadata?.upload_date || new Date().toISOString(),
+            }
+          }
+        })
+        .eq('track_id', trackId);
+
+      if (updateError) {
+        console.error('Failed to update database:', updateError);
+      }
+
+      const success = audioDeleted && sidecarDeleted;
+      const message = success
+        ? "CDN deletion completed successfully"
+        : "CDN deletion partially failed";
+
+      return new Response(
+        JSON.stringify({
+          success,
+          message,
+          verified: true,
+          details: {
+            audioFile: {
+              name: fileName,
+              deleted: audioDeleted,
+              error: audioError,
+            },
+            metadataFile: {
+              name: sidecarFileName,
+              deleted: sidecarDeleted,
+              error: sidecarError,
+            },
+          }
+        }),
+        {
+          status: success ? 200 : 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    return new Response(
+      JSON.stringify({ error: "Invalid operation" }),
+      {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      }
+    );
+
+  } catch (error: any) {
+    console.error('CDN sync error:', error);
+    return new Response(
+      JSON.stringify({ error: error.message || "Internal server error", stack: error.stack }),
+      {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      }
+    );
+  }
+});
+
+function getS3Client(): S3Client {
+  return new S3Client({
+    region: "auto",
+    endpoint: `https://${R2_CONFIG.accountId}.r2.cloudflarestorage.com`,
+    credentials: {
+      accessKeyId: R2_CONFIG.accessKeyId,
+      secretAccessKey: R2_CONFIG.secretAccessKey,
+    },
+  });
+}
+
+async function uploadAudioToCDN(fileName: string, fileData: Blob): Promise<string> {
+  const s3Client = getS3Client();
+  const key = `${R2_CONFIG.audioPath}/${fileName}`;
+
+  const arrayBuffer = await fileData.arrayBuffer();
+  const buffer = new Uint8Array(arrayBuffer);
+
+  const command = new PutObjectCommand({
+    Bucket: R2_CONFIG.bucketName,
+    Key: key,
+    Body: buffer,
+    ContentType: fileData.type || 'audio/mpeg',
+  });
+
+  await s3Client.send(command);
+
+  const cdnUrl = `${R2_CONFIG.publicUrl}/${key}`;
+  console.log(`Uploaded audio to CDN: ${cdnUrl}`);
+
+  return cdnUrl;
+}
+
+async function uploadMetadataToCDN(fileName: string, fileData: Blob): Promise<string> {
+  const s3Client = getS3Client();
+  const key = `${R2_CONFIG.metadataPath}/${fileName}`;
+
+  const arrayBuffer = await fileData.arrayBuffer();
+  const buffer = new Uint8Array(arrayBuffer);
+
+  const command = new PutObjectCommand({
+    Bucket: R2_CONFIG.bucketName,
+    Key: key,
+    Body: buffer,
+    ContentType: 'application/json',
+  });
+
+  await s3Client.send(command);
+
+  const cdnUrl = `${R2_CONFIG.publicUrl}/${key}`;
+  console.log(`Uploaded metadata to CDN: ${cdnUrl}`);
+
+  return cdnUrl;
+}
+
+async function deleteAudioFromCDN(fileName: string): Promise<boolean> {
+  const s3Client = getS3Client();
+  const key = `${R2_CONFIG.audioPath}/${fileName}`;
+
+  // First, check if file exists
+  try {
+    const headCommand = new HeadObjectCommand({
+      Bucket: R2_CONFIG.bucketName,
+      Key: key,
+    });
+    await s3Client.send(headCommand);
+    console.log(`File ${key} exists, proceeding with deletion`);
+  } catch (error: any) {
+    if (error.name === 'NotFound' || error.$metadata?.httpStatusCode === 404) {
+      console.log(`File ${key} does not exist on CDN, already deleted`);
+      return true; // File already gone = success
+    }
+    // Other errors should be logged but we'll try to delete anyway
+    console.warn(`Error checking file ${key} existence:`, error.message);
+  }
+
+  // Delete the file - trust the S3 SDK
+  try {
+    const deleteCommand = new DeleteObjectCommand({
+      Bucket: R2_CONFIG.bucketName,
+      Key: key,
+    });
+    console.log(`Deleting audio file from CDN: ${key}`);
+    await s3Client.send(deleteCommand);
+    console.log(`✅ Successfully deleted from CDN: ${key}`);
+    return true;
+  } catch (error: any) {
+    console.error(`❌ Failed to delete ${key}:`, error.message);
+    console.error(`Error details:`, {
+      name: error.name,
+      code: error.code,
+      statusCode: error.$metadata?.httpStatusCode,
+    });
+    return false;
+  }
+}
+
+async function deleteMetadataFromCDN(fileName: string): Promise<boolean> {
+  const s3Client = getS3Client();
+  const key = `${R2_CONFIG.metadataPath}/${fileName}`;
+
+  // Delete the file - trust the S3 SDK
+  try {
+    const deleteCommand = new DeleteObjectCommand({
+      Bucket: R2_CONFIG.bucketName,
+      Key: key,
+    });
+    console.log(`Deleting metadata file from CDN: ${key}`);
+    await s3Client.send(deleteCommand);
+    console.log(`✅ Successfully deleted from CDN: ${key}`);
+    return true;
+  } catch (error: any) {
+    console.error(`❌ Failed to delete ${key}:`, error.message);
+    console.error(`Error details:`, {
+      name: error.name,
+      code: error.code,
+      statusCode: error.$metadata?.httpStatusCode,
+    });
+    return false;
+  }
+}

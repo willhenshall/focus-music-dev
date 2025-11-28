@@ -1,0 +1,169 @@
+{
+  "quiz_version": "2.0",
+  "total_questions": 21,
+  "questions": [
+    "tipi_1", "tipi_2", "tipi_3", "tipi_4", "tipi_5",
+    "tipi_6", "tipi_7", "tipi_8", "tipi_9", "tipi_10",
+    "avatar_1", "avatar_2", "no_melody_pref", "voices_distract",
+    "context_1", "context_2", "focus_duration", "current_activity",
+    "best_focus_time", "music_frequency", "focus_preference"
+  ],
+  "personality_scoring": {
+    "extraversion": "(tipi_1 + reverse(tipi_6)) / 2",
+    "agreeableness": "(tipi_7 + reverse(tipi_2)) / 2",
+    "conscientiousness": "(tipi_3 + reverse(tipi_8)) / 2",
+    "neuroticism": "(reverse(tipi_9) + tipi_4) / 2",
+    "openness": "(tipi_5 + reverse(tipi_10)) / 2",
+    "reverse_score": "8 - score",
+    "normalization": "score / 7 (to 0-1 scale)"
+  },
+  "channel_families": {
+    "rhythmic": {
+      "channels": ["The Grid", "Drums", "HumDrum", "Turbo Drums", "Noise", "Machines"],
+      "base_weight": "2*N",
+      "description": "Steady rhythmic patterns for focus"
+    },
+    "lofi": {
+      "channels": ["Chinchilla", "The Deep", "Deep Space"],
+      "base_weight": "1*E + 1.5*O",
+      "description": "Lo-fi beats for creative work"
+    },
+    "naturebeat": {
+      "channels": ["NatureBeat"],
+      "base_weight": "2*E + 1*O",
+      "description": "Natural rhythms for energy"
+    },
+    "edm_high": {
+      "channels": ["The Drop", "A. D. D. J. Gabba", "PowerTool"],
+      "base_weight": "2*E - 1*N",
+      "description": "High-energy electronic music"
+    },
+    "ambient": {
+      "channels": ["Atmosphere", "Aquascope", "Tranquility"],
+      "base_weight": "2*N + 1.5*O",
+      "description": "Ambient soundscapes for calm focus"
+    },
+    "classical": {
+      "channels": ["Symphonica", "The Duke", "Edwardian", "Cinematic"],
+      "base_weight": "2*C + 0.5*A",
+      "description": "Classical compositions for deep work"
+    },
+    "acoustic": {
+      "channels": ["Organica", "Zen Piano", "Kora"],
+      "base_weight": "1*C + 1*A",
+      "description": "Organic acoustic sounds"
+    }
+  },
+  "preference_modifiers": {
+    "sound_preference": {
+      "rhythmic_low_emotion": {
+        "rhythmic": "+0.6",
+        "classical": "-0.3",
+        "acoustic": "-0.3"
+      },
+      "melodic_emotional": {
+        "acoustic": "+0.6",
+        "classical": "+0.6",
+        "rhythmic": "-0.3"
+      },
+      "ambient_nature": {
+        "ambient": "+0.6",
+        "edm_high": "-0.2"
+      },
+      "no_preference": "no adjustments"
+    },
+    "adhd_score": {
+      "condition": "stimulant_level >= medium",
+      "effect": {"naturebeat": "+0.4", "edm_high": "+0.4"}
+    },
+    "age_nudge": {
+      "50p": {
+        "classical": "+0.2",
+        "acoustic": "+0.2",
+        "edm_high": "-0.2"
+      }
+    },
+    "focus_duration": {
+      "short_bursts": {"edm_high": "+0.3", "rhythmic": "+0.2"},
+      "medium_sessions": {"lofi": "+0.2", "naturebeat": "+0.2"},
+      "long_stretches": {"ambient": "+0.3", "classical": "+0.3"},
+      "varies": "no adjustments"
+    },
+    "current_activity": {
+      "creative_content": {"lofi": "+0.4", "acoustic": "+0.3"},
+      "analytical": {"classical": "+0.4", "ambient": "+0.2"},
+      "management": {"rhythmic": "+0.3", "edm_high": "+0.2"},
+      "studying": {"ambient": "+0.3", "classical": "+0.3"},
+      "other": "no adjustments"
+    },
+    "best_focus_time": {
+      "early_morning": {"classical": "+0.2", "acoustic": "+0.2"},
+      "morning": {"naturebeat": "+0.2", "lofi": "+0.1"},
+      "afternoon": {"edm_high": "+0.2", "rhythmic": "+0.2"},
+      "evening": {"ambient": "+0.2", "lofi": "+0.2"},
+      "late_night": {"ambient": "+0.3", "lofi": "+0.2"},
+      "no_pattern": "no adjustments"
+    },
+    "music_frequency": {
+      "always": "all families +0.1",
+      "often": "no adjustments",
+      "sometimes": {"ambient": "+0.2", "acoustic": "+0.1"},
+      "rarely": {"ambient": "+0.3", "rhythmic": "+0.2"},
+      "never": {"ambient": "+0.4", "rhythmic": "+0.3"}
+    },
+    "focus_preference": {
+      "energizing": {"edm_high": "+0.4", "naturebeat": "+0.3"},
+      "calming": {"ambient": "+0.4", "acoustic": "+0.3"},
+      "structured": {"classical": "+0.4", "rhythmic": "+0.3"},
+      "creative": {"lofi": "+0.4", "acoustic": "+0.3"},
+      "minimal": {"ambient": "+0.3", "rhythmic": "+0.2"}
+    }
+  },
+  "energy_level_calculation": {
+    "base": "1 (Medium)",
+    "modifiers": [
+      "if E >= 0.6 or adhd_score >= 3: +1",
+      "if N >= 0.6 and !asd_flag and sound_pref == ambient_nature: -1"
+    ],
+    "range": "0-2 (Low, Medium, High)",
+    "channel_variation": [
+      "Top recommendation: if E > 0.7, increase energy",
+      "Third recommendation: if N > 0.6, decrease energy"
+    ]
+  },
+  "asd_score_calculation": {
+    "factors": [
+      "sound_pref == rhythmic_low_emotion: +1.0",
+      "sound_pref == ambient_nature: +0.5",
+      "no_melody_pref >= 4: +0.5",
+      "voices_distract >= 4: +0.5"
+    ],
+    "threshold": "asd_flag = true if score >= 1.0"
+  },
+  "recommendation_algorithm": {
+    "step_1": "Calculate Big Five personality scores from TIPI questions",
+    "step_2": "Calculate base family weights using personality formulas",
+    "step_3": "Apply sound preference overlays",
+    "step_4": "Apply ADHD modifiers if stimulant >= medium",
+    "step_5": "Apply age nudges if 50+",
+    "step_6": "Apply focus duration preferences (Q17)",
+    "step_7": "Apply current activity modifiers (Q18)",
+    "step_8": "Apply best focus time adjustments (Q19)",
+    "step_9": "Apply music frequency preferences (Q20)",
+    "step_10": "Apply focus preference modifiers (Q21)",
+    "step_11": "Sort families by total score",
+    "step_12": "Select top 3 families",
+    "step_13": "Pick random channel from each family",
+    "step_14": "Assign energy levels based on personality and position",
+    "step_15": "Generate rationales based on user profile"
+  },
+  "actual_channels": [
+    "The Grid", "Drums", "HumDrum", "Turbo Drums", "Noise", "Machines",
+    "Chinchilla", "The Deep", "Deep Space",
+    "NatureBeat",
+    "The Drop", "A. D. D. J. Gabba", "PowerTool",
+    "Atmosphere", "Aquascope", "Tranquility",
+    "Symphonica", "The Duke", "Edwardian", "Cinematic",
+    "Organica", "Zen Piano", "Kora"
+  ]
+}
