@@ -814,7 +814,7 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 pb-24">
-      {/* Trigger zone: Left side only (doesn't cover buttons) */}
+      {/* Trigger zone: Left side only (doesn't cover buttons) - desktop only */}
       <div
         ref={hoverZoneRef}
         onMouseEnter={handleMouseEnterHoverZone}
@@ -823,11 +823,10 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
           height: '48px',
           width: 'calc(100% - 400px)', // Leave right 400px for buttons
           pointerEvents: autoHideNavEnabled && activeTab === 'channels' && sortMethod !== 'collections' ? 'auto' : 'none',
-          display: autoHideNavEnabled && activeTab === 'channels' && sortMethod !== 'collections' ? 'block' : 'none'
         }}
       />
       {/* Main header - always visible */}
-      <header className="bg-white shadow-sm sticky top-0 z-50 overflow-hidden">
+      <header className="bg-white shadow-sm sticky top-0 z-50 md:overflow-hidden">
         {/* Mobile Header */}
         <div className="md:hidden">
           <div className="px-4 py-3 flex items-center justify-between border-b border-slate-200">
@@ -1020,29 +1019,30 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
         </div>
       </header>
 
-      {/* Floating Tab Navigation - only when auto-hide is enabled on Channels tab */}
+      {/* Floating Tab Navigation - only when auto-hide is enabled on Channels tab (desktop only) */}
       {autoHideNavEnabled && activeTab === 'channels' && sortMethod !== 'collections' && (
-        <div
-          ref={navRef}
-          onMouseEnter={handleMouseEnterNav}
-          onMouseLeave={handleMouseLeaveNav}
-          className="fixed left-0 right-0 bg-white border-b border-slate-200 shadow-lg z-30"
-          style={{
-            top: '73px',
-            transform: isNavVisible ? 'translateY(0)' : 'translateY(-100%)',
-            pointerEvents: isNavVisible ? 'auto' : 'none',
-            // Apple Dock timing: 0.4s with ease-out curve
-            transition: 'transform 0.4s cubic-bezier(0.25, 0.1, 0.25, 1)',
-          }}
-        >
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <nav className="flex items-center justify-between">
-              {/* Left side: Tab buttons */}
-              <div className="flex gap-8">
-                <button
-                  onClick={() => setActiveTab('channels')}
-                  className="py-4 px-1 border-b-2 font-semibold transition-colors flex items-center gap-2 border-blue-600 text-blue-600"
-                >
+        <div className="hidden md:block pointer-events-none md:pointer-events-auto">
+          <div
+            ref={navRef}
+            onMouseEnter={handleMouseEnterNav}
+            onMouseLeave={handleMouseLeaveNav}
+            className="fixed left-0 right-0 bg-white border-b border-slate-200 shadow-lg z-30"
+            style={{
+              top: '73px',
+              transform: isNavVisible ? 'translateY(0)' : 'translateY(-100%)',
+              pointerEvents: isNavVisible ? 'auto' : 'none',
+              // Apple Dock timing: 0.4s with ease-out curve
+              transition: 'transform 0.4s cubic-bezier(0.25, 0.1, 0.25, 1)',
+            }}
+          >
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+              <nav className="flex items-center justify-between">
+                {/* Left side: Tab buttons */}
+                <div className="flex gap-8">
+                  <button
+                    onClick={() => setActiveTab('channels')}
+                    className="py-4 px-1 border-b-2 font-semibold transition-colors flex items-center gap-2 border-blue-600 text-blue-600"
+                  >
                   <Radio size={18} />
                   Channels
                 </button>
@@ -1221,6 +1221,7 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
                 </div>
               </div>
             </nav>
+          </div>
           </div>
         </div>
       )}
@@ -1430,9 +1431,9 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
         </div>
       )}
 
-      {/* Settings Sub-Navigation Bar */}
+      {/* Settings Sub-Navigation Bar (desktop only) */}
       {activeTab === 'settings' && (
-        <div className="bg-white border-b border-slate-200 sticky top-[73px] z-40">
+        <div className="hidden md:block bg-white border-b border-slate-200 sticky top-[73px] z-40">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <nav className="flex gap-8">
               <button
@@ -2092,55 +2093,46 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
 
       {activeTab === 'settings' && (
         <>
-          {/* Mobile Back Link and Sub-Navigation */}
+          {/* Mobile Settings Sub-Navigation - single row with Back link */}
           <div className="md:hidden border-t border-slate-200 bg-white">
-            <div className="px-4 pt-4 pb-0">
+            <nav className="flex items-center">
               <button
                 onClick={() => setActiveTab('channels')}
-                className="text-blue-600 hover:text-blue-700 font-medium text-sm"
+                className="py-3 px-3 border-b-2 border-transparent text-blue-600 hover:text-blue-700 font-semibold text-sm transition-colors"
               >
                 Back
               </button>
-            </div>
-
-            {/* Mobile Settings Sub-Navigation */}
-            <div className="border-t border-slate-200 mt-4">
-              <nav className="flex overflow-x-auto">
-                <button
-                  onClick={() => setSettingsSubTab('profile')}
-                  className={`flex-1 py-3 px-4 border-b-2 font-semibold text-sm transition-colors flex items-center justify-center gap-2 whitespace-nowrap ${
-                    settingsSubTab === 'profile'
-                      ? 'border-blue-600 text-blue-600'
-                      : 'border-transparent text-slate-600'
-                  }`}
-                >
-                  <User size={16} />
-                  Profile
-                </button>
-                <button
-                  onClick={() => setSettingsSubTab('preferences')}
-                  className={`flex-1 py-3 px-4 border-b-2 font-semibold text-sm transition-colors flex items-center justify-center gap-2 whitespace-nowrap ${
-                    settingsSubTab === 'preferences'
-                      ? 'border-blue-600 text-blue-600'
-                      : 'border-transparent text-slate-600'
-                  }`}
-                >
-                  <SlidersHorizontal size={16} />
-                  Preferences
-                </button>
-                <button
-                  onClick={() => setSettingsSubTab('privacy-data')}
-                  className={`flex-1 py-3 px-4 border-b-2 font-semibold text-sm transition-colors flex items-center justify-center gap-2 whitespace-nowrap ${
-                    settingsSubTab === 'privacy-data'
-                      ? 'border-blue-600 text-blue-600'
-                      : 'border-transparent text-slate-600'
-                  }`}
-                >
-                  <Shield size={16} />
-                  Privacy
-                </button>
-              </nav>
-            </div>
+              <button
+                onClick={() => setSettingsSubTab('profile')}
+                className={`flex-1 py-3 px-2 border-b-2 font-semibold text-sm transition-colors text-center ${
+                  settingsSubTab === 'profile'
+                    ? 'border-blue-600 text-blue-600'
+                    : 'border-transparent text-slate-600'
+                }`}
+              >
+                Profile
+              </button>
+              <button
+                onClick={() => setSettingsSubTab('preferences')}
+                className={`flex-1 py-3 px-2 border-b-2 font-semibold text-sm transition-colors text-center ${
+                  settingsSubTab === 'preferences'
+                    ? 'border-blue-600 text-blue-600'
+                    : 'border-transparent text-slate-600'
+                }`}
+              >
+                Prefs
+              </button>
+              <button
+                onClick={() => setSettingsSubTab('privacy-data')}
+                className={`flex-1 py-3 px-2 border-b-2 font-semibold text-sm transition-colors text-center ${
+                  settingsSubTab === 'privacy-data'
+                    ? 'border-blue-600 text-blue-600'
+                    : 'border-transparent text-slate-600'
+                }`}
+              >
+                Privacy
+              </button>
+            </nav>
           </div>
           <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
             <div className="mt-6 space-y-6">
