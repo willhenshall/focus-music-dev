@@ -1919,42 +1919,7 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
 
       {activeTab === 'focus-profile' && profile?.onboarding_completed && (
         <>
-          {/* Mobile Back Link and Dropdown */}
-          <div className="md:hidden border-t border-slate-200 bg-white px-4 pt-4 pb-0">
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setActiveTab('channels')}
-                className="text-blue-600 hover:text-blue-700 font-medium text-sm whitespace-nowrap"
-              >
-                Back
-              </button>
-              <select
-                value={focusProfileSubTab}
-                onChange={(e) => {
-                  const newTab = e.target.value as 'brain-type' | 'channels' | 'traits' | 'tips';
-                  setFocusProfileSubTab(newTab);
-                  const focusProfileTabs = document.querySelector('[data-focus-profile-tabs]') as any;
-                  if (focusProfileTabs?.setActiveSubTab) {
-                    focusProfileTabs.setActiveSubTab(newTab);
-                  }
-                }}
-                className="flex-1 px-3 py-3 text-sm font-medium bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none"
-                style={{
-                  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23475569' d='M6 9L1 4h10z'/%3E%3C/svg%3E")`,
-                  backgroundRepeat: 'no-repeat',
-                  backgroundPosition: 'right 12px center',
-                  paddingRight: '36px'
-                }}
-              >
-                <option value="brain-type">My Brain Type</option>
-                <option value="channels">Recommended Channels</option>
-                <option value="traits">Personality Traits</option>
-                <option value="tips">Focus Tips</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Desktop Tabs */}
+          {/* Desktop Tabs - only for completed users */}
           <div className="hidden md:block border-t border-slate-200 bg-white">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
               <nav className="flex gap-8">
@@ -2021,7 +1986,45 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
       )}
 
       {activeTab === 'focus-profile' && (
-        <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 pb-2">
+        <>
+          {/* Mobile Back Link - always shown like Slideshow and Settings */}
+          <div className="md:hidden border-t border-slate-200 bg-white px-4 pt-4 pb-0">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setActiveTab('channels')}
+                className="text-blue-600 hover:text-blue-700 font-medium text-sm whitespace-nowrap"
+              >
+                Back
+              </button>
+              {/* Sub-tab dropdown only for users who completed onboarding */}
+              {profile?.onboarding_completed && (
+                <select
+                  value={focusProfileSubTab}
+                  onChange={(e) => {
+                    const newTab = e.target.value as 'brain-type' | 'channels' | 'traits' | 'tips';
+                    setFocusProfileSubTab(newTab);
+                    const focusProfileTabs = document.querySelector('[data-focus-profile-tabs]') as any;
+                    if (focusProfileTabs?.setActiveSubTab) {
+                      focusProfileTabs.setActiveSubTab(newTab);
+                    }
+                  }}
+                  className="flex-1 px-3 py-3 text-sm font-medium bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none"
+                  style={{
+                    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23475569' d='M6 9L1 4h10z'/%3E%3C/svg%3E")`,
+                    backgroundRepeat: 'no-repeat',
+                    backgroundPosition: 'right 12px center',
+                    paddingRight: '36px'
+                  }}
+                >
+                  <option value="brain-type">My Brain Type</option>
+                  <option value="channels">Recommended Channels</option>
+                  <option value="traits">Personality Traits</option>
+                  <option value="tips">Focus Tips</option>
+                </select>
+              )}
+            </div>
+          </div>
+          <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 pb-2">
           {!profile?.onboarding_completed ? (
             <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl shadow-lg p-12 border border-blue-200 text-center">
               <div className="max-w-2xl mx-auto space-y-6">
@@ -2072,6 +2075,7 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
             />
           )}
         </main>
+        </>
       )}
 
       {activeTab === 'slideshow' && (
