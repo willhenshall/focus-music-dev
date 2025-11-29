@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { LogOut, Shield, PowerOff, User, Download, Trash2, AlertTriangle, Upload, Camera, ZoomIn, ZoomOut, X, Check, Radio, Settings as SettingsIcon, ArrowUpDown, GripVertical, Presentation, Brain, TrendingUp, Lightbulb, Menu, ChevronDown, Sparkles, Activity, Star, AlignLeft, Grid3x3, List, Play, Pause, SkipForward, Timer, HelpCircle, SlidersHorizontal, FolderOpen } from 'lucide-react';
+import { LogOut, Shield, PowerOff, User, Download, Trash2, AlertTriangle, Upload, Camera, ZoomIn, ZoomOut, X, Check, Radio, Settings as SettingsIcon, ArrowUpDown, GripVertical, Presentation, Brain, TrendingUp, Lightbulb, Menu, ChevronDown, ChevronLeft, Sparkles, Activity, Star, AlignLeft, Grid3x3, List, Play, Pause, SkipForward, Timer, HelpCircle, SlidersHorizontal, FolderOpen } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useMusicPlayer } from '../contexts/MusicPlayerContext';
 import { useImageSet } from '../contexts/ImageSetContext';
@@ -2092,55 +2092,52 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
 
       {activeTab === 'settings' && (
         <>
-          {/* Mobile Back Link and Sub-Navigation */}
+          {/* Mobile Settings Sub-Navigation with Back Link */}
           <div className="md:hidden border-t border-slate-200 bg-white">
-            <div className="px-4 pt-4 pb-0">
+            <nav className="flex items-center">
+              {/* Back button on the left */}
               <button
                 onClick={() => setActiveTab('channels')}
-                className="text-blue-600 hover:text-blue-700 font-medium text-sm"
+                className="py-3 px-4 border-b-2 border-transparent text-blue-600 hover:text-blue-700 font-semibold text-sm transition-colors flex items-center gap-1 whitespace-nowrap"
               >
+                <ChevronLeft size={16} />
                 Back
               </button>
-            </div>
-
-            {/* Mobile Settings Sub-Navigation */}
-            <div className="border-t border-slate-200 mt-4">
-              <nav className="flex overflow-x-auto">
-                <button
-                  onClick={() => setSettingsSubTab('profile')}
-                  className={`flex-1 py-3 px-4 border-b-2 font-semibold text-sm transition-colors flex items-center justify-center gap-2 whitespace-nowrap ${
-                    settingsSubTab === 'profile'
-                      ? 'border-blue-600 text-blue-600'
-                      : 'border-transparent text-slate-600'
-                  }`}
-                >
-                  <User size={16} />
-                  Profile
-                </button>
-                <button
-                  onClick={() => setSettingsSubTab('preferences')}
-                  className={`flex-1 py-3 px-4 border-b-2 font-semibold text-sm transition-colors flex items-center justify-center gap-2 whitespace-nowrap ${
-                    settingsSubTab === 'preferences'
-                      ? 'border-blue-600 text-blue-600'
-                      : 'border-transparent text-slate-600'
-                  }`}
-                >
-                  <SlidersHorizontal size={16} />
-                  Preferences
-                </button>
-                <button
-                  onClick={() => setSettingsSubTab('privacy-data')}
-                  className={`flex-1 py-3 px-4 border-b-2 font-semibold text-sm transition-colors flex items-center justify-center gap-2 whitespace-nowrap ${
-                    settingsSubTab === 'privacy-data'
-                      ? 'border-blue-600 text-blue-600'
-                      : 'border-transparent text-slate-600'
-                  }`}
-                >
-                  <Shield size={16} />
-                  Privacy
-                </button>
-              </nav>
-            </div>
+              {/* Settings tabs */}
+              <button
+                onClick={() => setSettingsSubTab('profile')}
+                className={`flex-1 py-3 px-3 border-b-2 font-semibold text-sm transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap ${
+                  settingsSubTab === 'profile'
+                    ? 'border-blue-600 text-blue-600'
+                    : 'border-transparent text-slate-600'
+                }`}
+              >
+                <User size={16} />
+                Profile
+              </button>
+              <button
+                onClick={() => setSettingsSubTab('preferences')}
+                className={`flex-1 py-3 px-3 border-b-2 font-semibold text-sm transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap ${
+                  settingsSubTab === 'preferences'
+                    ? 'border-blue-600 text-blue-600'
+                    : 'border-transparent text-slate-600'
+                }`}
+              >
+                <SlidersHorizontal size={16} />
+                Prefs
+              </button>
+              <button
+                onClick={() => setSettingsSubTab('privacy-data')}
+                className={`flex-1 py-3 px-3 border-b-2 font-semibold text-sm transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap ${
+                  settingsSubTab === 'privacy-data'
+                    ? 'border-blue-600 text-blue-600'
+                    : 'border-transparent text-slate-600'
+                }`}
+              >
+                <Shield size={16} />
+                Privacy
+              </button>
+            </nav>
           </div>
           <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
             <div className="mt-6 space-y-6">
