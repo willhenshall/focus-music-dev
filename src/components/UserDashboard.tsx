@@ -827,7 +827,7 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
         }}
       />
       {/* Main header - always visible */}
-      <header className="bg-white shadow-sm sticky top-0 z-50 overflow-hidden">
+      <header className="bg-white shadow-sm sticky top-0 z-50 md:overflow-hidden">
         {/* Mobile Header */}
         <div className="md:hidden">
           <div className="px-4 py-3 flex items-center justify-between border-b border-slate-200">
