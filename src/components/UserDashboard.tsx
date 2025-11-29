@@ -814,7 +814,7 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 pb-24">
-      {/* Trigger zone: Left side only (doesn't cover buttons) */}
+      {/* Trigger zone: Left side only (doesn't cover buttons) - desktop only */}
       <div
         ref={hoverZoneRef}
         onMouseEnter={handleMouseEnterHoverZone}
@@ -823,7 +823,6 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
           height: '48px',
           width: 'calc(100% - 400px)', // Leave right 400px for buttons
           pointerEvents: autoHideNavEnabled && activeTab === 'channels' && sortMethod !== 'collections' ? 'auto' : 'none',
-          display: autoHideNavEnabled && activeTab === 'channels' && sortMethod !== 'collections' ? 'block' : 'none'
         }}
       />
       {/* Main header - always visible */}
@@ -1020,29 +1019,30 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
         </div>
       </header>
 
-      {/* Floating Tab Navigation - only when auto-hide is enabled on Channels tab */}
+      {/* Floating Tab Navigation - only when auto-hide is enabled on Channels tab (desktop only) */}
       {autoHideNavEnabled && activeTab === 'channels' && sortMethod !== 'collections' && (
-        <div
-          ref={navRef}
-          onMouseEnter={handleMouseEnterNav}
-          onMouseLeave={handleMouseLeaveNav}
-          className="fixed left-0 right-0 bg-white border-b border-slate-200 shadow-lg z-30"
-          style={{
-            top: '73px',
-            transform: isNavVisible ? 'translateY(0)' : 'translateY(-100%)',
-            pointerEvents: isNavVisible ? 'auto' : 'none',
-            // Apple Dock timing: 0.4s with ease-out curve
-            transition: 'transform 0.4s cubic-bezier(0.25, 0.1, 0.25, 1)',
-          }}
-        >
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <nav className="flex items-center justify-between">
-              {/* Left side: Tab buttons */}
-              <div className="flex gap-8">
-                <button
-                  onClick={() => setActiveTab('channels')}
-                  className="py-4 px-1 border-b-2 font-semibold transition-colors flex items-center gap-2 border-blue-600 text-blue-600"
-                >
+        <div className="hidden md:block pointer-events-none md:pointer-events-auto">
+          <div
+            ref={navRef}
+            onMouseEnter={handleMouseEnterNav}
+            onMouseLeave={handleMouseLeaveNav}
+            className="fixed left-0 right-0 bg-white border-b border-slate-200 shadow-lg z-30"
+            style={{
+              top: '73px',
+              transform: isNavVisible ? 'translateY(0)' : 'translateY(-100%)',
+              pointerEvents: isNavVisible ? 'auto' : 'none',
+              // Apple Dock timing: 0.4s with ease-out curve
+              transition: 'transform 0.4s cubic-bezier(0.25, 0.1, 0.25, 1)',
+            }}
+          >
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+              <nav className="flex items-center justify-between">
+                {/* Left side: Tab buttons */}
+                <div className="flex gap-8">
+                  <button
+                    onClick={() => setActiveTab('channels')}
+                    className="py-4 px-1 border-b-2 font-semibold transition-colors flex items-center gap-2 border-blue-600 text-blue-600"
+                  >
                   <Radio size={18} />
                   Channels
                 </button>
@@ -1221,6 +1221,7 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
                 </div>
               </div>
             </nav>
+          </div>
           </div>
         </div>
       )}
@@ -1430,7 +1431,7 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
         </div>
       )}
 
-      {/* Settings Sub-Navigation Bar */}
+      {/* Settings Sub-Navigation Bar (desktop only) */}
       {activeTab === 'settings' && (
         <div className="hidden md:block bg-white border-b border-slate-200 sticky top-[73px] z-40">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -2092,7 +2093,7 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
 
       {activeTab === 'settings' && (
         <>
-          {/* Mobile Settings Sub-Navigation with Back Link */}
+          {/* Mobile Settings Sub-Navigation - single row with Back link */}
           <div className="md:hidden border-t border-slate-200 bg-white">
             <nav className="flex items-center">
               <button
