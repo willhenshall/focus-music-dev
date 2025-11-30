@@ -209,6 +209,7 @@ export function SettingsPrivacyData() {
             </p>
             <button
               onClick={() => setShowDeleteConfirm(true)}
+              data-testid="delete-account-button"
               className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-md transition-colors"
             >
               <Trash2 size={18} />
@@ -216,7 +217,7 @@ export function SettingsPrivacyData() {
             </button>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-4" data-testid="delete-confirm-modal">
             <div className="bg-white rounded-md p-4 border border-red-200">
               <p className="text-sm font-semibold text-red-900 mb-2">
                 This will permanently delete:
@@ -240,6 +241,7 @@ export function SettingsPrivacyData() {
                 value={deleteConfirmText}
                 onChange={(e) => setDeleteConfirmText(e.target.value)}
                 placeholder="DELETE"
+                data-testid="delete-confirm-input"
                 className="w-full px-3 py-2 border-2 border-red-300 rounded-md focus:ring-2 focus:ring-red-500 focus:border-transparent"
               />
             </div>
@@ -250,6 +252,7 @@ export function SettingsPrivacyData() {
                   setShowDeleteConfirm(false);
                   setDeleteConfirmText('');
                 }}
+                data-testid="delete-cancel-button"
                 className="flex-1 px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold rounded-md transition-colors"
               >
                 Cancel
@@ -257,6 +260,7 @@ export function SettingsPrivacyData() {
               <button
                 onClick={handleAccountDeletion}
                 disabled={deleteConfirmText !== 'DELETE' || isDeletingAccount}
+                data-testid="delete-confirm-button"
                 className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isDeletingAccount ? 'Deleting...' : 'Permanently Delete Account'}

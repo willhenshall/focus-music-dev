@@ -250,6 +250,7 @@ export function SettingsProfile() {
                 <img
                   src={avatarUrl}
                   alt="Profile"
+                  data-testid="avatar-image"
                   className="w-24 h-24 rounded-full object-cover border-4 border-slate-200"
                 />
               ) : (
@@ -264,7 +265,7 @@ export function SettingsProfile() {
                 Upload a profile photo to personalize your account. Max file size: 2MB
               </p>
               <div className="flex gap-3">
-                <label className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-md transition-colors cursor-pointer">
+                <label data-testid="avatar-upload-button" className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-md transition-colors cursor-pointer">
                   <Upload size={18} />
                   {avatarUrl ? 'Change Photo' : 'Upload Photo'}
                   <input
@@ -273,6 +274,7 @@ export function SettingsProfile() {
                     onChange={handleAvatarSelect}
                     disabled={isUploadingAvatar}
                     className="hidden"
+                    data-testid="avatar-file-input"
                   />
                 </label>
                 {avatarUrl && (
@@ -290,7 +292,7 @@ export function SettingsProfile() {
           </div>
 
           {avatarUploadStatus && (
-            <div className={`text-sm p-3 rounded-md ${
+            <div data-testid="avatar-status" className={`text-sm p-3 rounded-md ${
               avatarUploadStatus.startsWith('Error')
                 ? 'bg-red-50 text-red-700'
                 : 'bg-green-50 text-green-700'
@@ -319,6 +321,7 @@ export function SettingsProfile() {
                     setNameUpdateStatus('');
                   }
                 }}
+                data-testid="display-name-edit-button"
                 className="text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1"
               >
                 {isEditingName ? (
@@ -340,6 +343,7 @@ export function SettingsProfile() {
               onChange={(e) => setDisplayName(e.target.value)}
               disabled={!isEditingName}
               placeholder="Enter your name"
+              data-testid="display-name-input"
               className={`w-full px-3 py-2 border border-slate-300 rounded-md transition-colors ${
                 isEditingName
                   ? 'bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent'
@@ -347,7 +351,7 @@ export function SettingsProfile() {
               }`}
             />
             {nameUpdateStatus && (
-              <div className={`text-sm mt-2 p-2 rounded-md ${
+              <div data-testid="display-name-status" className={`text-sm mt-2 p-2 rounded-md ${
                 nameUpdateStatus.startsWith('Error')
                   ? 'bg-red-50 text-red-700'
                   : 'bg-green-50 text-green-700'
@@ -370,6 +374,7 @@ export function SettingsProfile() {
                     setEmailUpdateStatus('');
                   }
                 }}
+                data-testid="email-edit-button"
                 className="text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1"
               >
                 {isEditingEmail ? (
@@ -391,6 +396,7 @@ export function SettingsProfile() {
               onChange={(e) => setCurrentEmail(e.target.value)}
               disabled={!isEditingEmail}
               placeholder="your@email.com"
+              data-testid="email-input"
               className={`w-full px-3 py-2 border border-slate-300 rounded-md transition-colors ${
                 isEditingEmail
                   ? 'bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent'
@@ -398,7 +404,7 @@ export function SettingsProfile() {
               }`}
             />
             {emailUpdateStatus && (
-              <div className={`text-sm mt-2 p-2 rounded-md ${
+              <div data-testid="email-status" className={`text-sm mt-2 p-2 rounded-md ${
                 emailUpdateStatus.startsWith('Error')
                   ? 'bg-red-50 text-red-700'
                   : 'bg-green-50 text-green-700'
