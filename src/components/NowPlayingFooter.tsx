@@ -49,7 +49,7 @@ export function NowPlayingFooter({ onOpenSlideshow }: NowPlayingFooterProps) {
   const nextTracks = playlist.slice(currentTrackIndex + 1, currentTrackIndex + 11);
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-lg z-50">
+    <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-lg z-50" data-testid="player-footer">
       {/* Queue Display - Only for admins */}
       {profile?.is_admin && isQueueExpanded && nextTracks.length > 0 && (
         <div className="bg-slate-50 border-b border-slate-200 max-h-96 overflow-y-auto">
@@ -118,11 +118,11 @@ export function NowPlayingFooter({ onOpenSlideshow }: NowPlayingFooterProps) {
 
             {/* Text content */}
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-slate-500 mb-0.5">Now playing...</div>
+              <div className="text-xs text-slate-500 mb-0.5" data-testid="player-now-playing">Now playing...</div>
               <div className="font-semibold text-slate-900 truncate">
                 {activeChannel?.channel_name}
               </div>
-              <div className="text-sm text-slate-600 truncate">
+              <div className="text-sm text-slate-600 truncate" data-testid="player-track-info">
                 {displayTrack?.artist_name || 'Unknown Artist'} • {displayTrack?.track_name || 'No Track'}
               </div>
             </div>
@@ -141,6 +141,8 @@ export function NowPlayingFooter({ onOpenSlideshow }: NowPlayingFooterProps) {
           {/* Play/Pause Button */}
           <button
             onClick={() => isAdminMode ? toggleAdminPlayback() : toggleChannel(activeChannel!, !isPlaying, true)}
+            data-testid="player-play-pause"
+            data-playing={isPlaying}
             className={`w-12 h-12 rounded-full flex items-center justify-center transition-all shadow-md ${
               isPlaying
                 ? 'bg-slate-900 text-white hover:bg-slate-800'
