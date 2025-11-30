@@ -4,8 +4,9 @@ on:
   push:
     branches:
       - main
-      - develop
   pull_request:
+    branches:
+      - main
 
 jobs:
   test:
@@ -18,27 +19,11 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "20"
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
-
-      - name: Run unit tests
-        run: |
-          if [ -f package.json ] && jq -e '.scripts["test:unit"]' package.json > /dev/null; then
-            npm run test:unit -- --runInBand
-          else
-            echo "No test:unit script, skipping."
-          fi
-
-      - name: Run e2e tests
-        run: |
-          if [ -f package.json ] && jq -e '.scripts["test:e2e"]' package.json > /dev/null; then
-            npm run test:e2e
-          else
-            echo "No test:e2e script, skipping."
-          fi
+      - name: Run tests
+        run: npm test
