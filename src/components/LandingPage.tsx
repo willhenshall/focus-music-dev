@@ -45,6 +45,7 @@ export function LandingPage({ onAuthModeChange, onStartQuiz }: LandingPageProps)
             </p>
             <button
               onClick={onStartQuiz}
+              data-testid="quiz-start-button"
               className="px-8 py-4 bg-blue-500 hover:bg-blue-600 text-white text-lg font-semibold rounded-lg transition-colors inline-flex items-center gap-2"
             >
               Start Your Free Assessment

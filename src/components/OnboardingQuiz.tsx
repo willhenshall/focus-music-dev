@@ -310,7 +310,7 @@ export function OnboardingQuiz({ onComplete, isAnonymous = false, onLogoClick }:
             <ArrowLeft size={20} />
             <span className="font-medium">Back</span>
           </button>
-          <div className="mb-8">
+          <div className="mb-8" data-testid="quiz-progress">
             <div className="flex justify-between items-center mb-2">
               <span className="text-sm font-medium text-slate-600">
                 Question {currentQuestion + 1} of {questions.length}
@@ -327,7 +327,7 @@ export function OnboardingQuiz({ onComplete, isAnonymous = false, onLogoClick }:
             </div>
           </div>
 
-          <h2 className="text-2xl font-semibold text-slate-900 mb-8">
+          <h2 className="text-2xl font-semibold text-slate-900 mb-8" data-testid="quiz-question">
             {question.question_text}
           </h2>
 
@@ -338,6 +338,7 @@ export function OnboardingQuiz({ onComplete, isAnonymous = false, onLogoClick }:
                   key={option.value}
                   onClick={() => handleResponse(option.value)}
                   disabled={isSubmitting}
+                  data-testid="quiz-option"
                   className="w-full p-4 text-left rounded-xl border-2 border-slate-200 hover:border-blue-500 hover:bg-blue-50 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <span className="text-slate-700 font-medium">{option.label}</span>
@@ -349,6 +350,7 @@ export function OnboardingQuiz({ onComplete, isAnonymous = false, onLogoClick }:
                   key={value}
                   onClick={() => handleResponse(value)}
                   disabled={isSubmitting}
+                  data-testid="quiz-option"
                   className="w-full p-4 text-left rounded-xl border-2 border-slate-200 hover:border-blue-500 hover:bg-blue-50 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <span className="text-slate-700 font-medium">
@@ -368,6 +370,7 @@ export function OnboardingQuiz({ onComplete, isAnonymous = false, onLogoClick }:
                   key={value}
                   onClick={() => handleResponse(value)}
                   disabled={isSubmitting}
+                  data-testid="quiz-option"
                   className="w-full p-4 text-left rounded-xl border-2 border-slate-200 hover:border-blue-500 hover:bg-blue-50 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <span className="text-slate-700 font-medium">

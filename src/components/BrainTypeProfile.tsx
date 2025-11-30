@@ -124,7 +124,7 @@ export function BrainTypeProfile({ primaryType, secondaryType, secondaryScore, c
         <div className="flex items-start gap-4 mb-6">
           <div className="text-6xl">{content.emoji}</div>
           <div className="flex-1">
-            <div className="text-sm font-semibold text-blue-600 uppercase tracking-wide mb-2">
+            <div className="text-sm font-semibold text-blue-600 uppercase tracking-wide mb-2" data-testid="quiz-results-title">
               Your Focus Profile Brain Type
             </div>
             <h2 className="text-3xl font-bold text-slate-900 mb-2">
@@ -172,7 +172,7 @@ export function BrainTypeProfile({ primaryType, secondaryType, secondaryScore, c
                   const isLoading = loading[channel.id];
 
                   return (
-                    <div key={channel.id} className="bg-white rounded-2xl shadow-md border-2 border-slate-900 md:border md:border-slate-200 overflow-hidden hover:shadow-lg transition-shadow flex flex-col min-h-[255px] md:min-h-[255px] min-h-[230px]">
+                    <div key={channel.id} data-testid="quiz-recommended-channel" className="bg-white rounded-2xl shadow-md border-2 border-slate-900 md:border md:border-slate-200 overflow-hidden hover:shadow-lg transition-shadow flex flex-col min-h-[255px] md:min-h-[255px] min-h-[230px]">
                       <div className="relative h-[97px] md:h-[97px] h-[87px]">
                         <div className="absolute top-3 left-3 w-9 h-9 bg-slate-900 rounded-lg flex items-center justify-center text-white font-bold text-base z-10">
                           {index + 1}
