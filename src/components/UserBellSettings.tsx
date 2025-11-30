@@ -354,6 +354,7 @@ export function UserBellSettings() {
                 background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${volume}%, #e2e8f0 ${volume}%, #e2e8f0 100%)`,
               }}
               aria-label="Timer sound volume"
+              data-testid="bell-volume-slider"
             />
             <div className="flex justify-between text-xs text-slate-500 mt-2">
               <span>Quiet</span>
@@ -379,6 +380,8 @@ export function UserBellSettings() {
                   } ${savingBellId === bell.id ? 'opacity-50 cursor-wait' : ''}`}
                   aria-label={`Select ${bell.name}`}
                   aria-pressed={selectedBellId === bell.id}
+                  data-testid="bell-sound-option"
+                  data-selected={selectedBellId === bell.id}
                 >
                   <div className="flex items-center gap-3 flex-1 min-w-0">
                     <div
@@ -418,6 +421,7 @@ export function UserBellSettings() {
                       }`}
                       aria-label={previewingBellId === bell.id ? `Stop previewing ${bell.name}` : `Preview ${bell.name}`}
                       title={previewingBellId === bell.id ? 'Stop preview' : 'Preview sound'}
+                      data-testid="bell-preview-button"
                     >
                       {previewingBellId === bell.id ? (
                         <Pause size={16} className="animate-pulse" />

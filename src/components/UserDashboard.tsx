@@ -1444,9 +1444,10 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
       {activeTab === 'settings' && (
         <div className="hidden md:block bg-white border-b border-slate-200 sticky top-[73px] z-40">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <nav className="flex gap-8">
+            <nav className="flex gap-8" data-testid="settings-sub-nav">
               <button
                 onClick={() => setSettingsSubTab('profile')}
+                data-testid="settings-tab-profile"
                 className={`py-4 px-1 border-b-2 font-semibold transition-colors flex items-center gap-2 ${
                   settingsSubTab === 'profile'
                     ? 'border-blue-600 text-blue-600'
@@ -1458,6 +1459,7 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
               </button>
               <button
                 onClick={() => setSettingsSubTab('preferences')}
+                data-testid="settings-tab-preferences"
                 className={`py-4 px-1 border-b-2 font-semibold transition-colors flex items-center gap-2 ${
                   settingsSubTab === 'preferences'
                     ? 'border-blue-600 text-blue-600'
@@ -1469,6 +1471,7 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
               </button>
               <button
                 onClick={() => setSettingsSubTab('privacy-data')}
+                data-testid="settings-tab-privacy"
                 className={`py-4 px-1 border-b-2 font-semibold transition-colors flex items-center gap-2 ${
                   settingsSubTab === 'privacy-data'
                     ? 'border-blue-600 text-blue-600'
@@ -2117,7 +2120,7 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
         <>
           {/* Mobile Settings Sub-Navigation - single row with Back link */}
           <div className="md:hidden border-t border-slate-200 bg-white">
-            <nav className="flex items-center">
+            <nav className="flex items-center" data-testid="settings-mobile-nav">
               <button
                 onClick={() => setActiveTab('channels')}
                 className="py-3 px-3 border-b-2 border-transparent text-blue-600 hover:text-blue-700 font-semibold text-sm transition-colors"
@@ -2126,6 +2129,7 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
               </button>
               <button
                 onClick={() => setSettingsSubTab('profile')}
+                data-testid="mobile-settings-tab-profile"
                 className={`flex-1 py-3 px-2 border-b-2 font-semibold text-sm transition-colors text-center ${
                   settingsSubTab === 'profile'
                     ? 'border-blue-600 text-blue-600'
@@ -2136,6 +2140,7 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
               </button>
               <button
                 onClick={() => setSettingsSubTab('preferences')}
+                data-testid="mobile-settings-tab-preferences"
                 className={`flex-1 py-3 px-2 border-b-2 font-semibold text-sm transition-colors text-center ${
                   settingsSubTab === 'preferences'
                     ? 'border-blue-600 text-blue-600'
@@ -2146,6 +2151,7 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
               </button>
               <button
                 onClick={() => setSettingsSubTab('privacy-data')}
+                data-testid="mobile-settings-tab-privacy"
                 className={`flex-1 py-3 px-2 border-b-2 font-semibold text-sm transition-colors text-center ${
                   settingsSubTab === 'privacy-data'
                     ? 'border-blue-600 text-blue-600'

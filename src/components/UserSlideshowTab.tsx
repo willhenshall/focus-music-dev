@@ -329,6 +329,7 @@ export default function UserSlideshowTab() {
           </div>
           <button
             onClick={() => setShowCreateModal(true)}
+            data-testid="slideshow-create-button"
             className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors text-sm"
           >
             <Upload size={16} />
@@ -340,6 +341,8 @@ export default function UserSlideshowTab() {
           {slideshowSets.map((set) => (
             <div
               key={set.id}
+              data-testid="slideshow-card"
+              data-selected={selectedSetId === set.id}
               className={`relative border-2 rounded-lg p-4 transition-all cursor-pointer ${
                 selectedSetId === set.id
                   ? 'border-slate-900 bg-slate-50'
@@ -390,7 +393,7 @@ export default function UserSlideshowTab() {
               <h4 className="font-medium text-slate-900">
                 Manage "{selectedSet.name}" Images
               </h4>
-              <label className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors text-sm cursor-pointer">
+              <label data-testid="slideshow-upload-images" className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors text-sm cursor-pointer">
                 <Upload size={16} />
                 Add Images
                 <input
@@ -400,6 +403,7 @@ export default function UserSlideshowTab() {
                   className="hidden"
                   onChange={(e) => handleFileSelect(selectedSetId!, e)}
                   disabled={uploadingImages}
+                  data-testid="slideshow-image-input"
                 />
               </label>
             </div>
@@ -489,6 +493,8 @@ export default function UserSlideshowTab() {
                   setMessage({ type: 'error', text: 'Failed to save setting' });
                 }
               }}
+              data-testid="slideshow-toggle"
+              data-enabled={slideshowEnabled}
               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                 slideshowEnabled ? 'bg-green-600' : 'bg-slate-300'
               }`}
@@ -579,6 +585,8 @@ export default function UserSlideshowTab() {
             </div>
             <button
               onClick={() => setShowTimerOverlay(!showTimerOverlay)}
+              data-testid="timer-overlay-toggle"
+              data-enabled={showTimerOverlay}
               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                 showTimerOverlay ? 'bg-green-600' : 'bg-slate-300'
               }`}
@@ -594,7 +602,7 @@ export default function UserSlideshowTab() {
       </div>
 
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" data-testid="slideshow-create-modal">
           <div className="bg-white rounded-lg p-6 max-w-md w-full">
             <h3 className="text-xl font-bold text-slate-900 mb-4">Create My Slideshow</h3>
             <p className="text-sm text-slate-600 mb-4">
@@ -609,6 +617,7 @@ export default function UserSlideshowTab() {
                   value={newSetName}
                   onChange={(e) => setNewSetName(e.target.value)}
                   placeholder="My Work Focus Images"
+                  data-testid="slideshow-name-input"
                   className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
                 />
               </div>
@@ -627,6 +636,7 @@ export default function UserSlideshowTab() {
             <div className="flex gap-3">
               <button
                 onClick={createCustomSlideshow}
+                data-testid="slideshow-create-confirm"
                 className="flex-1 px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors"
               >
                 Create
@@ -637,6 +647,7 @@ export default function UserSlideshowTab() {
                   setNewSetName('');
                   setNewSetDescription('');
                 }}
+                data-testid="slideshow-create-cancel"
                 className="flex-1 px-4 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 transition-colors"
               >
                 Cancel
