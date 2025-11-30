@@ -8,3 +8,8 @@ npm-debug.log*
 yarn.lock
 pnpm-lock.yaml
 .DS_Store
+
+# Playwright
+playwright-report/
+test-results/
+*.last-run.json
