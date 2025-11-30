@@ -1,17 +1,9 @@
 import { test, expect } from "@playwright/test";
+import { login } from "./login";
 
 test.describe("Smoke Tests", () => {
   test.beforeEach(async ({ page }) => {
-    // Bypass the password gate
-    await page.goto("/");
-    
-    // Check if password form is shown
-    const passwordInput = page.locator('input[type="password"]');
-    if (await passwordInput.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await passwordInput.fill("magic");
-      await page.click('button[type="submit"]');
-      await page.waitForURL("/", { timeout: 5000 });
-    }
+    await login(page);
   });
 
   test("homepage loads successfully", async ({ page }) => {
@@ -23,7 +15,7 @@ test.describe("Smoke Tests", () => {
     await expect(header).toBeVisible();
 
     // Check for focus.music logo text
-    const logo = page.locator("header").getByText("focus");
+    const logo = header.getByText("focus");
     await expect(logo).toBeVisible();
   });
 
@@ -43,7 +35,9 @@ test.describe("Smoke Tests", () => {
     await expect(heading).toBeVisible();
 
     // Call-to-action button
-    const ctaButton = page.getByRole("button", { name: /start your free assessment/i });
+    const ctaButton = page.getByRole("button", {
+      name: /start your free assessment/i,
+    });
     await expect(ctaButton).toBeVisible();
   });
 });

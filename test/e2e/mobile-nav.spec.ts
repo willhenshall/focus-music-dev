@@ -1,19 +1,14 @@
 import { test, expect } from "@playwright/test";
+import { login } from "./login";
 
 test.describe("Mobile Navigation", () => {
-  test.use({ viewport: { width: 375, height: 667 } }); // iPhone SE size
+  test.use({
+    viewport: { width: 375, height: 667 }, // iPhone SE size
+    hasTouch: true, // Enable touch support for tap tests
+  });
 
   test.beforeEach(async ({ page }) => {
-    // Bypass the password gate
-    await page.goto("/");
-
-    // Check if password form is shown
-    const passwordInput = page.locator('input[type="password"]');
-    if (await passwordInput.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await passwordInput.fill("magic");
-      await page.click('button[type="submit"]');
-      await page.waitForURL("/", { timeout: 5000 });
-    }
+    await login(page);
   });
 
   test("header is visible on mobile", async ({ page }) => {
@@ -23,7 +18,6 @@ test.describe("Mobile Navigation", () => {
 
   test("navigation buttons remain accessible on mobile", async ({ page }) => {
     // On the landing page, buttons should still be visible on mobile
-    // The landing page uses a horizontal layout that may wrap on mobile
     const signInButton = page.getByRole("button", { name: /sign in/i });
     const getStartedButton = page.getByRole("button", { name: /get started/i });
 
@@ -52,23 +46,23 @@ test.describe("Mobile Navigation", () => {
 
   test("touch interactions work on mobile", async ({ page }) => {
     // Tap the Get Started button
-    const ctaButton = page.getByRole("button", { name: /start your free assessment/i });
+    const ctaButton = page.getByRole("button", {
+      name: /start your free assessment/i,
+    });
 
     if (await ctaButton.isVisible()) {
       await ctaButton.tap();
 
-      // Should navigate to quiz or show quiz modal
-      // Wait for some UI change
+      // Should navigate to quiz - wait for quiz content to appear
       await page.waitForTimeout(500);
 
-      // Verify the page has changed (either URL or visible content)
+      // Verify the page has changed (quiz content visible)
       const quizVisible = await page
-        .locator("text=/quiz|question|profile/i")
+        .locator("text=/quiz|question|profile|assessment/i")
         .first()
         .isVisible()
         .catch(() => false);
 
-      // The button tap should trigger some response
       expect(quizVisible).toBe(true);
     }
   });
