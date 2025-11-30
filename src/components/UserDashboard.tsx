@@ -844,6 +844,7 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
               <button
                 onClick={() => setShowMobileMenu(!showMobileMenu)}
                 className="p-2 text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+                data-testid="mobile-menu-button"
               >
                 <Menu size={20} />
               </button>
@@ -858,6 +859,7 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
                 <button
                   onClick={() => { setActiveTab('channels'); setShowMobileMenu(false); }}
                   className="w-full flex items-center gap-3 px-3 py-2 text-slate-700 hover:bg-slate-100 rounded-lg transition-colors text-left"
+                  data-testid="mobile-nav-channels"
                 >
                   <Radio size={18} />
                   <span className="font-medium">Channels</span>
@@ -865,6 +867,7 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
                 <button
                   onClick={() => { setActiveTab('focus-profile'); setShowMobileMenu(false); }}
                   className="w-full flex items-center gap-3 px-3 py-2 text-slate-700 hover:bg-slate-100 rounded-lg transition-colors text-left"
+                  data-testid="mobile-nav-profile"
                 >
                   <User size={18} />
                   <span className="font-medium">Profile</span>
@@ -872,6 +875,7 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
                 <button
                   onClick={() => { setActiveTab('slideshow'); setShowMobileMenu(false); }}
                   className="w-full flex items-center gap-3 px-3 py-2 text-slate-700 hover:bg-slate-100 rounded-lg transition-colors text-left"
+                  data-testid="mobile-nav-slideshow"
                 >
                   <Presentation size={18} />
                   <span className="font-medium">Slideshow</span>
@@ -879,6 +883,7 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
                 <button
                   onClick={() => { setActiveTab('settings'); setShowMobileMenu(false); }}
                   className="w-full flex items-center gap-3 px-3 py-2 text-slate-700 hover:bg-slate-100 rounded-lg transition-colors text-left"
+                  data-testid="mobile-nav-settings"
                 >
                   <SettingsIcon size={18} />
                   <span className="font-medium">Settings</span>
@@ -967,9 +972,10 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
           {!(autoHideNavEnabled && activeTab === 'channels' && sortMethod !== 'collections') && (
           <div className="border-t border-slate-200 relative z-10">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-              <nav className="flex gap-8">
+              <nav className="flex gap-8" data-testid="desktop-nav">
                 <button
                   onClick={() => setActiveTab('channels')}
+                  data-testid="nav-channels"
                   className={`py-4 px-1 border-b-2 font-semibold transition-colors flex items-center gap-2 ${
                     activeTab === 'channels'
                       ? 'border-blue-600 text-blue-600'
@@ -981,6 +987,7 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
                 </button>
                 <button
                   onClick={() => setActiveTab('focus-profile')}
+                  data-testid="nav-profile"
                   className={`py-4 px-1 border-b-2 font-semibold transition-colors flex items-center gap-2 ${
                     activeTab === 'focus-profile'
                       ? 'border-blue-600 text-blue-600'
@@ -992,6 +999,7 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
                 </button>
                 <button
                   onClick={() => setActiveTab('slideshow')}
+                  data-testid="nav-slideshow"
                   className={`py-4 px-1 border-b-2 font-semibold transition-colors flex items-center gap-2 ${
                     activeTab === 'slideshow'
                       ? 'border-blue-600 text-blue-600'
@@ -1003,6 +1011,7 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
                 </button>
                 <button
                   onClick={() => setActiveTab('settings')}
+                  data-testid="nav-settings"
                   className={`py-4 px-1 border-b-2 font-semibold transition-colors flex items-center gap-2 ${
                     activeTab === 'settings'
                       ? 'border-blue-600 text-blue-600'
@@ -1557,6 +1566,7 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
               <div
                 key={channel.id}
                 data-channel-id={channel.id}
+                data-testid="channel-card"
                 draggable={isUserOrderMode}
                 onDragStart={(e) => {
                   if (isUserOrderMode) {
@@ -1741,12 +1751,14 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
                       {isActive && viewMode === 'grid' ? (
                         <div className="space-y-2 w-full">
                           {/* Energy Level Selector */}
-                          <div className="flex gap-1.5 w-full">
+                          <div className="flex gap-1.5 w-full" data-testid="energy-selector">
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setChannelEnergy(channel.id, 'low');
                               }}
+                              data-testid="energy-low"
+                              data-selected={state?.energyLevel === 'low'}
                               className={`flex-1 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wide transition-all whitespace-nowrap ${
                                 state?.energyLevel === 'low'
                                   ? 'bg-blue-600 text-white shadow'
@@ -1760,6 +1772,8 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
                                 e.stopPropagation();
                                 setChannelEnergy(channel.id, 'medium');
                               }}
+                              data-testid="energy-medium"
+                              data-selected={state?.energyLevel === 'medium'}
                               className={`flex-1 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wide transition-all whitespace-nowrap ${
                                 state?.energyLevel === 'medium'
                                   ? 'bg-orange-600 text-white shadow'
@@ -1773,6 +1787,8 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
                                 e.stopPropagation();
                                 setChannelEnergy(channel.id, 'high');
                               }}
+                              data-testid="energy-high"
+                              data-selected={state?.energyLevel === 'high'}
                               className={`flex-1 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wide transition-all whitespace-nowrap ${
                                 state?.energyLevel === 'high'
                                   ? 'bg-red-600 text-white shadow'
@@ -1828,6 +1844,8 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
                                 e.stopPropagation();
                                 toggleChannel(channel, !isActuallyPlaying, true);
                               }}
+                              data-testid="channel-play-pause"
+                              data-playing={isActuallyPlaying}
                               className={`w-12 h-12 flex-shrink-0 rounded-full flex items-center justify-center transition-all shadow-md ${
                                 isActuallyPlaying
                                   ? 'bg-slate-900 text-white hover:bg-slate-800'

@@ -494,6 +494,8 @@ export default function SessionTimer() {
             setShowModal(true);
           }
         }}
+        data-testid="session-timer"
+        data-timer-active={isTimerActive}
         className={`px-3 py-1.5 rounded-xl text-lg font-semibold tabular-nums transition-all ${
           isTimerActive && isPlaying
             ? 'bg-blue-50 border-2 border-blue-200 text-blue-700 hover:bg-blue-100 hover:border-blue-300 shadow-sm'
