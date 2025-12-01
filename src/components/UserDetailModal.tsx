@@ -275,6 +275,7 @@ export function UserDetailModal({ user, onClose, onUserDeleted, onUserUpdated }:
     <div
       className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4 pb-24"
       onClick={onClose}
+      data-testid="user-detail-modal"
     >
       <div
         className="bg-white rounded-lg shadow-xl max-w-4xl w-full flex flex-col"
@@ -298,12 +299,14 @@ export function UserDetailModal({ user, onClose, onUserDeleted, onUserUpdated }:
                       }
                     }}
                     disabled={updatingName}
+                    data-testid="user-detail-displayname-input"
                     className="text-2xl font-bold bg-white bg-opacity-20 text-white px-3 py-1 rounded border-2 border-white border-opacity-40 focus:outline-none focus:border-opacity-100 disabled:opacity-50"
                     autoFocus
                   />
                   <button
                     onClick={handleUpdateDisplayName}
                     disabled={updatingName}
+                    data-testid="user-detail-save-name-button"
                     className="px-3 py-1 bg-white text-blue-600 rounded hover:bg-opacity-90 transition-colors disabled:opacity-50 text-sm font-medium"
                   >
                     {updatingName ? 'Saving...' : 'Save'}
@@ -324,6 +327,7 @@ export function UserDetailModal({ user, onClose, onUserDeleted, onUserUpdated }:
                   className="text-2xl font-bold mb-1 cursor-pointer hover:bg-white hover:bg-opacity-10 px-2 py-1 -mx-2 rounded transition-colors"
                   onClick={() => setIsEditingName(true)}
                   title="Click to edit name"
+                  data-testid="user-detail-displayname"
                 >
                   {displayName || 'No Name'}
                 </h2>
@@ -389,6 +393,7 @@ export function UserDetailModal({ user, onClose, onUserDeleted, onUserUpdated }:
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setShowDeleteConfirm(true)}
+                data-testid="user-detail-delete-button"
                 className="p-2 hover:bg-red-500 hover:bg-opacity-20 rounded-lg transition-colors flex-shrink-0"
                 title="Delete user"
               >
@@ -396,6 +401,7 @@ export function UserDetailModal({ user, onClose, onUserDeleted, onUserUpdated }:
               </button>
               <button
                 onClick={onClose}
+                data-testid="user-detail-close-button"
                 className="p-2 hover:bg-white hover:bg-opacity-20 rounded-lg transition-colors flex-shrink-0"
               >
                 <X size={24} />
