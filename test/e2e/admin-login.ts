@@ -140,3 +140,4 @@ export async function navigateToUserView(page: Page): Promise<void> {
   // Wait for user dashboard to load - Channels button indicates we're back
   await page.getByRole("button", { name: /channels/i }).waitFor({ state: "visible", timeout: 10000 });
 }
+
