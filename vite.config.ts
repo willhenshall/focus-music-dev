@@ -3,6 +3,9 @@ import react from '@vitejs/plugin-react';
 import * as fs from 'fs';
 import * as path from 'path';
 
+// Read version from package.json
+const packageJson = JSON.parse(fs.readFileSync('./package.json', 'utf-8'));
+
 // Plugin to auto-increment build version (only on production builds)
 function buildVersionPlugin() {
   let hasIncremented = false;
@@ -35,6 +38,10 @@ function buildVersionPlugin() {
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react(), buildVersionPlugin()],
+  define: {
+    __APP_VERSION__: JSON.stringify(packageJson.version),
+    __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+  },
   optimizeDeps: {
     exclude: ['lucide-react'],
   },
