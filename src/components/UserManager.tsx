@@ -562,6 +562,7 @@ export function UserManager() {
               placeholder="Search users by email or name..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              data-testid="users-search-input"
               className="w-full pl-10 pr-10 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             {searchQuery && (
@@ -623,6 +624,7 @@ export function UserManager() {
           )}
           <button
             onClick={() => setShowAddModal(true)}
+            data-testid="add-user-button"
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors whitespace-nowrap"
           >
             <UserPlus size={20} />
@@ -655,7 +657,7 @@ export function UserManager() {
 
       <div className="bg-white rounded-lg shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full">
+          <table className="w-full" data-testid="users-table">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
                 <th className="px-4 py-3 text-left">
@@ -691,6 +693,7 @@ export function UserManager() {
               {filteredUsers.map((user) => (
                 <tr
                   key={user.id}
+                  data-testid={`user-row-${user.email}`}
                   className="hover:bg-slate-50 transition-colors"
                 >
                   <td className="px-4 py-4">
@@ -743,12 +746,18 @@ export function UserManager() {
                   </td>
                   <td className="px-6 py-4">
                     {user.is_admin ? (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-purple-100 text-purple-800 text-xs font-medium rounded-full">
+                      <span 
+                        data-testid={`user-admin-badge-${user.email}`}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-purple-100 text-purple-800 text-xs font-medium rounded-full"
+                      >
                         <Shield size={14} />
                         Admin
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 text-slate-700 text-xs font-medium rounded-full">
+                      <span 
+                        data-testid={`user-role-badge-${user.email}`}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 text-slate-700 text-xs font-medium rounded-full"
+                      >
                         User
                       </span>
                     )}
@@ -763,6 +772,7 @@ export function UserManager() {
                     <div className="flex items-center justify-end gap-2">
                       <button
                         onClick={() => toggleAdminStatus(user.id, user.is_admin)}
+                        data-testid={`toggle-admin-${user.email}`}
                         className={`p-2 rounded-lg transition-colors ${
                           user.is_admin
                             ? 'text-slate-600 hover:text-orange-600 hover:bg-orange-50'
@@ -774,6 +784,7 @@ export function UserManager() {
                       </button>
                       <button
                         onClick={() => startDeleteUser(user)}
+                        data-testid={`delete-user-${user.email}`}
                         className="p-2 text-slate-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                         title="Delete user"
                       >
@@ -799,6 +810,7 @@ export function UserManager() {
         <div
           className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4 pb-24"
           onClick={() => setShowAddModal(false)}
+          data-testid="add-user-modal"
         >
           <div
             className="bg-white rounded-lg shadow-xl max-w-md w-full p-6"
@@ -822,6 +834,7 @@ export function UserManager() {
                   type="email"
                   value={newUser.email}
                   onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
+                  data-testid="new-user-email-input"
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="user@example.com"
                 />
@@ -834,6 +847,7 @@ export function UserManager() {
                   type="password"
                   value={newUser.password}
                   onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+                  data-testid="new-user-password-input"
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="Minimum 6 characters"
                 />
@@ -846,6 +860,7 @@ export function UserManager() {
                   type="text"
                   value={newUser.displayName}
                   onChange={(e) => setNewUser({ ...newUser, displayName: e.target.value })}
+                  data-testid="new-user-displayname-input"
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="Optional"
                 />
@@ -856,6 +871,7 @@ export function UserManager() {
                   id="isAdmin"
                   checked={newUser.isAdmin}
                   onChange={(e) => setNewUser({ ...newUser, isAdmin: e.target.checked })}
+                  data-testid="new-user-admin-checkbox"
                   className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
                 />
                 <label htmlFor="isAdmin" className="text-sm font-medium text-slate-700">
@@ -867,6 +883,7 @@ export function UserManager() {
               <button
                 onClick={() => setShowAddModal(false)}
                 disabled={creating}
+                data-testid="add-user-cancel-button"
                 className="px-4 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50"
               >
                 Cancel
@@ -874,6 +891,7 @@ export function UserManager() {
               <button
                 onClick={createNewUser}
                 disabled={creating || !newUser.email || !newUser.password}
+                data-testid="create-user-submit-button"
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {creating ? 'Creating...' : 'Create User'}
@@ -887,6 +905,7 @@ export function UserManager() {
         <div
           className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4 pb-24"
           onClick={cancelDelete}
+          data-testid="delete-user-modal"
         >
           <div
             className="bg-white rounded-lg shadow-xl max-w-md w-full p-6"
@@ -911,6 +930,7 @@ export function UserManager() {
                   type="text"
                   value={deleteConfirmText}
                   onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  data-testid="delete-confirm-input"
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 font-mono"
                   placeholder="Type DELETE to confirm"
                   autoFocus
@@ -921,6 +941,7 @@ export function UserManager() {
               <button
                 onClick={cancelDelete}
                 disabled={deleting}
+                data-testid="delete-cancel-button"
                 className="px-4 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50"
               >
                 Cancel
@@ -928,6 +949,7 @@ export function UserManager() {
               <button
                 onClick={confirmDeleteUser}
                 disabled={deleteConfirmText !== 'DELETE' || deleting}
+                data-testid="delete-confirm-button"
                 className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {deleting ? 'Deleting...' : 'Delete User'}
