@@ -1,40 +1,94 @@
-name: Nightly Playback Soak Tests
+name: Nightly playback soak tests
 
 on:
-  # Run once per day at 09:00 UTC (01:00 PST / 02:00 PDT)
   schedule:
+    # 09:00 UTC every day (01:00 PST / 02:00 PDT)
     - cron: '0 9 * * *'
-  # Allow manual trigger from GitHub UI
+  # Allow manual runs from the Actions tab
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   soak-tests:
+    name: Run desktop + mobile soak tests
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: "npm"
+          node-version: 20
+          cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
 
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps
 
-      - name: Run desktop soak suite
+      # Desktop soak tests (Chromium)
+      - name: Run desktop playback soak tests
         env:
           TEST_USER_EMAIL: ${{ secrets.TEST_USER_EMAIL }}
           TEST_USER_PASSWORD: ${{ secrets.TEST_USER_PASSWORD }}
-        run: npm run e2e -- --project=chromium test/e2e/playback-soak.desktop.spec.ts
+        run: |
+          npm run e2e -- --project=chromium test/e2e/playback-soak.desktop.spec.ts
 
-      - name: Run mobile soak suite
+      # Mobile soak tests (mobile-chrome project)
+      - name: Run mobile playback soak tests
         env:
           TEST_USER_EMAIL: ${{ secrets.TEST_USER_EMAIL }}
           TEST_USER_PASSWORD: ${{ secrets.TEST_USER_PASSWORD }}
-        run: npm run e2e -- --project=mobile-chrome test/e2e/playback-soak.mobile.spec.ts
+        run: |
+          npm run e2e -- --project=mobile-chrome test/e2e/playback-soak.mobile.spec.ts
+
+  notify-on-failure:
+    name: Email on nightly soak failure
+    needs: soak-tests
+    if: failure()      # Only run this job if soak-tests failed
+    runs-on: ubuntu-latest
+
+    env:
+      SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+      ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
+      ALERT_EMAIL_FROM: ${{ secrets.ALERT_EMAIL_FROM }}
+
+    steps:
+      - name: Build SendGrid payload
+        run: |
+          cat << EOF > payload.json
+          {
+            "personalizations": [
+              {
+                "to": [
+                  { "email": "$ALERT_EMAIL_TO" }
+                ],
+                "subject": "❌ Focus Music nightly soak tests FAILED"
+              }
+            ],
+            "from": {
+              "email": "$ALERT_EMAIL_FROM",
+              "name": "Focus Music CI"
+            },
+            "content": [
+              {
+                "type": "text/plain",
+                "value": "Nightly soak tests failed.\n\nRepository: $GITHUB_REPOSITORY\nWorkflow: $GITHUB_WORKFLOW\nRun: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\n\nCheck the failing job logs for details."
+              }
+            ]
+          }
+          EOF
+
+      - name: Send failure email via SendGrid
+        run: |
+          curl --request POST \
+            --url https://api.sendgrid.com/v3/mail/send \
+            --header "Authorization: Bearer $SENDGRID_API_KEY" \
+            --header "Content-Type: application/json" \
+            --data-binary @payload.json
