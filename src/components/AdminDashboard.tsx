@@ -11,7 +11,7 @@ import { AnalyticsDashboard } from './AnalyticsDashboard';
 import { TimerBellSettings } from './TimerBellSettings';
 import { TestingDashboard } from './TestingDashboard';
 import { TestsAdminDashboard } from './TestsAdminDashboard';
-import { BUILD_VERSION } from '../buildVersion';
+import { buildInfo, getEnvLabel, formatBuildTime } from '../lib/buildInfo';
 
 type AnalyticsData = {
   totalUsers: number;
@@ -315,7 +315,13 @@ export function AdminDashboard({ onSwitchToUser, showAudioDiagnostics, onToggleA
             <div className="h-6 w-px bg-slate-300"></div>
             <span className="text-sm text-slate-600">{user?.email}</span>
             <span className="mx-1">•</span>
-            <span className="text-xs text-slate-500">Version {BUILD_VERSION}</span>
+            <span 
+              data-testid="admin-build-info"
+              className="text-xs text-slate-500"
+              title={`Build: ${buildInfo.buildTime}`}
+            >
+              v{buildInfo.version} • {getEnvLabel()} • {formatBuildTime()}
+            </span>
           </div>
           <div className="flex items-center gap-3">
             {onToggleAudioDiagnostics && (
