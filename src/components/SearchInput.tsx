@@ -4,9 +4,10 @@ import { Search } from 'lucide-react';
 interface SearchInputProps {
   onSearch: (query: string) => void;
   placeholder?: string;
+  'data-testid'?: string;
 }
 
-export const SearchInput = memo(({ onSearch, placeholder = "Search..." }: SearchInputProps) => {
+export const SearchInput = memo(({ onSearch, placeholder = "Search...", 'data-testid': testId }: SearchInputProps) => {
   const [value, setValue] = useState('');
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -35,6 +36,7 @@ export const SearchInput = memo(({ onSearch, placeholder = "Search..." }: Search
           onChange={handleChange}
           onKeyDown={handleKeyDown}
           className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          data-testid={testId}
         />
       </div>
       <button
