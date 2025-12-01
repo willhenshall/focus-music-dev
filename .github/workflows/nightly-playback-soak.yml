@@ -1,0 +1,40 @@
+name: Nightly Playback Soak Tests
+
+on:
+  # Run once per day at 09:00 UTC (01:00 PST / 02:00 PDT)
+  schedule:
+    - cron: '0 9 * * *'
+  # Allow manual trigger from GitHub UI
+  workflow_dispatch:
+
+jobs:
+  soak-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run desktop soak suite
+        env:
+          TEST_USER_EMAIL: ${{ secrets.TEST_USER_EMAIL }}
+          TEST_USER_PASSWORD: ${{ secrets.TEST_USER_PASSWORD }}
+        run: npm run e2e -- --project=chromium test/e2e/playback-soak.desktop.spec.ts
+
+      - name: Run mobile soak suite
+        env:
+          TEST_USER_EMAIL: ${{ secrets.TEST_USER_EMAIL }}
+          TEST_USER_PASSWORD: ${{ secrets.TEST_USER_PASSWORD }}
+        run: npm run e2e -- --project=mobile-chrome test/e2e/playback-soak.mobile.spec.ts
