@@ -323,6 +323,51 @@ test.describe("Player Happy Path - Desktop", () => {
     expect(timerText).toMatch(/\d+:\d{2}/);
   });
 
+  test("audio is served from Cloudflare R2 CDN, not Supabase", async ({ page }) => {
+    await waitForChannelReady(page);
+
+    // Click on the first channel and start playing
+    const firstChannel = page.locator('[data-channel-id]').first();
+    await firstChannel.click();
+
+    const playPauseButton = page.locator('[data-testid="channel-play-pause"]');
+    await expect(playPauseButton).toBeVisible({ timeout: 10000 });
+    await playPauseButton.click();
+
+    // Wait for playback to start and audio to load
+    await page.waitForTimeout(3000);
+
+    // Verify playing state first
+    const footerPlayPause = page.locator('[data-testid="player-play-pause"]');
+    await expect(footerPlayPause).toHaveAttribute("data-playing", "true", { timeout: 10000 });
+
+    // Get the audio URL from the debug interface
+    // Retry a few times since metrics update async
+    let audioUrl: string | null = null;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      audioUrl = await page.evaluate(() => {
+        const debug = (window as any).__playerDebug;
+        if (debug && typeof debug.getCurrentTrackUrl === 'function') {
+          return debug.getCurrentTrackUrl();
+        }
+        return null;
+      });
+      
+      if (audioUrl) break;
+      await page.waitForTimeout(1000);
+    }
+
+    // Assert: Audio URL should contain the R2 CDN domain
+    expect(audioUrl).not.toBeNull();
+    expect(audioUrl).toContain('r2.dev');
+    expect(audioUrl).toContain('pub-16f9274cf01948468de2d5af8a6fdb23');
+    
+    // Assert: Audio URL should NOT contain Supabase
+    expect(audioUrl).not.toContain('supabase.co');
+
+    console.log(`[CDN TEST] Audio URL verified: ${audioUrl}`);
+  });
+
   test("navigation while playing - music continues across tabs", async ({
     page,
   }) => {
