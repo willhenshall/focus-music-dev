@@ -1171,9 +1171,11 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         getActiveChannel: () => activeChannel,
         getChannelStates: () => channelStates,
         isAdminMode: () => isAdminMode,
+        getMetrics: () => audioMetrics,
+        getCurrentTrackUrl: () => audioMetrics?.currentTrackUrl ?? null,
       };
     }
-  }, [currentTrack, currentTrackIndex, isPlaying, playlist, activeChannel, channelStates, isAdminMode]);
+  }, [currentTrack, currentTrackIndex, isPlaying, playlist, activeChannel, channelStates, isAdminMode, audioMetrics]);
 
   return (
     <MusicPlayerContext.Provider
