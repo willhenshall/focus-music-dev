@@ -13,6 +13,8 @@ import {
  * Tests are non-destructive by default, with destructive actions (like deleting users)
  * guarded behind an environment flag.
  *
+ * IMPORTANT: Admin tests are DESKTOP-ONLY. Mobile admin is not supported.
+ *
  * Prerequisites:
  *   - Admin test account must exist with admin privileges
  *   - Environment variables must be set:
@@ -88,13 +90,12 @@ function setupAlertHandler(page: Page): void {
 }
 
 test.describe("Admin User Management E2E Tests - Phase 2", () => {
-  // Skip all tests in this describe block if admin credentials are not set
-  test.skip(
-    !hasAdminCredentials,
-    "Skipping admin tests: TEST_ADMIN_EMAIL and TEST_ADMIN_PASSWORD environment variables must be set"
-  );
+  // Admin UI is desktop-only; skip on mobile projects
+  test.beforeEach(async ({ page }, testInfo) => {
+    if (testInfo.project.name === "mobile-chrome") {
+      test.skip(true, "Admin UI is desktop-only; mobile admin not supported.");
+    }
 
-  test.beforeEach(async ({ page }) => {
     // Set up alert handler for browser dialogs
     setupAlertHandler(page);
 
@@ -110,6 +111,12 @@ test.describe("Admin User Management E2E Tests - Phase 2", () => {
     // Wait for users section to load
     await waitForUsersTableToLoad(page);
   });
+
+  // Skip all tests in this describe block if admin credentials are not set
+  test.skip(
+    !hasAdminCredentials,
+    "Skipping admin tests: TEST_ADMIN_EMAIL and TEST_ADMIN_PASSWORD environment variables must be set"
+  );
 
   test("1) Admin can view Users list", async ({ page }) => {
     // Verify Users tab is active by checking we're on the right section
@@ -427,19 +434,12 @@ test.describe("Admin User Management E2E Tests - Phase 2", () => {
  * we never accidentally delete real users.
  */
 test.describe("Admin User Management - Destructive Tests (Delete User)", () => {
-  // Skip unless explicitly enabled
-  test.skip(
-    !ALLOW_USER_DELETION,
-    "Skipping destructive tests: Set TEST_ALLOW_USER_DELETION=true to enable"
-  );
+  // Admin UI is desktop-only; skip on mobile projects
+  test.beforeEach(async ({ page }, testInfo) => {
+    if (testInfo.project.name === "mobile-chrome") {
+      test.skip(true, "Admin UI is desktop-only; mobile admin not supported.");
+    }
 
-  // Also skip if no admin credentials
-  test.skip(
-    !hasAdminCredentials,
-    "Skipping admin tests: TEST_ADMIN_EMAIL and TEST_ADMIN_PASSWORD environment variables must be set"
-  );
-
-  test.beforeEach(async ({ page }) => {
     // Set up alert handler for browser dialogs
     setupAlertHandler(page);
 
@@ -455,6 +455,18 @@ test.describe("Admin User Management - Destructive Tests (Delete User)", () => {
     // Wait for users section to load
     await waitForUsersTableToLoad(page);
   });
+
+  // Skip unless explicitly enabled
+  test.skip(
+    !ALLOW_USER_DELETION,
+    "Skipping destructive tests: Set TEST_ALLOW_USER_DELETION=true to enable"
+  );
+
+  // Also skip if no admin credentials
+  test.skip(
+    !hasAdminCredentials,
+    "Skipping admin tests: TEST_ADMIN_EMAIL and TEST_ADMIN_PASSWORD environment variables must be set"
+  );
 
   test("6) Admin can delete test user (destructive)", async ({ page }) => {
     // Skip if no test user was created (or if it was already cleaned up)
@@ -546,9 +558,16 @@ test.describe("Admin User Management - Destructive Tests (Delete User)", () => {
 });
 
 /**
- * Verification test that always runs
+ * Verification test that always runs (desktop-only for consistency with admin tests)
  */
 test.describe("Admin User Management - Configuration Verification", () => {
+  // Admin UI is desktop-only; skip on mobile projects
+  test.beforeEach(async ({}, testInfo) => {
+    if (testInfo.project.name === "mobile-chrome") {
+      test.skip(true, "Admin UI is desktop-only; mobile admin not supported.");
+    }
+  });
+
   test("shows clear messages about test configuration", async () => {
     // Document the configuration state
     console.log("[CONFIG] Admin credentials available:", hasAdminCredentials);

@@ -12,6 +12,8 @@ import {
  * 
  * These tests verify admin functionality without modifying or deleting any data.
  * 
+ * IMPORTANT: Admin tests are DESKTOP-ONLY. Mobile admin is not supported.
+ * 
  * Prerequisites:
  *   - Admin test account must exist with admin privileges
  *   - Environment variables must be set:
@@ -23,6 +25,13 @@ import {
  */
 
 test.describe("Admin Tools E2E Tests - Phase 1 (Non-Destructive)", () => {
+  // Admin UI is desktop-only; skip on mobile projects
+  test.beforeEach(async ({}, testInfo) => {
+    if (testInfo.project.name === "mobile-chrome") {
+      test.skip(true, "Admin UI is desktop-only; mobile admin not supported.");
+    }
+  });
+
   // Skip all tests in this describe block if admin credentials are not set
   test.skip(
     !hasAdminCredentials,
@@ -124,6 +133,13 @@ test.describe("Admin Tools E2E Tests - Phase 1 (Non-Destructive)", () => {
 });
 
 test.describe("Admin Tools - Skip Message Verification", () => {
+  // Admin UI is desktop-only; skip on mobile projects
+  test.beforeEach(async ({}, testInfo) => {
+    if (testInfo.project.name === "mobile-chrome") {
+      test.skip(true, "Admin UI is desktop-only; mobile admin not supported.");
+    }
+  });
+
   // This test always runs to verify the skip behavior is clear
   test("shows clear skip message when admin credentials are missing", async ({ page }) => {
     // This test just documents the expected behavior
