@@ -68,7 +68,7 @@ async function openFirstChannelEditor(page: Page): Promise<void> {
 }
 
 /**
- * Helper to open the "Add from Library" modal
+ * Helper to open the "Add from Library" modal and wait for library to load
  */
 async function openLibraryModal(page: Page): Promise<void> {
   const openLibraryButton = page.locator('[data-testid="channel-library-open-button"]');
@@ -78,6 +78,41 @@ async function openLibraryModal(page: Page): Promise<void> {
   // Wait for library modal to appear
   const libraryModal = page.locator('[data-testid="channel-library-modal"]');
   await expect(libraryModal).toBeVisible({ timeout: 10000 });
+
+  // Wait for the library to finish loading (placeholder changes from "Loading library...")
+  // The search input placeholder shows "Loading library..." while loading
+  const searchInput = libraryModal.locator('[data-testid="channel-library-search-input"]');
+  await expect(searchInput).toBeVisible({ timeout: 5000 });
+  
+  // Wait for loading to complete - the placeholder will change when done
+  // Also wait for any loading overlay to disappear
+  await page.waitForFunction(() => {
+    const input = document.querySelector('[data-testid="channel-library-search-input"]') as HTMLInputElement;
+    return input && !input.placeholder.includes('Loading library');
+  }, { timeout: 30000 });
+  
+  console.log("[LIBRARY MODAL] Library loaded and ready for search");
+}
+
+/**
+ * Helper to search in library modal and wait for results
+ * Returns the locator for track rows scoped to the modal
+ */
+async function searchLibraryAndWaitForResults(page: Page, searchTerm: string): Promise<{ modal: ReturnType<Page['locator']>, trackRows: ReturnType<Page['locator']> }> {
+  const modal = page.locator('[data-testid="channel-library-modal"]');
+  const searchInput = modal.locator('[data-testid="channel-library-search-input"]');
+  
+  // Fill and trigger search
+  await searchInput.fill(searchTerm);
+  await searchInput.press('Enter');
+  
+  // Wait for search results to appear (tracks load from the already-loaded libraryTracks)
+  // Give the UI time to filter and render
+  await page.waitForTimeout(2000);
+  
+  // Return locators scoped to the modal
+  const trackRows = modal.locator('[data-testid="channel-library-track-row"]');
+  return { modal, trackRows };
 }
 
 /**
@@ -160,72 +195,51 @@ test.describe("Admin Library E2E Tests – Phase 1 (Non-Destructive)", () => {
   });
 
   test("2) Library search/filter works", async ({ page }) => {
+    // Increase timeout for this test due to large library
+    test.setTimeout(60000);
+    
     await navigateToAdminTab(page, "channels");
     await waitForChannelsToLoad(page);
     await openFirstChannelEditor(page);
     await openLibraryModal(page);
 
-    // Verify search input is present
-    const searchInput = page.locator('[data-testid="channel-library-search-input"]');
-    await expect(searchInput).toBeVisible({ timeout: 5000 });
-    console.log("[SEARCH] Search input is visible");
-
-    // Search for a term
-    await searchInput.fill("e");
-    await searchInput.press('Enter');
-    await page.waitForTimeout(3000);
-
-    // Check for track rows OR "no results" message
-    const trackRows = page.locator('[data-testid="channel-library-track-row"]');
+    // Search for a specific term that returns manageable results
+    // Using "focus" instead of "e" to avoid 10,000+ DOM elements
+    const { trackRows } = await searchLibraryAndWaitForResults(page, "focus");
+    
     const countAfterSearch = await trackRows.count();
-    console.log(`[SEARCH] Track rows after search: ${countAfterSearch}`);
+    console.log(`[SEARCH] Track rows after search for 'focus': ${countAfterSearch}`);
 
-    if (countAfterSearch === 0) {
-      // Verify the "no results" or prompt message appears (search UI is working)
-      const noResultsMsg = page.locator('text=No tracks found');
-      const searchPrompt = page.locator('text=Search for tracks');
-      const hasMsg = await noResultsMsg.isVisible({ timeout: 2000 }).catch(() => false) ||
-                     await searchPrompt.isVisible({ timeout: 2000 }).catch(() => false);
-      
-      console.log(`[SEARCH] Search UI showing appropriate message: ${hasMsg}`);
-      console.log("[SEARCH] Library search UI is functional (no matching tracks in library)");
-    } else {
-      console.log(`[SEARCH] Found ${countAfterSearch} tracks - search is working`);
-      expect(countAfterSearch).toBeGreaterThan(0);
-    }
+    // HARD FAILURE: The library should have tracks containing "focus"
+    // If we find 0, something is broken (not skipping!)
+    expect(countAfterSearch, "Expected tracks containing 'focus' in library - library should have data").toBeGreaterThan(0);
+    
+    console.log(`[SEARCH] Found ${countAfterSearch} tracks - search is working correctly`);
 
-    console.log("[SEARCH] Library search functionality verified");
     await closeLibraryModal(page);
     await closeChannelEditor(page);
   });
 
   test("3) Track preview buttons are wired", async ({ page }) => {
+    // Increase timeout for this test
+    test.setTimeout(60000);
+    
     await navigateToAdminTab(page, "channels");
     await waitForChannelsToLoad(page);
     await openFirstChannelEditor(page);
     await openLibraryModal(page);
 
-    // Search to get tracks
-    const searchInput = page.locator('[data-testid="channel-library-search-input"]');
-    await searchInput.fill("e");
-    await searchInput.press('Enter');
-    await page.waitForTimeout(3000);
-
-    // Check for track rows
-    const trackRows = page.locator('[data-testid="channel-library-track-row"]');
+    // Search to get tracks - use specific term for manageable results
+    const { modal, trackRows } = await searchLibraryAndWaitForResults(page, "ambient");
+    
     const trackCount = await trackRows.count();
     console.log(`[PREVIEW] Track count: ${trackCount}`);
 
-    if (trackCount === 0) {
-      console.log("[PREVIEW] No tracks in library - skipping preview button test");
-      await closeLibraryModal(page);
-      await closeChannelEditor(page);
-      test.skip();
-      return;
-    }
+    // HARD FAILURE: We expect tracks to exist for 'ambient'
+    expect(trackCount, "Expected tracks containing 'ambient' in library for preview test").toBeGreaterThan(0);
 
-    // Get the first preview button
-    const previewButton = page.locator('[data-testid="channel-library-preview-button"]').first();
+    // Get the first preview button (scoped to modal)
+    const previewButton = modal.locator('[data-testid="channel-library-preview-button"]').first();
     await expect(previewButton).toBeVisible({ timeout: 5000 });
 
     // Verify the button has the data-playing attribute
@@ -260,42 +274,35 @@ test.describe("Admin Library E2E Tests – Phase 1 (Non-Destructive)", () => {
   });
 
   test("4) Add track flow is wired but non-destructive (cancel)", async ({ page }) => {
+    // Increase timeout for this test
+    test.setTimeout(60000);
+    
     await navigateToAdminTab(page, "channels");
     await waitForChannelsToLoad(page);
     await openFirstChannelEditor(page);
     await openLibraryModal(page);
 
-    // Search to get tracks
-    const searchInput = page.locator('[data-testid="channel-library-search-input"]');
-    await searchInput.fill("e");
-    await searchInput.press('Enter');
-    await page.waitForTimeout(3000);
-
-    // Check for track rows
-    const trackRows = page.locator('[data-testid="channel-library-track-row"]');
+    // Search to get tracks - use specific term for manageable results
+    const { modal, trackRows } = await searchLibraryAndWaitForResults(page, "piano");
+    
     const trackCount = await trackRows.count();
     console.log(`[ADD TRACK] Track count: ${trackCount}`);
 
-    if (trackCount === 0) {
-      console.log("[ADD TRACK] No tracks in library - skipping add track test");
-      await closeLibraryModal(page);
-      await closeChannelEditor(page);
-      test.skip();
-      return;
-    }
+    // HARD FAILURE: We expect tracks to exist for 'piano'
+    expect(trackCount, "Expected tracks containing 'piano' in library for add track test").toBeGreaterThan(0);
 
-    // Verify UI elements exist
-    const addButton = page.locator('[data-testid="channel-library-add-button"]').first();
-    const hasAddButton = await addButton.isVisible({ timeout: 3000 }).catch(() => false);
+    // Verify UI elements exist (scoped to modal)
+    const addButton = modal.locator('[data-testid="channel-library-add-button"]').first();
+    const hasAddButton = await addButton.isVisible({ timeout: 5000 }).catch(() => false);
     console.log(`[ADD TRACK] Add button visible: ${hasAddButton}`);
 
     const firstRow = trackRows.first();
     const checkbox = firstRow.locator('input[type="checkbox"]');
-    const hasCheckbox = await checkbox.isVisible({ timeout: 3000 }).catch(() => false);
+    const hasCheckbox = await checkbox.isVisible({ timeout: 5000 }).catch(() => false);
     console.log(`[ADD TRACK] Checkbox visible: ${hasCheckbox}`);
 
     // Verify the structure is correct
-    expect(hasAddButton || hasCheckbox).toBe(true);
+    expect(hasAddButton || hasCheckbox, "Expected add button or checkbox to be visible").toBe(true);
     console.log("[ADD TRACK] Add track UI elements are present");
 
     // NON-DESTRUCTIVE: We do NOT click the add button
