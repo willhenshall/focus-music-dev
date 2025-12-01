@@ -18,6 +18,31 @@
 
 export type ErrorCategory = 'network' | 'decode' | 'auth' | 'cors' | 'timeout' | 'unknown';
 
+/**
+ * State machine for iOS WebKit network glitch recovery.
+ * Tracks recovery attempts for the current track to handle transient
+ * NETWORK_NO_SOURCE errors that occur mid-playback on iOS devices.
+ * 
+ * Note: On iOS, ALL browsers (Safari, Chrome, Firefox, Edge) use the WebKit
+ * engine under the hood. This recovery logic applies to any iOS browser.
+ */
+export interface NetworkRecoveryState {
+  active: boolean;           // Currently attempting recovery
+  attempts: number;          // Recovery attempts for this track
+  lastErrorTime: number;     // Timestamp of last error
+  lastGoodPosition: number;  // Last known good currentTime before error
+  trackUrl: string | null;   // URL of track being recovered
+}
+
+// Recovery constants for iOS WebKit network glitch handling
+// Applies to ALL iOS browsers (Safari, Chrome, Firefox, Edge) since they all use WebKit
+const IOS_RECOVERY_CONFIG = {
+  MAX_ATTEMPTS: 3,              // Max recovery attempts per track
+  JITTER_SECONDS: 1.0,          // Seek back this far when resuming
+  TIMEOUT_MS: 15000,            // Max time window for recovery attempts
+  MIN_POSITION_FOR_RECOVERY: 5, // Only recover if we've played at least 5s
+};
+
 export interface AudioMetrics {
   currentTrackId: string | null;
   currentTrackUrl: string | null;
@@ -63,6 +88,9 @@ export interface AudioMetrics {
   sessionSuccessRate: number;
   stallCount: number;
   recoveryAttempts: number;
+  iosRecoveryAttempts: number;
+  iosRecoveryActive: boolean;
+  iosRecoveryLastPosition: number;
 }
 
 export interface RetryConfig {
@@ -168,6 +196,9 @@ export class EnterpriseAudioEngine {
     sessionSuccessRate: 100,
     stallCount: 0,
     recoveryAttempts: 0,
+    iosRecoveryAttempts: 0,
+    iosRecoveryActive: false,
+    iosRecoveryLastPosition: 0,
   };
 
   private metricsUpdateFrame: number | null = null;
@@ -182,10 +213,26 @@ export class EnterpriseAudioEngine {
   private stallDetectionDelay: number = 5000;
   private retryTimer: NodeJS.Timeout | null = null;
   private abortController: AbortController | null = null;
+  
+  // iOS WebKit network glitch recovery state (applies to ALL iOS browsers)
+  private iosRecoveryState: NetworkRecoveryState = {
+    active: false,
+    attempts: 0,
+    lastErrorTime: 0,
+    lastGoodPosition: 0,
+    trackUrl: null,
+  };
+  private isIosWebKit: boolean;
 
   constructor(storageAdapter: StorageAdapter) {
     this.storageAdapter = storageAdapter;
     this.metrics.storageBackend = storageAdapter.name;
+    
+    // Detect iOS WebKit for network glitch recovery (applies to ALL iOS browsers)
+    this.isIosWebKit = this.detectIosWebKit();
+    if (this.isIosWebKit) {
+      console.log('[AUDIO ENGINE] iOS WebKit detected - network glitch recovery enabled');
+    }
 
     this.primaryAudio = this.createAudioElement();
     this.secondaryAudio = this.createAudioElement();
@@ -198,6 +245,25 @@ export class EnterpriseAudioEngine {
     this.setupNetworkMonitoring();
     this.startMetricsLoop();
     this.initializeMediaSession();
+  }
+  
+  /**
+   * Detect iOS WebKit browser for enabling network glitch recovery.
+   * Returns true if running on ANY iOS device (iPhone/iPad/iPod).
+   * 
+   * On iOS, ALL browsers (Safari, Chrome, Firefox, Edge, etc.) use the WebKit
+   * engine under the hood due to Apple's App Store policies. Therefore, the
+   * network glitch behavior and recovery logic applies to all of them.
+   */
+  private detectIosWebKit(): boolean {
+    if (typeof navigator === 'undefined') return false;
+    
+    const ua = navigator.userAgent;
+    
+    // Check for iOS device - this is sufficient since ALL iOS browsers use WebKit
+    // We intentionally do NOT check for Safari or exclude Chrome/Firefox/Edge
+    // because they all share the same underlying WebKit audio behavior on iOS
+    return /iPhone|iPad|iPod/.test(ua);
   }
 
   private createAudioElement(): HTMLAudioElement {
@@ -230,6 +296,15 @@ export class EnterpriseAudioEngine {
     audio.addEventListener('timeupdate', () => {
       this.updateMetrics();
       this.resetStallDetection();
+      
+      // Track last good position for iOS Safari recovery
+      // Only track when audio is in a healthy state
+      if (audio === this.currentAudio && 
+          audio.readyState >= 2 && 
+          audio.networkState === 2 && 
+          audio.currentTime > 0) {
+        this.iosRecoveryState.lastGoodPosition = audio.currentTime;
+      }
     });
 
     audio.addEventListener('waiting', () => {
@@ -266,6 +341,9 @@ export class EnterpriseAudioEngine {
         this.metrics.error = message;
         this.metrics.errorCategory = category;
         this.updateMetrics();
+        
+        // Attempt iOS Safari network glitch recovery
+        this.attemptIosRecovery(audio);
       }
     });
 
@@ -379,6 +457,12 @@ export class EnterpriseAudioEngine {
 
   private async attemptStallRecovery(): Promise<void> {
     if (!this.isPlayingState) return;
+    
+    // Don't interfere if iOS recovery is in progress
+    if (this.iosRecoveryState.active) {
+      console.log('[RECOVERY] Stall recovery skipped - iOS recovery in progress');
+      return;
+    }
 
     this.metrics.recoveryAttempts++;
     this.updateMetrics();
@@ -421,6 +505,159 @@ export class EnterpriseAudioEngine {
         this.onTrackEnd();
       }
     }
+  }
+
+  /**
+   * Attempt to recover from iOS Safari NETWORK_NO_SOURCE errors.
+   * These are transient network glitches that occur mid-playback on long tracks.
+   * 
+   * Recovery strategy:
+   * 1. Check if this is a recoverable situation (iOS Safari, mid-track, under attempt limit)
+   * 2. Reload the same track URL
+   * 3. Seek to slightly before the last known good position
+   * 4. Resume playback
+   * 
+   * If recovery fails MAX_ATTEMPTS times, fall back to normal error handling (skip to next track).
+   */
+  private async attemptIosRecovery(audio: HTMLAudioElement): Promise<void> {
+    const currentUrl = audio.src;
+    const lastGoodPosition = this.iosRecoveryState.lastGoodPosition;
+    const now = Date.now();
+    
+    // Check if we should attempt recovery
+    const shouldAttemptRecovery = 
+      this.isIosWebKit &&
+      this.isPlayingState &&
+      currentUrl &&
+      this.iosRecoveryState.attempts < IOS_RECOVERY_CONFIG.MAX_ATTEMPTS &&
+      lastGoodPosition >= IOS_RECOVERY_CONFIG.MIN_POSITION_FOR_RECOVERY;
+    
+    // Also check timeout window if we've had previous errors
+    const withinTimeoutWindow = 
+      this.iosRecoveryState.attempts === 0 ||
+      (now - this.iosRecoveryState.lastErrorTime) < IOS_RECOVERY_CONFIG.TIMEOUT_MS;
+    
+    if (!shouldAttemptRecovery || !withinTimeoutWindow) {
+      // Not a recoverable situation - let normal error handling proceed
+      console.log('[RECOVERY] Not attempting iOS recovery:', {
+        isIosWebKit: this.isIosWebKit,
+        isPlayingState: this.isPlayingState,
+        hasUrl: !!currentUrl,
+        attempts: this.iosRecoveryState.attempts,
+        lastGoodPosition,
+        withinTimeoutWindow,
+      });
+      
+      // If we exceeded attempts or timeout, reset and skip
+      if (this.iosRecoveryState.attempts >= IOS_RECOVERY_CONFIG.MAX_ATTEMPTS ||
+          !withinTimeoutWindow) {
+        console.log('[RECOVERY] Giving up after', this.iosRecoveryState.attempts, 'attempts - skipping track');
+        this.resetIosRecoveryState();
+        // Normal error handling will proceed via existing path
+      }
+      return;
+    }
+    
+    // Increment recovery state
+    this.iosRecoveryState.active = true;
+    this.iosRecoveryState.attempts++;
+    this.iosRecoveryState.lastErrorTime = now;
+    this.iosRecoveryState.trackUrl = currentUrl;
+    
+    // Update metrics for debugging
+    this.metrics.iosRecoveryAttempts = this.iosRecoveryState.attempts;
+    this.metrics.iosRecoveryActive = true;
+    this.metrics.iosRecoveryLastPosition = lastGoodPosition;
+    this.updateMetrics();
+    
+    // Calculate resume position with jitter
+    const resumeFrom = Math.max(0, lastGoodPosition - IOS_RECOVERY_CONFIG.JITTER_SECONDS);
+    
+    console.log('[RECOVERY] iOS Safari NETWORK_NO_SOURCE detected - attempting recovery:', {
+      attempt: this.iosRecoveryState.attempts,
+      maxAttempts: IOS_RECOVERY_CONFIG.MAX_ATTEMPTS,
+      lastGoodPosition: lastGoodPosition.toFixed(2),
+      resumeFrom: resumeFrom.toFixed(2),
+      trackUrl: currentUrl.substring(currentUrl.lastIndexOf('/') + 1),
+    });
+    
+    try {
+      // Re-set the source and reload
+      audio.src = currentUrl;
+      audio.load();
+      
+      // Wait for canplay then seek and play
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          cleanup();
+          reject(new Error('Recovery timeout'));
+        }, 10000);
+        
+        const onCanPlay = async () => {
+          cleanup();
+          
+          try {
+            // Seek to resume position
+            audio.currentTime = resumeFrom;
+            await audio.play();
+            
+            console.log('[RECOVERY] Successfully resumed track at', resumeFrom.toFixed(2) + 's');
+            
+            // Clear error state on successful recovery
+            this.metrics.error = null;
+            this.metrics.errorCategory = null;
+            this.iosRecoveryState.active = false;
+            this.metrics.iosRecoveryActive = false;
+            this.updateMetrics();
+            
+            resolve();
+          } catch (playError) {
+            reject(playError);
+          }
+        };
+        
+        const onError = () => {
+          cleanup();
+          reject(new Error('Recovery load failed'));
+        };
+        
+        const cleanup = () => {
+          clearTimeout(timeout);
+          audio.removeEventListener('canplay', onCanPlay);
+          audio.removeEventListener('error', onError);
+        };
+        
+        audio.addEventListener('canplay', onCanPlay, { once: true });
+        audio.addEventListener('error', onError, { once: true });
+      });
+      
+    } catch (error) {
+      console.warn('[RECOVERY] Recovery attempt', this.iosRecoveryState.attempts, 'failed:', error);
+      this.iosRecoveryState.active = false;
+      this.metrics.iosRecoveryActive = false;
+      this.updateMetrics();
+      
+      // If we've exhausted attempts, the next error will trigger normal handling
+      if (this.iosRecoveryState.attempts >= IOS_RECOVERY_CONFIG.MAX_ATTEMPTS) {
+        console.log('[RECOVERY] All recovery attempts exhausted - will skip on next error');
+      }
+    }
+  }
+  
+  /**
+   * Reset iOS recovery state when loading a new track or stopping playback.
+   */
+  private resetIosRecoveryState(): void {
+    this.iosRecoveryState = {
+      active: false,
+      attempts: 0,
+      lastErrorTime: 0,
+      lastGoodPosition: 0,
+      trackUrl: null,
+    };
+    this.metrics.iosRecoveryAttempts = 0;
+    this.metrics.iosRecoveryActive = false;
+    this.metrics.iosRecoveryLastPosition = 0;
   }
 
   private categorizeError(error: MediaError): { message: string; category: ErrorCategory } {
@@ -720,6 +957,9 @@ export class EnterpriseAudioEngine {
     this.metrics.retryAttempt = 0;
     this.metrics.recoveryAttempts = 0;
     this.currentTrackId = trackId;
+    
+    // Reset iOS recovery state for new track
+    this.resetIosRecoveryState();
 
     if (this.abortController) {
       this.abortController.abort();
@@ -1073,6 +1313,7 @@ export class EnterpriseAudioEngine {
     this.currentAudio.currentTime = 0;
     this.isPlayingState = false;
     this.metrics.playbackState = 'stopped';
+    this.resetIosRecoveryState();
     this.updateMetrics();
   }
 
@@ -1107,6 +1348,54 @@ export class EnterpriseAudioEngine {
 
   getMetrics(): AudioMetrics {
     return { ...this.metrics };
+  }
+
+  /**
+   * Get iOS WebKit detection status (for testing/debugging).
+   * Returns true for ANY iOS device (iPhone/iPad/iPod), regardless of browser.
+   * On iOS, all browsers (Safari, Chrome, Firefox, Edge) use WebKit.
+   */
+  getIsIosWebKit(): boolean {
+    return this.isIosWebKit;
+  }
+  
+  /**
+   * Get current iOS recovery state (for testing/debugging).
+   */
+  getIosRecoveryState(): NetworkRecoveryState {
+    return { ...this.iosRecoveryState };
+  }
+  
+  /**
+   * Force enable iOS WebKit recovery mode for testing on non-iOS browsers.
+   * This allows testing the recovery logic in Chromium/Playwright.
+   * @internal Test hook only - not for production use
+   */
+  _setIosWebKitForTesting(value: boolean): void {
+    this.isIosWebKit = value;
+    console.log('[RECOVERY] iOS WebKit detection forced to:', value);
+  }
+  
+  /**
+   * Simulate a NETWORK_NO_SOURCE error for testing iOS recovery.
+   * This triggers the same recovery flow that would happen on a real iOS WebKit network glitch.
+   * @internal Test hook only - not for production use
+   */
+  _simulateNetworkNoSource(): void {
+    if (!this.currentAudio.src) {
+      console.warn('[RECOVERY] Cannot simulate error - no track loaded');
+      return;
+    }
+    
+    console.log('[RECOVERY] Simulating NETWORK_NO_SOURCE error for testing');
+    
+    // Set error state
+    this.metrics.error = 'Network error (simulated)';
+    this.metrics.errorCategory = 'network';
+    this.updateMetrics();
+    
+    // Trigger recovery attempt (simulating the error event)
+    this.attemptIosRecovery(this.currentAudio);
   }
 
   destroy(): void {
