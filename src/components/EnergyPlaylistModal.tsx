@@ -1742,6 +1742,7 @@ export function EnergyPlaylistModal({ channel, onClose, onUpdate, onClearSearch,
             setShowDeleteDialog(true);
           }
         }}
+        data-testid="channel-editor-modal"
       >
         <div className="border-b border-slate-200">
           <div className="p-6">
@@ -1759,6 +1760,7 @@ export function EnergyPlaylistModal({ channel, onClose, onUpdate, onClearSearch,
                         onChange={(e) => setEditForm({ ...editForm, channel_name: e.target.value })}
                         className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                         placeholder="Channel display name"
+                        data-testid="channel-name-input"
                       />
                     </div>
 
@@ -1772,6 +1774,7 @@ export function EnergyPlaylistModal({ channel, onClose, onUpdate, onClearSearch,
                         className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                         placeholder="Channel description"
                         rows={2}
+                        data-testid="channel-description-input"
                       />
                     </div>
                     <div>
@@ -1782,6 +1785,7 @@ export function EnergyPlaylistModal({ channel, onClose, onUpdate, onClearSearch,
                         value={editForm.intensity}
                         onChange={(e) => setEditForm({ ...editForm, intensity: e.target.value as 'low' | 'medium' | 'high' })}
                         className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        data-testid="channel-intensity-select"
                       >
                         <option value="low">Low - Calm, gentle focus</option>
                         <option value="medium">Medium - Balanced engagement</option>
@@ -1828,6 +1832,7 @@ export function EnergyPlaylistModal({ channel, onClose, onUpdate, onClearSearch,
                         className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none font-mono text-sm"
                         placeholder="Information about the channel, artists, or creators. Supports markdown formatting. Max 200 words."
                         rows={4}
+                        data-testid="channel-about-input"
                       />
                       <p className="text-xs text-slate-500 mt-1">
                         Words: {editForm.about_channel.trim().split(/\s+/).filter(w => w.length > 0).length}/200 • Supports **bold**, *italic*, and [links](url)
@@ -1877,6 +1882,7 @@ export function EnergyPlaylistModal({ channel, onClose, onUpdate, onClearSearch,
                       onClick={handleSaveChannelInfo}
                       disabled={saving || !editForm.channel_name.trim()}
                       className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      data-testid="channel-save-button"
                     >
                       <Save size={18} />
                       {saving ? 'Saving...' : 'Save'}
@@ -1901,6 +1907,7 @@ export function EnergyPlaylistModal({ channel, onClose, onUpdate, onClearSearch,
                       }}
                       disabled={saving}
                       className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50"
+                      data-testid="channel-cancel-button"
                     >
                       <X size={18} />
                     </button>
@@ -1910,6 +1917,7 @@ export function EnergyPlaylistModal({ channel, onClose, onUpdate, onClearSearch,
                     <button
                       onClick={() => setIsEditing(true)}
                       className="p-2 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                      data-testid="channel-edit-button"
                     >
                       <Edit2 size={18} />
                     </button>
@@ -1925,6 +1933,7 @@ export function EnergyPlaylistModal({ channel, onClose, onUpdate, onClearSearch,
                     <button
                       onClick={onClose}
                       className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                      data-testid="channel-editor-close"
                     >
                       <X size={24} />
                     </button>
@@ -1953,6 +1962,7 @@ export function EnergyPlaylistModal({ channel, onClose, onUpdate, onClearSearch,
                       ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                   }`}
+                  data-testid={`energy-tab-${energy}`}
                 >
                   {energy.charAt(0).toUpperCase() + energy.slice(1)} Energy
                   <span className="ml-2 px-2 py-1 bg-slate-100 text-slate-700 rounded-full text-xs font-medium min-w-[2rem] inline-block text-center">

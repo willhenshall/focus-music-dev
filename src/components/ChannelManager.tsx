@@ -355,6 +355,7 @@ export function ChannelManager() {
           <SearchInput
             onSearch={handleSearch}
             placeholder="Search channels by name or number... (Press Enter to search)"
+            data-testid="channels-search-input"
           />
 
           {showExportButton && (
@@ -420,6 +421,7 @@ export function ChannelManager() {
               <button
                 onClick={() => setIsCreatingNew(true)}
                 className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors whitespace-nowrap"
+                data-testid="add-channel-button"
               >
                 <Plus size={20} />
                 Add Channel
@@ -441,6 +443,7 @@ export function ChannelManager() {
               (sortMode === 'user-order' || sortMode === 'custom') ? 'cursor-move hover:shadow-md' : 'cursor-pointer hover:shadow-md'
             } ${draggedChannel?.id === channel.id ? 'opacity-50' : ''}`}
             onClick={() => (sortMode !== 'user-order' && sortMode !== 'custom') && setSelectedChannel(channel)}
+            data-testid={`channel-card-${channel.id}`}
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3 flex-1 min-w-0">
