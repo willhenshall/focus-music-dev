@@ -387,6 +387,7 @@ export function AdminDashboard({ onSwitchToUser, showAudioDiagnostics, onToggleA
                     } ${
                       draggedTab === tab.id ? 'opacity-50' : ''
                     }`}
+                    data-testid={`admin-tab-${tab.id}`}
                   >
                     {isReordering && <GripVertical size={16} />}
                     <Icon size={18} />

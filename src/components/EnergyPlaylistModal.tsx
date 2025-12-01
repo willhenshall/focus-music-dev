@@ -2182,6 +2182,7 @@ export function EnergyPlaylistModal({ channel, onClose, onUpdate, onClearSearch,
                         setShowLibrary(true);
                       }}
                       className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                      data-testid="channel-library-open-button"
                     >
                       <Plus size={18} />
                       Add from Library
@@ -2745,6 +2746,7 @@ export function EnergyPlaylistModal({ channel, onClose, onUpdate, onClearSearch,
           <div
             className="bg-white rounded-lg shadow-xl w-full max-w-5xl h-[calc(100vh-8rem)] flex flex-col"
             onClick={(e) => e.stopPropagation()}
+            data-testid="channel-library-modal"
           >
             <div className="border-b border-slate-200">
               <div className="p-6">
@@ -2758,6 +2760,7 @@ export function EnergyPlaylistModal({ channel, onClose, onUpdate, onClearSearch,
                       <button
                         onClick={() => checkDuplicatesAndPrepareAdd()}
                         className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                        data-testid="channel-library-add-selected-button"
                       >
                         <Plus size={18} />
                         Add {selectedLibraryTracks.length} Track{selectedLibraryTracks.length !== 1 ? 's' : ''}
@@ -2769,6 +2772,7 @@ export function EnergyPlaylistModal({ channel, onClose, onUpdate, onClearSearch,
                         setSelectedLibraryTracks([]);
                       }}
                       className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                      data-testid="channel-library-close-button"
                     >
                       <X size={24} />
                     </button>
@@ -2781,6 +2785,7 @@ export function EnergyPlaylistModal({ channel, onClose, onUpdate, onClearSearch,
                   <SearchInput
                     onSearch={setSearchQuery}
                     placeholder={loadingLibrary ? "Loading library..." : "Search by name, artist, album, genre, energy level, or track ID..."}
+                    data-testid="channel-library-search-input"
                   />
                   {loadingLibrary && (
                     <div className="absolute inset-0 bg-white bg-opacity-70 rounded-lg pointer-events-none"></div>
@@ -2872,6 +2877,7 @@ export function EnergyPlaylistModal({ channel, onClose, onUpdate, onClearSearch,
                             className={`transition-colors ${
                               isSelected ? 'bg-blue-50' : 'hover:bg-slate-50'
                             }`}
+                            data-testid="channel-library-track-row"
                           >
                             <td className="px-3 py-2 w-12">
                               <input
@@ -2901,6 +2907,8 @@ export function EnergyPlaylistModal({ channel, onClose, onUpdate, onClearSearch,
                                     ? 'text-green-600 bg-green-100 hover:bg-green-200'
                                     : 'text-blue-600 hover:bg-blue-100'
                                 }`}
+                                data-testid="channel-library-preview-button"
+                                data-playing={isTrackPlaying ? 'true' : 'false'}
                               >
                                 {isTrackPlaying ? <Pause size={16} /> : <Play size={16} />}
                               </button>
@@ -2947,6 +2955,7 @@ export function EnergyPlaylistModal({ channel, onClose, onUpdate, onClearSearch,
                                   onClick={() => addMultipleTracks([track.id])}
                                   className="p-1.5 text-green-600 hover:bg-green-100 rounded-lg transition-colors"
                                   title="Add to channel"
+                                  data-testid="channel-library-add-button"
                                 >
                                   <Plus size={16} />
                                 </button>
