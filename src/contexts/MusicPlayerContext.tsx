@@ -67,6 +67,8 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const backgroundLoadAbortController = useRef<AbortController | null>(null);
   const playlistGenerationId = useRef<number>(0);
   const handleTrackEndRef = useRef<(() => void) | null>(null);
+  // Playback session ID for E2E test tracking - increments on each new track load
+  const playbackSessionIdRef = useRef<number>(0);
 
   // Initialize Web Audio Engine (runs ONCE on mount, never again)
   useEffect(() => {
@@ -241,6 +243,8 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
       isLoadingTrack.current = true;
       lastLoadedTrackId.current = trackId;
+      // Increment playback session ID for E2E test tracking
+      playbackSessionIdRef.current += 1;
 
       try {
         // Validate track has required data before attempting to load
@@ -1173,9 +1177,12 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         isAdminMode: () => isAdminMode,
         getMetrics: () => audioMetrics,
         getCurrentTrackUrl: () => audioMetrics?.currentTrackUrl ?? null,
+        // New methods for mobile playback resilience E2E tests
+        getPlaybackSessionId: () => playbackSessionIdRef.current,
+        getCurrentTime: () => audioEngine?.getCurrentTime() ?? 0,
       };
     }
-  }, [currentTrack, currentTrackIndex, isPlaying, playlist, activeChannel, channelStates, isAdminMode, audioMetrics]);
+  }, [currentTrack, currentTrackIndex, isPlaying, playlist, activeChannel, channelStates, isAdminMode, audioMetrics, audioEngine]);
 
   return (
     <MusicPlayerContext.Provider
