@@ -6,6 +6,7 @@ import { trackPlayStart, trackPlayEnd } from '../lib/analyticsService';
 import { EnterpriseAudioEngine, AudioMetrics } from '../lib/enterpriseAudioEngine';
 import { createStorageAdapter } from '../lib/storageAdapters';
 import { selectNextTrack, selectNextTrackCached, getCurrentSlotIndex } from '../lib/slotStrategyEngine';
+import { getIosWebkitInfo } from '../lib/iosWebkitDetection';
 
 type ChannelState = {
   isOn: boolean;
@@ -1167,7 +1168,11 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
+      // Cache iOS WebKit info once (doesn't change during session)
+      const iosInfo = getIosWebkitInfo();
+      
       (window as any).__playerDebug = {
+        // Existing methods
         getTrackId: () => currentTrack?.metadata?.track_id ?? null,
         getPlaylistIndex: () => currentTrackIndex,
         getTransportState: () => isPlaying ? "playing" : "paused",
@@ -1177,9 +1182,57 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         isAdminMode: () => isAdminMode,
         getMetrics: () => audioMetrics,
         getCurrentTrackUrl: () => audioMetrics?.currentTrackUrl ?? null,
-        // New methods for mobile playback resilience E2E tests
         getPlaybackSessionId: () => playbackSessionIdRef.current,
         getCurrentTime: () => audioEngine?.getCurrentTime() ?? 0,
+        
+        // iOS WebKit Buffer Governor methods
+        isIOSWebKit: () => iosInfo.isIOSWebKit,
+        isBufferGovernorActive: () => audioEngine?.isBufferGovernorActive() ?? false,
+        getBufferGovernorState: () => {
+          if (!audioEngine) {
+            return { 
+              active: false, 
+              limitBytes: 0, 
+              estimatedBufferedBytes: 0,
+              isLargeTrack: false,
+              isThrottling: false,
+              iosInfo: iosInfo,
+              recovery: {
+                errorType: null,
+                attempts: 0,
+                lastGoodPosition: 0,
+                lastGoodBufferedBytes: 0,
+                lastErrorTimestamp: null,
+                trackUrl: null,
+                isRecovering: false,
+              },
+              prefetch: {
+                allowed: true,
+                reason: 'nonIOSPlatform',
+                prefetchedTrackId: null,
+              },
+            };
+          }
+          return audioEngine.getBufferGovernorState();
+        },
+        forceBufferGovernor: (enable: boolean) => {
+          if (audioEngine) {
+            audioEngine._forceBufferGovernorActive(enable);
+            console.log('[IOS_BUFFER] Governor force-enabled:', enable);
+          } else {
+            console.warn('[IOS_BUFFER] Cannot force governor - no audio engine');
+          }
+        },
+        simulateBufferFailure: () => {
+          if (audioEngine) {
+            audioEngine._simulateBufferFailure();
+            console.log('[IOS_BUFFER] Simulated buffer failure');
+          } else {
+            console.warn('[IOS_BUFFER] Cannot simulate failure - no audio engine');
+          }
+        },
+        // Expose iOS info for debugging
+        getIosInfo: () => iosInfo,
       };
     }
   }, [currentTrack, currentTrackIndex, isPlaying, playlist, activeChannel, channelStates, isAdminMode, audioMetrics, audioEngine]);
