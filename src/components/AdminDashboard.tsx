@@ -11,7 +11,7 @@ import { AnalyticsDashboard } from './AnalyticsDashboard';
 import { TimerBellSettings } from './TimerBellSettings';
 import { TestingDashboard } from './TestingDashboard';
 import { TestsAdminDashboard } from './TestsAdminDashboard';
-import { buildInfo, getEnvLabel, formatBuildTime } from '../lib/buildInfo';
+import { buildInfo } from '../lib/buildInfo';
 
 type AnalyticsData = {
   totalUsers: number;
@@ -318,9 +318,9 @@ export function AdminDashboard({ onSwitchToUser, showAudioDiagnostics, onToggleA
             <span 
               data-testid="admin-build-info"
               className="text-xs text-slate-500"
-              title={`Build: ${buildInfo.buildTime}`}
+              title={`Full commit: ${buildInfo.commitSha}\nBuild time: ${buildInfo.buildTime}`}
             >
-              v{buildInfo.version} • {getEnvLabel()} • {formatBuildTime()}
+              {buildInfo.buildLabel}
             </span>
           </div>
           <div className="flex items-center gap-3">

@@ -35,12 +35,21 @@ function buildVersionPlugin() {
   };
 }
 
+// Get commit SHA from environment variables
+// Priority: VERCEL_GIT_COMMIT_SHA > GITHUB_SHA > 'local'
+function getCommitSha(): string {
+  return process.env.VERCEL_GIT_COMMIT_SHA || 
+         process.env.GITHUB_SHA || 
+         'local';
+}
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react(), buildVersionPlugin()],
   define: {
     __APP_VERSION__: JSON.stringify(packageJson.version),
     __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+    __COMMIT_SHA__: JSON.stringify(getCommitSha()),
   },
   optimizeDeps: {
     exclude: ['lucide-react'],
