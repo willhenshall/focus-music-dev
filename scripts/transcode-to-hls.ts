@@ -441,42 +441,64 @@ async function updateTrackHLSStatus(
 }
 
 // ============================================================================
-// TRACK FETCHING
+// TRACK FETCHING (with pagination to get ALL tracks)
 // ============================================================================
 
 async function fetchTracksToTranscode(
   supabase: SupabaseClient,
   options: TranscodeOptions
 ): Promise<AudioTrack[]> {
-  let query = supabase
-    .from('audio_tracks')
-    .select('id, track_id, file_path, duration_seconds, channel_id, metadata')
-    .is('deleted_at', null)
-    .is('hls_path', null); // Only tracks not yet transcoded
+  const PAGE_SIZE = 1000;
+  let allTracks: AudioTrack[] = [];
+  let offset = 0;
+  let hasMore = true;
   
-  if (options.trackId) {
-    query = query.eq('track_id', options.trackId);
+  console.log('   Fetching all tracks (paginated)...');
+  
+  while (hasMore) {
+    let query = supabase
+      .from('audio_tracks')
+      .select('id, track_id, file_path, duration_seconds, channel_id, metadata')
+      .is('deleted_at', null)
+      .is('hls_path', null) // Only tracks not yet transcoded
+      .range(offset, offset + PAGE_SIZE - 1);
+    
+    if (options.trackId) {
+      query = query.eq('track_id', options.trackId);
+    }
+    
+    if (options.channelId) {
+      query = query.eq('channel_id', options.channelId);
+    }
+    
+    // For --large-only, filter by duration
+    // NatureBeat tracks are ~45MB at ~25 minutes (high bitrate)
+    if (options.largeOnly) {
+      query = query.gte('duration_seconds', 1200); // 20+ minutes
+    }
+    
+    const { data, error } = await query;
+    
+    if (error) {
+      throw new Error(`Failed to fetch tracks: ${error.message}`);
+    }
+    
+    if (data && data.length > 0) {
+      allTracks = allTracks.concat(data);
+      console.log(`   ... fetched ${allTracks.length} tracks so far`);
+      offset += PAGE_SIZE;
+      hasMore = data.length === PAGE_SIZE;
+    } else {
+      hasMore = false;
+    }
   }
   
-  if (options.channelId) {
-    query = query.eq('channel_id', options.channelId);
+  // Apply limit after fetching all (if specified)
+  if (options.limit && allTracks.length > options.limit) {
+    allTracks = allTracks.slice(0, options.limit);
   }
   
-  // For --large-only, filter by duration
-  // NatureBeat tracks are ~45MB at ~25 minutes (high bitrate)
-  if (options.largeOnly) {
-    query = query.gte('duration_seconds', 1200); // 20+ minutes
-  }
-  
-  if (options.limit) {
-    query = query.limit(options.limit);
-  }
-  
-  const { data, error } = await query;
-  
-  if (error) {
-    throw new Error(`Failed to fetch tracks: ${error.message}`);
-  }
+  const { data, error } = { data: allTracks, error: null };
   
   return data || [];
 }
