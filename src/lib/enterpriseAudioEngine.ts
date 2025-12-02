@@ -14,24 +14,20 @@
  * - Comprehensive error categorization
  * - Dual audio element architecture for gapless playback
  * - MediaSession API for lock screen controls
- * - iOS WebKit buffer governor for long track stability
+ * - iOS WebKit buffer clamp for long track stability
  */
 
-import { 
-  getIosBufferGovernor, 
-  IosBufferGovernor,
-  BufferGovernorState,
-  BUFFER_GOVERNOR_CONFIG,
-} from './iosBufferGovernor';
 import { getIosWebkitInfo, IosWebkitInfo } from './iosWebkitDetection';
-import { 
-  probeTrackSizeWithRange, 
-  shouldProbeTrackSize, 
-  extractTrackIdFromUrl,
-  TrackSizeInfo,
-} from './trackSizeProbe';
+import {
+  IOS_BUFFER_CLAMP_CONFIG,
+  isIOSWebKit,
+  shouldClampBuffer,
+  getClampState,
+  resetClampState,
+  type IOSClampState,
+} from './iosBufferClamp';
 
-export type ErrorCategory = 'network' | 'decode' | 'auth' | 'cors' | 'timeout' | 'ios_webkit_buffer' | 'unknown';
+export type ErrorCategory = 'network' | 'decode' | 'auth' | 'cors' | 'timeout' | 'unknown';
 
 export interface AudioMetrics {
   currentTrackId: string | null;
@@ -78,21 +74,13 @@ export interface AudioMetrics {
   sessionSuccessRate: number;
   stallCount: number;
   recoveryAttempts: number;
-  // iOS WebKit Buffer Governor metrics
-  iosWebkit: {
+  // iOS WebKit clamp metrics (simple)
+  iosClamp: {
     isIOSWebKit: boolean;
-    browserName: string;
-    isCellular: boolean;
-    bufferGovernorActive: boolean;
-    bufferLimitBytes: number;
-    estimatedBufferedBytes: number;
-    estimatedTrackSizeBytes: number;
-    isLargeTrack: boolean;
-    isThrottling: boolean;
-    recoveryAttempts: number;
-    recoveryErrorType: string | null;
-    prefetchAllowed: boolean;
-    prefetchReason: string;
+    isClampActive: boolean;
+    bufferLimitMB: number;
+    currentBufferMB: number;
+    prefetchDisabled: boolean;
   };
 }
 
@@ -199,20 +187,12 @@ export class EnterpriseAudioEngine {
     sessionSuccessRate: 100,
     stallCount: 0,
     recoveryAttempts: 0,
-    iosWebkit: {
+    iosClamp: {
       isIOSWebKit: false,
-      browserName: 'Unknown',
-      isCellular: false,
-      bufferGovernorActive: false,
-      bufferLimitBytes: 0,
-      estimatedBufferedBytes: 0,
-      estimatedTrackSizeBytes: 0,
-      isLargeTrack: false,
-      isThrottling: false,
-      recoveryAttempts: 0,
-      recoveryErrorType: null,
-      prefetchAllowed: true,
-      prefetchReason: 'nonIOSPlatform',
+      isClampActive: false,
+      bufferLimitMB: 0,
+      currentBufferMB: 0,
+      prefetchDisabled: false,
     },
   };
 
@@ -229,38 +209,29 @@ export class EnterpriseAudioEngine {
   private retryTimer: NodeJS.Timeout | null = null;
   private abortController: AbortController | null = null;
   
-  // iOS WebKit Buffer Governor
-  private bufferGovernor: IosBufferGovernor;
+  // iOS WebKit info (for clamp decisions)
   private iosWebkitInfo: IosWebkitInfo;
+  private iosClampPrefetchDisabled: boolean = false;
 
   constructor(storageAdapter: StorageAdapter) {
     this.storageAdapter = storageAdapter;
     this.metrics.storageBackend = storageAdapter.name;
 
-    // Initialize iOS WebKit detection and buffer governor
+    // Initialize iOS WebKit detection
     this.iosWebkitInfo = getIosWebkitInfo();
-    this.bufferGovernor = getIosBufferGovernor();
     
-    // Set up buffer governor callbacks
-    this.bufferGovernor.setCallbacks({
-      onRecoveryNeeded: (position) => this.handleBufferRecovery(position),
-      onRecoveryExhausted: () => this.handleBufferRecoveryExhausted(),
-      onThrottleStart: () => {
-        console.log('[IOS_BUFFER] Throttling started - disabling prefetch');
-      },
-      onThrottleEnd: () => {
-        console.log('[IOS_BUFFER] Throttling ended - prefetch may resume');
-      },
-    });
-
-    // Initialize iOS WebKit metrics
-    this.updateIosWebkitMetrics();
-
+    // Update iOS clamp metrics
+    this.metrics.iosClamp.isIOSWebKit = this.iosWebkitInfo.isIOSWebKit;
     if (this.iosWebkitInfo.isIOSWebKit) {
-      console.log('[IOS_BUFFER] iOS WebKit detected - buffer governor active', {
+      const limitMB = this.iosWebkitInfo.isCellular 
+        ? IOS_BUFFER_CLAMP_CONFIG.CELLULAR_LIMIT_MB 
+        : IOS_BUFFER_CLAMP_CONFIG.WIFI_LIMIT_MB;
+      this.metrics.iosClamp.bufferLimitMB = limitMB;
+      
+      console.log('[IOS_CLAMP] iOS WebKit detected', {
         browser: this.iosWebkitInfo.browserName,
         cellular: this.iosWebkitInfo.isCellular,
-        version: this.iosWebkitInfo.iosVersion,
+        bufferLimitMB: limitMB,
       });
     }
 
@@ -275,22 +246,24 @@ export class EnterpriseAudioEngine {
     this.setupNetworkMonitoring();
     this.startMetricsLoop();
     this.initializeMediaSession();
-    
-    // Note: window.__playerDebug is managed by MusicPlayerContext.tsx
-    // The context will call our public methods like getBufferGovernorState()
   }
 
   private createAudioElement(): HTMLAudioElement {
     const audio = new Audio();
-    audio.preload = 'auto';
+    
+    // iOS WebKit: Use 'metadata' preload to prevent aggressive buffering
+    // This is the KEY FIX - prevents WebKit from buffering too much upfront
+    if (this.iosWebkitInfo.isIOSWebKit) {
+      audio.preload = 'metadata';
+      console.log('[IOS_CLAMP] Audio element configured with preload=metadata');
+    } else {
+      audio.preload = 'auto';
+    }
+    
     audio.crossOrigin = 'anonymous';
     audio.setAttribute('playsinline', 'true');
     audio.style.display = 'none';
     document.body.appendChild(audio);
-
-    // Apply iOS WebKit buffer governor configuration
-    // This may change preload to 'metadata' on iOS to prevent aggressive buffering
-    this.bufferGovernor.configureAudioElement(audio);
 
     audio.addEventListener('canplaythrough', () => {
       this.metrics.error = null;
@@ -300,11 +273,6 @@ export class EnterpriseAudioEngine {
 
     audio.addEventListener('loadedmetadata', () => {
       this.updateMetrics();
-      
-      // Inform buffer governor of track duration for accurate byte calculations
-      if (audio.duration > 0 && !isNaN(audio.duration)) {
-        this.bufferGovernor.setTrackDuration(audio.duration);
-      }
     });
 
     audio.addEventListener('loadeddata', () => {
@@ -315,10 +283,9 @@ export class EnterpriseAudioEngine {
       this.updateMetrics();
       this.updateConnectionQuality();
       
-      // Update buffer governor with current buffered bytes
-      if (audio === this.currentAudio && audio.buffered.length > 0) {
-        const bufferedEnd = audio.buffered.end(audio.buffered.length - 1);
-        this.bufferGovernor.updateBufferedBytes(bufferedEnd);
+      // iOS WebKit: Check buffer level and apply clamp if needed
+      if (audio === this.currentAudio && this.iosWebkitInfo.isIOSWebKit) {
+        this.checkIOSBufferClamp(audio);
       }
     });
 
@@ -361,16 +328,32 @@ export class EnterpriseAudioEngine {
         this.metrics.error = message;
         this.metrics.errorCategory = category;
         this.updateMetrics();
-        
-        // Check if buffer governor should handle this error
-        if (this.bufferGovernor.handleError(error, audio.networkState)) {
-          console.log('[IOS_BUFFER] Buffer-related error detected, attempting recovery');
-          this.bufferGovernor.attemptRecovery();
-        }
       }
     });
 
     return audio;
+  }
+
+  /**
+   * Check buffer level on iOS and apply clamp decisions.
+   * This is called on 'progress' events to monitor buffering.
+   */
+  private checkIOSBufferClamp(audio: HTMLAudioElement): void {
+    if (!this.iosWebkitInfo.isIOSWebKit) return;
+    
+    const clampResult = shouldClampBuffer(audio, this.iosWebkitInfo);
+    
+    // Update metrics with current buffer level
+    this.metrics.iosClamp.currentBufferMB = clampResult.currentBufferMB;
+    this.metrics.iosClamp.isClampActive = clampResult.shouldClamp;
+    
+    if (clampResult.shouldClamp && !this.iosClampPrefetchDisabled) {
+      // Buffer is approaching limit - disable prefetch for this track
+      this.iosClampPrefetchDisabled = true;
+      this.metrics.iosClamp.prefetchDisabled = true;
+      
+      console.log(`[IOS_CLAMP] Buffer at ${clampResult.currentBufferMB.toFixed(1)} MB (limit ${clampResult.limitMB} MB) – disabling prefetch`);
+    }
   }
 
   private setupNetworkMonitoring(): void {
@@ -391,26 +374,21 @@ export class EnterpriseAudioEngine {
     });
 
     // Handle page visibility changes (tab switching)
-    // This prevents audio from restarting when returning to the tab
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
         console.log('[PAGE VISIBILITY] Tab hidden - maintaining audio state');
-        // Tab is hidden - audio will continue playing in background
-        // Safari may throttle/suspend, but we DON'T change our state
       } else {
         console.log('[PAGE VISIBILITY] Tab visible - checking audio state:', {
           isPlayingState: this.isPlayingState,
           audioPaused: this.currentAudio.paused,
           currentSrc: this.currentAudio.src
         });
-        // Tab is visible again - if we SHOULD be playing but audio got suspended, resume it
         if (this.isPlayingState && this.currentAudio.paused && this.currentAudio.src) {
           console.log('[PAGE VISIBILITY] Resuming audio after tab switch');
           this.currentAudio.play().catch(err => {
             console.warn('[PAGE VISIBILITY] Failed to resume:', err);
           });
         }
-        // DO NOT reload track, DO NOT change state, just resume if needed
       }
     });
 
@@ -742,9 +720,6 @@ export class EnterpriseAudioEngine {
       this.lastBandwidthCheck = now;
     }
 
-    // Update iOS WebKit buffer governor metrics
-    this.updateIosWebkitMetrics();
-
     if (this.onDiagnosticsUpdate) {
       this.onDiagnosticsUpdate({ ...this.metrics });
     }
@@ -777,15 +752,9 @@ export class EnterpriseAudioEngine {
       return;
     }
 
-    // Check if buffer governor allows prefetching
-    if (!this.bufferGovernor.shouldAllowPrefetch()) {
-      const state = this.bufferGovernor.getState();
-      console.log('[IOS_BUFFER] Prefetch blocked:', {
-        reason: state.prefetch.reason,
-        isLargeTrack: state.isLargeTrack,
-        estimatedBufferedMB: (state.estimatedBufferedBytes / (1024 * 1024)).toFixed(2),
-        limitMB: (state.limitBytes / (1024 * 1024)).toFixed(2),
-      });
+    // iOS WebKit: Check if prefetch is disabled due to buffer clamp
+    if (this.iosWebkitInfo.isIOSWebKit && this.iosClampPrefetchDisabled) {
+      console.log('[IOS_CLAMP] Prefetch blocked - buffer clamp active');
       return;
     }
 
@@ -796,10 +765,15 @@ export class EnterpriseAudioEngine {
     this.storageAdapter.getAudioUrl(filePath).then(url => {
       prefetchAudio.src = url;
       prefetchAudio.load();
-      prefetchAudio.preload = 'auto';
+      
+      // On iOS, keep prefetch minimal
+      if (this.iosWebkitInfo.isIOSWebKit) {
+        prefetchAudio.preload = 'metadata';
+      } else {
+        prefetchAudio.preload = 'auto';
+      }
 
       this.prefetchedNextTrack = true;
-      this.bufferGovernor.recordPrefetch(trackId);
       this.metrics.prefetchedTrackId = trackId;
       this.metrics.prefetchedTrackUrl = url;
 
@@ -838,8 +812,11 @@ export class EnterpriseAudioEngine {
     this.metrics.recoveryAttempts = 0;
     this.currentTrackId = trackId;
     
-    // Reset buffer governor for new track
-    this.bufferGovernor.resetForNewTrack(trackId);
+    // Reset iOS buffer clamp state for new track
+    this.iosClampPrefetchDisabled = false;
+    this.metrics.iosClamp.prefetchDisabled = false;
+    this.metrics.iosClamp.currentBufferMB = 0;
+    this.metrics.iosClamp.isClampActive = false;
 
     if (this.abortController) {
       this.abortController.abort();
@@ -861,11 +838,6 @@ export class EnterpriseAudioEngine {
       const url = await this.storageAdapter.getAudioUrl(filePath);
       this.metrics.currentTrackUrl = url;
 
-      // On iOS WebKit, probe for track size from CDN headers
-      if (shouldProbeTrackSize()) {
-        this.probeAndSetTrackSize(url, trackId);
-      }
-
       await this.loadTrackWithRetry(trackId, url, metadata);
       clearTimeout(overallTimeout);
       this.recordSuccess();
@@ -873,32 +845,6 @@ export class EnterpriseAudioEngine {
       clearTimeout(overallTimeout);
       this.recordFailure();
       throw error;
-    }
-  }
-  
-  /**
-   * Probe CDN for track size and inform the buffer governor.
-   * Runs asynchronously to not block track loading.
-   */
-  private async probeAndSetTrackSize(url: string, trackId: string): Promise<void> {
-    try {
-      const sizeInfo = await probeTrackSizeWithRange(url, trackId);
-      
-      if (sizeInfo.probeSuccess && sizeInfo.sizeBytes > 0) {
-        // Set track size in governor - this will determine if it's a "large" track
-        this.bufferGovernor.setTrackSize(trackId, sizeInfo.sizeBytes);
-        
-        // Update metrics
-        this.metrics.totalBytes = sizeInfo.sizeBytes;
-        this.updateMetrics();
-      } else {
-        console.log('[IOS_BUFFER] Track size unknown or probe failed, governor in passive mode', {
-          trackId,
-          error: sizeInfo.error,
-        });
-      }
-    } catch (error) {
-      console.warn('[IOS_BUFFER] Track size probe error:', error);
     }
   }
 
@@ -1129,23 +1075,8 @@ export class EnterpriseAudioEngine {
         this.metrics.playbackState = 'playing';
         this.updateMetrics();
         console.log('[DIAGNOSTIC] play() completed successfully');
-        
-        // Start buffer governor monitoring
-        this.bufferGovernor.startMonitoring(this.currentAudio);
       } catch (error) {
         console.error('[DIAGNOSTIC] play() failed:', error);
-        
-        // Check if this is a NotSupportedError (iOS WebKit buffer issue)
-        if (error instanceof Error && error.message?.includes('NotSupported')) {
-          console.log('[IOS_BUFFER] NotSupportedError detected during play()');
-          if (this.bufferGovernor.handleError(error, this.currentAudio.networkState)) {
-            const recovered = await this.bufferGovernor.attemptRecovery();
-            if (recovered) {
-              return; // Recovery successful
-            }
-          }
-        }
-        
         this.metrics.error = `Play failed: ${error}`;
         this.metrics.errorCategory = 'unknown';
         this.updateMetrics();
@@ -1239,7 +1170,6 @@ export class EnterpriseAudioEngine {
     this.currentAudio.currentTime = 0;
     this.isPlayingState = false;
     this.metrics.playbackState = 'stopped';
-    this.bufferGovernor.stopMonitoring();
     this.updateMetrics();
   }
 
@@ -1277,138 +1207,35 @@ export class EnterpriseAudioEngine {
   }
 
   /**
-   * Get buffer governor state (for diagnostics).
+   * Get iOS clamp state (for diagnostics).
    */
-  getBufferGovernorState(): BufferGovernorState {
-    return this.bufferGovernor.getState();
+  getIOSClampState(): IOSClampState {
+    return getClampState(this.currentAudio, this.iosWebkitInfo, this.iosClampPrefetchDisabled);
   }
 
   /**
-   * Check if buffer governor is active.
+   * Check if iOS clamp is active.
    */
-  isBufferGovernorActive(): boolean {
-    return this.bufferGovernor.isActive();
+  isIOSClampActive(): boolean {
+    return this.iosWebkitInfo.isIOSWebKit && this.iosClampPrefetchDisabled;
   }
 
   /**
-   * Force buffer governor active state for testing.
+   * Force iOS clamp for testing (desktop simulation).
    * @internal Test hook only
    */
-  _forceBufferGovernorActive(active: boolean): void {
-    this.bufferGovernor._forceActivate(active);
-    this.updateIosWebkitMetrics();
-  }
-
-  /**
-   * Simulate a buffer failure for testing.
-   * @internal Test hook only
-   */
-  _simulateBufferFailure(): void {
-    this.bufferGovernor._simulateBufferFailure();
-    this.bufferGovernor.attemptRecovery();
-  }
-
-  /**
-   * Handle buffer recovery request from governor.
-   */
-  private async handleBufferRecovery(resumePosition: number): Promise<boolean> {
-    if (!this.currentAudio.src || !this.isPlayingState) {
-      return false;
-    }
-
-    const currentUrl = this.currentAudio.src;
-
-    console.log('[RECOVERY] iOS WebKit buffer recovery, resuming at', resumePosition.toFixed(2) + 's');
-
-    try {
-      // Re-set the source to force WebKit to drop and restart the connection
-      this.currentAudio.src = currentUrl;
-      this.currentAudio.load();
-
-      // Wait for enough data to seek
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          cleanup();
-          reject(new Error('Recovery timeout'));
-        }, BUFFER_GOVERNOR_CONFIG.RECOVERY_TIMEOUT_MS);
-
-        const onCanPlay = () => {
-          cleanup();
-          resolve();
-        };
-
-        const onError = () => {
-          cleanup();
-          reject(new Error('Recovery load failed'));
-        };
-
-        const cleanup = () => {
-          clearTimeout(timeout);
-          this.currentAudio.removeEventListener('canplay', onCanPlay);
-          this.currentAudio.removeEventListener('error', onError);
-        };
-
-        this.currentAudio.addEventListener('canplay', onCanPlay, { once: true });
-        this.currentAudio.addEventListener('error', onError, { once: true });
-      });
-
-      // Seek and play
-      this.currentAudio.currentTime = resumePosition;
-      await this.currentAudio.play();
-
-      // Clear error state
-      this.metrics.error = null;
-      this.metrics.errorCategory = null;
-      this.updateMetrics();
-
-      console.log('[RECOVERY] Successfully resumed at', resumePosition.toFixed(2) + 's');
-      return true;
-
-    } catch (error) {
-      console.error('[RECOVERY] Buffer recovery failed:', error);
-      return false;
-    }
-  }
-
-  /**
-   * Handle when buffer recovery attempts are exhausted.
-   */
-  private handleBufferRecoveryExhausted(): void {
-    console.log('[RECOVERY] iOS WebKit buffer recovery exhausted - skipping track');
-    this.metrics.error = 'iOS WebKit buffer failure - skipping track';
-    this.metrics.errorCategory = 'ios_webkit_buffer';
-    this.updateMetrics();
-
-    if (this.onTrackEnd) {
-      this.onTrackEnd();
-    }
-  }
-
-  /**
-   * Update iOS WebKit metrics from buffer governor state.
-   */
-  private updateIosWebkitMetrics(): void {
-    const state = this.bufferGovernor.getState();
-    
-    this.metrics.iosWebkit = {
-      isIOSWebKit: state.iosInfo.isIOSWebKit,
-      browserName: state.iosInfo.browserName,
-      isCellular: state.iosInfo.isCellular,
-      bufferGovernorActive: state.active,
-      bufferLimitBytes: state.limitBytes,
-      estimatedBufferedBytes: state.estimatedBufferedBytes,
-      estimatedTrackSizeBytes: state.estimatedTrackSizeBytes,
-      isLargeTrack: state.isLargeTrack,
-      isThrottling: state.isThrottling,
-      recoveryAttempts: state.recovery.attempts,
-      recoveryErrorType: state.recovery.errorType,
-      prefetchAllowed: state.prefetch.allowed,
-      prefetchReason: state.prefetch.reason,
-    };
-    
-    // Also update totalBytes if we have track size from governor
-    if (state.estimatedTrackSizeBytes > 0 && this.metrics.totalBytes === 0) {
-      this.metrics.totalBytes = state.estimatedTrackSizeBytes;
+  _forceIOSClampForTesting(enable: boolean): void {
+    if (enable) {
+      // Simulate iOS WebKit environment
+      (this.iosWebkitInfo as any).isIOSWebKit = true;
+      this.metrics.iosClamp.isIOSWebKit = true;
+      this.metrics.iosClamp.bufferLimitMB = IOS_BUFFER_CLAMP_CONFIG.WIFI_LIMIT_MB;
+      console.log('[IOS_CLAMP] Force-enabled for testing');
+    } else {
+      // Restore actual detection
+      this.iosWebkitInfo = getIosWebkitInfo();
+      this.metrics.iosClamp.isIOSWebKit = this.iosWebkitInfo.isIOSWebKit;
+      console.log('[IOS_CLAMP] Force-disabled, restored actual detection');
     }
   }
 
@@ -1434,7 +1261,6 @@ export class EnterpriseAudioEngine {
     }
 
     this.stop();
-    this.bufferGovernor.destroy();
     this.primaryAudio.src = '';
     this.secondaryAudio.src = '';
     this.primaryAudio.load();
@@ -1453,8 +1279,6 @@ export class EnterpriseAudioEngine {
       navigator.mediaSession.setActionHandler('nexttrack', null);
       navigator.mediaSession.setActionHandler('seekto', null);
     }
-
-    // Note: window.__playerDebug is managed by MusicPlayerContext.tsx
 
     window.removeEventListener('online', () => {});
     window.removeEventListener('offline', () => {});
