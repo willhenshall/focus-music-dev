@@ -1185,51 +1185,29 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         getPlaybackSessionId: () => playbackSessionIdRef.current,
         getCurrentTime: () => audioEngine?.getCurrentTime() ?? 0,
         
-        // iOS WebKit Buffer Governor methods
+        // iOS WebKit Buffer Clamp methods (simplified)
         isIOSWebKit: () => iosInfo.isIOSWebKit,
-        isBufferGovernorActive: () => audioEngine?.isBufferGovernorActive() ?? false,
-        getBufferGovernorState: () => {
+        isIOSClampActive: () => audioEngine?.isIOSClampActive() ?? false,
+        getIOSClampState: () => {
           if (!audioEngine) {
             return { 
-              active: false, 
-              limitBytes: 0, 
-              estimatedBufferedBytes: 0,
-              estimatedTrackSizeBytes: 0,
-              isLargeTrack: false,
-              isThrottling: false,
-              iosInfo: iosInfo,
-              recovery: {
-                errorType: null,
-                attempts: 0,
-                lastGoodPosition: 0,
-                lastGoodBufferedBytes: 0,
-                lastErrorTimestamp: null,
-                trackUrl: null,
-                isRecovering: false,
-              },
-              prefetch: {
-                allowed: true,
-                reason: 'nonIOSPlatform',
-                prefetchedTrackId: null,
-              },
+              isIOSWebKit: iosInfo.isIOSWebKit,
+              isClampActive: false,
+              bufferLimitMB: 0,
+              currentBufferMB: 0,
+              prefetchDisabled: false,
+              browserName: iosInfo.browserName,
+              isCellular: iosInfo.isCellular,
             };
           }
-          return audioEngine.getBufferGovernorState();
+          return audioEngine.getIOSClampState();
         },
-        forceBufferGovernor: (enable: boolean) => {
+        forceIOSClampForTesting: (enable: boolean) => {
           if (audioEngine) {
-            audioEngine._forceBufferGovernorActive(enable);
-            console.log('[IOS_BUFFER] Governor force-enabled:', enable);
+            audioEngine._forceIOSClampForTesting(enable);
+            console.log('[IOS_CLAMP] Force-enabled for testing:', enable);
           } else {
-            console.warn('[IOS_BUFFER] Cannot force governor - no audio engine');
-          }
-        },
-        simulateBufferFailure: () => {
-          if (audioEngine) {
-            audioEngine._simulateBufferFailure();
-            console.log('[IOS_BUFFER] Simulated buffer failure');
-          } else {
-            console.warn('[IOS_BUFFER] Cannot simulate failure - no audio engine');
+            console.warn('[IOS_CLAMP] Cannot force clamp - no audio engine');
           }
         },
         // Expose iOS info for debugging
