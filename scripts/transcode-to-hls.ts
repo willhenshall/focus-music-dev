@@ -300,9 +300,10 @@ async function fetchTracksToTranscode(
   }
   
   // For --large-only, filter by duration (long tracks tend to be large files)
-  // NatureBeat tracks are ~50MB and ~60 minutes, so 48+ min ≈ 40MB+
+  // NatureBeat tracks are ~45-50MB and ~55-60 minutes
+  // 40 min threshold catches ~33MB+ files to ensure we get all large tracks
   if (options.largeOnly) {
-    query = query.gte('duration_seconds', 2880); // 48+ minutes ≈ 40MB+ files
+    query = query.gte('duration_seconds', 2400); // 40+ minutes ≈ 33MB+ files
   }
   
   if (options.limit) {
