@@ -57,7 +57,6 @@ interface AudioTrack {
   id: string;
   track_id: string;
   file_path: string;
-  file_size?: number;
   duration_seconds?: number;
   channel_id?: string;
   metadata?: {
@@ -264,7 +263,7 @@ async function updateTrackHLSStatus(
   segmentCount: number
 ): Promise<void> {
   // Update the audio_tracks table to mark this track as HLS-ready
-  await supabase
+  const { error, count } = await supabase
     .from('audio_tracks')
     .update({
       hls_path: hlsPath,
@@ -272,6 +271,10 @@ async function updateTrackHLSStatus(
       hls_transcoded_at: new Date().toISOString(),
     })
     .eq('track_id', trackId);
+  
+  if (error) {
+    console.error(`   ⚠️  Database update failed: ${error.message}`);
+  }
 }
 
 // ============================================================================
@@ -284,7 +287,7 @@ async function fetchTracksToTranscode(
 ): Promise<AudioTrack[]> {
   let query = supabase
     .from('audio_tracks')
-    .select('id, track_id, file_path, file_size, duration_seconds, channel_id, metadata')
+    .select('id, track_id, file_path, duration_seconds, channel_id, metadata')
     .is('deleted_at', null)
     .is('hls_path', null); // Only tracks not yet transcoded
   
@@ -296,9 +299,10 @@ async function fetchTracksToTranscode(
     query = query.eq('channel_id', options.channelId);
   }
   
+  // For --large-only, filter by duration (long tracks tend to be large files)
+  // NatureBeat tracks are ~50MB and ~60 minutes, so 48+ min ≈ 40MB+
   if (options.largeOnly) {
-    const thresholdBytes = HLS_CONFIG.LARGE_FILE_THRESHOLD_MB * 1024 * 1024;
-    query = query.gte('file_size', thresholdBytes);
+    query = query.gte('duration_seconds', 2880); // 48+ minutes ≈ 40MB+ files
   }
   
   if (options.limit) {
@@ -328,7 +332,7 @@ async function transcodeTrack(
   
   console.log(`\n📀 Processing track: ${trackId}`);
   console.log(`   Name: ${track.metadata?.track_name || 'Unknown'}`);
-  console.log(`   Size: ${track.file_size ? (track.file_size / 1024 / 1024).toFixed(1) + ' MB' : 'Unknown'}`);
+  console.log(`   Duration: ${track.duration_seconds ? Math.round(track.duration_seconds / 60) + ' min' : 'Unknown'}`);
   
   // Create temp directories
   const trackTempDir = path.join(tempDir, trackId);
