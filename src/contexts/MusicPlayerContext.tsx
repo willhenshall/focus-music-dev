@@ -1194,6 +1194,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
               active: false, 
               limitBytes: 0, 
               estimatedBufferedBytes: 0,
+              estimatedTrackSizeBytes: 0,
               isLargeTrack: false,
               isThrottling: false,
               iosInfo: iosInfo,
