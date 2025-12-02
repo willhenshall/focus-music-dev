@@ -3,10 +3,78 @@ import { supabase, AudioChannel, AudioTrack, SystemPreferences } from '../lib/su
 import { generatePlaylist, EnergyLevel } from '../lib/playlisterService';
 import { useAuth } from './AuthContext';
 import { trackPlayStart, trackPlayEnd } from '../lib/analyticsService';
-import { EnterpriseAudioEngine, AudioMetrics } from '../lib/enterpriseAudioEngine';
+import { EnterpriseAudioEngine } from '../lib/enterpriseAudioEngine';
+import type { AudioMetrics } from '../lib/enterpriseAudioEngine';
+import { StreamingAudioEngine } from '../lib/streamingAudioEngine';
 import { createStorageAdapter } from '../lib/storageAdapters';
-import { selectNextTrack, selectNextTrackCached, getCurrentSlotIndex } from '../lib/slotStrategyEngine';
+import { selectNextTrackCached, getCurrentSlotIndex } from '../lib/slotStrategyEngine';
 import { getIosWebkitInfo } from '../lib/iosWebkitDetection';
+import type { IAudioEngine, AudioMetrics as StreamingAudioMetrics } from '../lib/types/audioEngine';
+
+// Re-export for consistency - both engines produce compatible metrics
+type EngineAudioMetrics = AudioMetrics | StreamingAudioMetrics;
+
+// ============================================================================
+// ENGINE SELECTION
+// ============================================================================
+
+/**
+ * Audio engine type selector.
+ * - 'legacy': Uses EnterpriseAudioEngine (HTML5 Audio, current production)
+ * - 'streaming': Uses StreamingAudioEngine (HLS-based, new implementation)
+ * - 'auto': Automatically selects based on platform (streaming for iOS, legacy for others)
+ */
+export type AudioEngineType = 'legacy' | 'streaming' | 'auto';
+
+/**
+ * Get the engine type from environment or local storage.
+ * This allows A/B testing and gradual rollout.
+ */
+function getEngineType(): AudioEngineType {
+  // Check environment variable first
+  const envEngine = import.meta.env.VITE_AUDIO_ENGINE_TYPE as AudioEngineType;
+  if (envEngine && ['legacy', 'streaming', 'auto'].includes(envEngine)) {
+    return envEngine;
+  }
+  
+  // Check local storage (for per-user override)
+  try {
+    const stored = localStorage.getItem('audioEngineType') as AudioEngineType;
+    if (stored && ['legacy', 'streaming', 'auto'].includes(stored)) {
+      return stored;
+    }
+  } catch {}
+  
+  // Default to auto (will use streaming on iOS, legacy elsewhere)
+  return 'auto';
+}
+
+/**
+ * Determine if we should use the streaming engine based on platform.
+ */
+function shouldUseStreamingEngine(engineType: AudioEngineType): boolean {
+  if (engineType === 'streaming') return true;
+  if (engineType === 'legacy') return false;
+  
+  // Auto mode: use streaming on iOS (where buffer issues occur)
+  const iosInfo = getIosWebkitInfo();
+  return iosInfo.isIOSWebKit;
+}
+
+/**
+ * Create the appropriate audio engine instance.
+ */
+function createAudioEngine(useStreaming: boolean): IAudioEngine {
+  const storageAdapter = createStorageAdapter();
+  
+  if (useStreaming) {
+    console.log('[AUDIO ENGINE] Creating StreamingAudioEngine (HLS-based)');
+    return new StreamingAudioEngine(storageAdapter);
+  } else {
+    console.log('[AUDIO ENGINE] Creating EnterpriseAudioEngine (legacy)');
+    return new EnterpriseAudioEngine(storageAdapter);
+  }
+}
 
 type ChannelState = {
   isOn: boolean;
@@ -23,10 +91,13 @@ type MusicPlayerContextType = {
   currentTrack: AudioTrack | undefined;
   isAdminMode: boolean;
   adminPreviewTrack: AudioTrack | null;
-  audioEngine: EnterpriseAudioEngine | null;
+  audioEngine: IAudioEngine | null;
   audioMetrics: AudioMetrics | null;
   sessionTimerActive: boolean;
   sessionTimerRemaining: number;
+  // Engine selection (for A/B testing)
+  engineType: AudioEngineType;
+  isStreamingEngine: boolean;
   setSessionTimer: (active: boolean, remaining: number) => void;
   toggleChannel: (channel: AudioChannel, turnOn: boolean, fromPlayer?: boolean) => Promise<void>;
   setChannelEnergy: (channelId: string, energyLevel: 'low' | 'medium' | 'high') => void;
@@ -37,6 +108,8 @@ type MusicPlayerContextType = {
   seek: (time: number) => void;
   setVolume: (volume: number) => void;
   getVolume: () => number;
+  // Engine switching (for testing/debugging)
+  switchEngine: (type: AudioEngineType) => void;
 };
 
 const MusicPlayerContext = createContext<MusicPlayerContextType | undefined>(undefined);
@@ -54,11 +127,18 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [currentPlayEventId, setCurrentPlayEventId] = useState<string | null>(null);
-  const [audioEngine, setAudioEngine] = useState<EnterpriseAudioEngine | null>(null);
+  const [audioEngine, setAudioEngine] = useState<IAudioEngine | null>(null);
   const [audioMetrics, setAudioMetrics] = useState<AudioMetrics | null>(null);
   const [sessionTimerActive, setSessionTimerActive] = useState(false);
   const [sessionTimerRemaining, setSessionTimerRemaining] = useState(0);
   const [systemPreferences, setSystemPreferences] = useState<SystemPreferences | null>(null);
+  
+  // Engine type state (for A/B testing)
+  const [engineType, setEngineType] = useState<AudioEngineType>(() => getEngineType());
+  const [isStreamingEngine, setIsStreamingEngine] = useState<boolean>(() => 
+    shouldUseStreamingEngine(getEngineType())
+  );
+  
   const playStartTimeRef = useRef<number>(0);
   const isLoadingTrack = useRef<boolean>(false);
   const lastPlaylistGeneration = useRef<{ channelId: string; energyLevel: string; timestamp: number } | null>(null);
@@ -73,11 +153,17 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
   // Initialize Web Audio Engine (runs ONCE on mount, never again)
   useEffect(() => {
-    console.log('[AUDIO ENGINE] Creating audio engine (should only happen once in production, twice in dev due to StrictMode)');
+    const useStreaming = shouldUseStreamingEngine(engineType);
+    setIsStreamingEngine(useStreaming);
+    
+    console.log('[AUDIO ENGINE] Creating audio engine', {
+      engineType,
+      useStreaming,
+      shouldOnlyHappenOnce: 'once in production, twice in dev due to StrictMode'
+    });
 
-    // Create Enterprise Audio Engine with storage adapter
-    const storageAdapter = createStorageAdapter();
-    const engine = new EnterpriseAudioEngine(storageAdapter);
+    // Create the appropriate audio engine based on configuration
+    const engine = createAudioEngine(useStreaming);
 
     // Set up callbacks using refs to avoid stale closures
     engine.setCallbacks({
@@ -89,7 +175,8 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         }
       },
       onDiagnosticsUpdate: (metrics) => {
-        setAudioMetrics(metrics);
+        // Cast to AudioMetrics for state compatibility (both engine types have compatible metrics)
+        setAudioMetrics(metrics as AudioMetrics);
       },
       onError: (error, category, canRetry) => {
         console.error(`Audio error [${category}]:`, error.message, canRetry ? '(retrying)' : '(fatal)');
@@ -115,11 +202,11 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       .subscribe();
 
     return () => {
-      console.log('[AUDIO ENGINE] Destroying audio engine (should only happen on unmount)');
+      console.log('[AUDIO ENGINE] Destroying audio engine (should only happen on unmount or engine switch)');
       engine.destroy();
       channelSubscription.unsubscribe();
     };
-  }, []); // Audio engine should only be created once on mount
+  }, [engineType]); // Recreate engine when engineType changes
 
   // Load system preferences and subscribe to changes
   useEffect(() => {
@@ -1164,6 +1251,34 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     setSessionTimerRemaining(remaining);
   };
 
+  /**
+   * Switch between audio engine implementations.
+   * Used for A/B testing and debugging.
+   * Note: This will reset playback state.
+   */
+  const switchEngine = (type: AudioEngineType) => {
+    console.log('[AUDIO ENGINE] Switching engine type to:', type);
+    
+    // Stop current playback
+    if (audioEngine) {
+      audioEngine.stop();
+      audioEngine.destroy();
+    }
+    
+    // Save preference
+    try {
+      localStorage.setItem('audioEngineType', type);
+    } catch {}
+    
+    // Update state - will trigger engine recreation via useEffect
+    setEngineType(type);
+    setIsPlaying(false);
+    lastLoadedTrackId.current = null;
+    
+    // Note: The useEffect will create the new engine on next render
+    // This is intentional to ensure clean state
+  };
+
   const currentTrack = isAdminMode ? (adminPreviewTrack || undefined) : playlist[currentTrackIndex];
 
   useEffect(() => {
@@ -1185,9 +1300,20 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         getPlaybackSessionId: () => playbackSessionIdRef.current,
         getCurrentTime: () => audioEngine?.getCurrentTime() ?? 0,
         
-        // iOS WebKit Buffer Clamp methods (simplified)
+        // Engine type info (for A/B testing)
+        getEngineType: () => engineType,
+        isStreamingEngine: () => isStreamingEngine,
+        switchEngine: (type: AudioEngineType) => switchEngine(type),
+        
+        // iOS WebKit Buffer Clamp methods (only available on legacy engine)
         isIOSWebKit: () => iosInfo.isIOSWebKit,
-        isIOSClampActive: () => audioEngine?.isIOSClampActive() ?? false,
+        isIOSClampActive: () => {
+          // Only legacy engine has iOS clamp
+          if (!isStreamingEngine && audioEngine && 'isIOSClampActive' in audioEngine) {
+            return (audioEngine as EnterpriseAudioEngine).isIOSClampActive();
+          }
+          return false;
+        },
         getIOSClampState: () => {
           if (!audioEngine) {
             return { 
@@ -1200,21 +1326,38 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
               isCellular: iosInfo.isCellular,
             };
           }
-          return audioEngine.getIOSClampState();
+          // Only legacy engine has getIOSClampState
+          if (!isStreamingEngine && 'getIOSClampState' in audioEngine) {
+            return (audioEngine as EnterpriseAudioEngine).getIOSClampState();
+          }
+          // Return default for streaming engine (no iOS clamp needed - HLS handles it)
+          return { 
+            isIOSWebKit: iosInfo.isIOSWebKit,
+            isClampActive: false,
+            bufferLimitMB: 0,
+            currentBufferMB: 0,
+            prefetchDisabled: false,
+            browserName: iosInfo.browserName,
+            isCellular: iosInfo.isCellular,
+            hlsHandlesBuffer: true, // Streaming engine uses HLS buffer management
+          };
         },
         forceIOSClampForTesting: (enable: boolean) => {
-          if (audioEngine) {
-            audioEngine._forceIOSClampForTesting(enable);
+          // Only legacy engine supports this
+          if (!isStreamingEngine && audioEngine && '_forceIOSClampForTesting' in audioEngine) {
+            (audioEngine as EnterpriseAudioEngine)._forceIOSClampForTesting(enable);
             console.log('[IOS_CLAMP] Force-enabled for testing:', enable);
           } else {
-            console.warn('[IOS_CLAMP] Cannot force clamp - no audio engine');
+            console.warn('[IOS_CLAMP] Not available - streaming engine uses HLS buffer management');
           }
         },
         // Expose iOS info for debugging
         getIosInfo: () => iosInfo,
+        // HLS metrics (only available on streaming engine)
+        getHLSMetrics: () => audioMetrics?.hls ?? null,
       };
     }
-  }, [currentTrack, currentTrackIndex, isPlaying, playlist, activeChannel, channelStates, isAdminMode, audioMetrics, audioEngine]);
+  }, [currentTrack, currentTrackIndex, isPlaying, playlist, activeChannel, channelStates, isAdminMode, audioMetrics, audioEngine, engineType, isStreamingEngine]);
 
   return (
     <MusicPlayerContext.Provider
@@ -1232,6 +1375,8 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         audioMetrics,
         sessionTimerActive,
         sessionTimerRemaining,
+        engineType,
+        isStreamingEngine,
         setSessionTimer,
         toggleChannel,
         setChannelEnergy,
@@ -1242,6 +1387,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         seek,
         setVolume,
         getVolume,
+        switchEngine,
       }}
     >
       {children}

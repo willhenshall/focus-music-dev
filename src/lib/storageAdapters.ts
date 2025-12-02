@@ -5,6 +5,7 @@
  * - Supabase Storage (development)
  * - CloudFront CDN (production)
  * - S3 Direct (fallback)
+ * - HLS Streaming (for iOS and progressive streaming)
  *
  * Architecture allows hot-swapping storage providers without code changes
  */
@@ -12,9 +13,21 @@
 import { supabase } from './supabase';
 import type { StorageAdapter } from './enterpriseAudioEngine';
 
-export class SupabaseStorageAdapter implements StorageAdapter {
+// ============================================================================
+// HLS STORAGE ADAPTER INTERFACE
+// ============================================================================
+
+export interface HLSStorageAdapter extends StorageAdapter {
+  /** Get the HLS manifest URL for a track */
+  getHLSUrl(trackId: string, hlsPath: string): Promise<string>;
+  /** Check if HLS is available for a track */
+  hasHLSSupport(trackId: string): Promise<boolean>;
+}
+
+export class SupabaseStorageAdapter implements HLSStorageAdapter {
   name = 'Supabase Storage';
   private urlCache: Map<string, { url: string; expiresAt: number }> = new Map();
+  private hlsCache: Map<string, boolean> = new Map();
   private cacheDuration = 3600000; // 1 hour
 
   async getAudioUrl(filePath: string): Promise<string> {
@@ -47,6 +60,57 @@ export class SupabaseStorageAdapter implements StorageAdapter {
     return data.publicUrl;
   }
 
+  /**
+   * Get HLS manifest URL for a track
+   * Returns the master.m3u8 URL from the audio-hls bucket
+   */
+  async getHLSUrl(trackId: string, hlsPath: string): Promise<string> {
+    const cacheKey = `hls:${trackId}`;
+    const cached = this.urlCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.url;
+    }
+
+    const { data } = supabase.storage
+      .from('audio-hls')
+      .getPublicUrl(hlsPath);
+
+    if (!data?.publicUrl) {
+      throw new Error(`Failed to get HLS URL for ${trackId}`);
+    }
+
+    this.urlCache.set(cacheKey, {
+      url: data.publicUrl,
+      expiresAt: Date.now() + this.cacheDuration,
+    });
+
+    return data.publicUrl;
+  }
+
+  /**
+   * Check if HLS is available for a track
+   * Uses cached result when available
+   */
+  async hasHLSSupport(trackId: string): Promise<boolean> {
+    if (this.hlsCache.has(trackId)) {
+      return this.hlsCache.get(trackId)!;
+    }
+
+    try {
+      // Check if master.m3u8 exists in HLS bucket
+      const { data, error } = await supabase.storage
+        .from('audio-hls')
+        .list(trackId, { limit: 1 });
+
+      const hasHLS = !error && data && data.length > 0;
+      this.hlsCache.set(trackId, hasHLS);
+      return hasHLS;
+    } catch {
+      this.hlsCache.set(trackId, false);
+      return false;
+    }
+  }
+
   validateUrl(url: string): boolean {
     try {
       const urlObj = new URL(url);
@@ -58,15 +122,18 @@ export class SupabaseStorageAdapter implements StorageAdapter {
 
   clearCache(): void {
     this.urlCache.clear();
+    this.hlsCache.clear();
   }
 }
 
-export class CloudFrontStorageAdapter implements StorageAdapter {
+export class CloudFrontStorageAdapter implements HLSStorageAdapter {
   name = 'Cloudflare CDN';
   private cdnDomain: string;
-  private signingEnabled: boolean;
-  private signingKey?: string;
+  // Signing config for future signed URL support
+  private _signingEnabled: boolean;
+  private _signingKey?: string;
   private urlCache: Map<string, { url: string; expiresAt: number }> = new Map();
+  private hlsCache: Map<string, boolean> = new Map();
   private cacheDuration = 3600000; // 1 hour
 
   constructor(config: {
@@ -75,8 +142,8 @@ export class CloudFrontStorageAdapter implements StorageAdapter {
     signingKey?: string;
   }) {
     this.cdnDomain = config.cdnDomain;
-    this.signingEnabled = config.signingEnabled || false;
-    this.signingKey = config.signingKey;
+    this._signingEnabled = config.signingEnabled || false;
+    this._signingKey = config.signingKey;
   }
 
   async getAudioUrl(filePath: string): Promise<string> {
@@ -123,6 +190,51 @@ export class CloudFrontStorageAdapter implements StorageAdapter {
     return cdnUrl;
   }
 
+  /**
+   * Get HLS manifest URL from CDN
+   * Assumes HLS files are mirrored to CDN at /hls/{trackId}/master.m3u8
+   * @param trackId - The track identifier
+   * @param _hlsPath - The HLS path (unused, kept for interface compatibility)
+   */
+  async getHLSUrl(trackId: string, _hlsPath: string): Promise<string> {
+    const cacheKey = `hls:${trackId}`;
+    const cached = this.urlCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.url;
+    }
+
+    // CDN HLS URL pattern: https://media.focus.music/hls/{track_id}/master.m3u8
+    const hlsUrl = `https://${this.cdnDomain}/hls/${trackId}/master.m3u8`;
+
+    this.urlCache.set(cacheKey, {
+      url: hlsUrl,
+      expiresAt: Date.now() + this.cacheDuration,
+    });
+
+    return hlsUrl;
+  }
+
+  /**
+   * Check if HLS is available via CDN
+   * Does a HEAD request to verify the manifest exists
+   */
+  async hasHLSSupport(trackId: string): Promise<boolean> {
+    if (this.hlsCache.has(trackId)) {
+      return this.hlsCache.get(trackId)!;
+    }
+
+    try {
+      const hlsUrl = `https://${this.cdnDomain}/hls/${trackId}/master.m3u8`;
+      const response = await fetch(hlsUrl, { method: 'HEAD' });
+      const hasHLS = response.ok;
+      this.hlsCache.set(trackId, hasHLS);
+      return hasHLS;
+    } catch {
+      this.hlsCache.set(trackId, false);
+      return false;
+    }
+  }
+
   private async generateSignedUrl(url: string): Promise<string> {
     const expirationTime = Math.floor(Date.now() / 1000) + 3600;
     return `${url}?Expires=${expirationTime}&Signature=placeholder`;
@@ -143,6 +255,7 @@ export class CloudFrontStorageAdapter implements StorageAdapter {
 
   clearCache(): void {
     this.urlCache.clear();
+    this.hlsCache.clear();
   }
 }
 
