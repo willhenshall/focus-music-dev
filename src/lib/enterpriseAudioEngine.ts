@@ -14,9 +14,18 @@
  * - Comprehensive error categorization
  * - Dual audio element architecture for gapless playback
  * - MediaSession API for lock screen controls
+ * - iOS WebKit buffer governor for long track stability
  */
 
-export type ErrorCategory = 'network' | 'decode' | 'auth' | 'cors' | 'timeout' | 'unknown';
+import { 
+  getIosBufferGovernor, 
+  IosBufferGovernor,
+  BufferGovernorState,
+  BUFFER_GOVERNOR_CONFIG,
+} from './iosBufferGovernor';
+import { getIosWebkitInfo, IosWebkitInfo } from './iosWebkitDetection';
+
+export type ErrorCategory = 'network' | 'decode' | 'auth' | 'cors' | 'timeout' | 'ios_webkit_buffer' | 'unknown';
 
 export interface AudioMetrics {
   currentTrackId: string | null;
@@ -63,6 +72,21 @@ export interface AudioMetrics {
   sessionSuccessRate: number;
   stallCount: number;
   recoveryAttempts: number;
+  // iOS WebKit Buffer Governor metrics
+  iosWebkit: {
+    isIOSWebKit: boolean;
+    browserName: string;
+    isCellular: boolean;
+    bufferGovernorActive: boolean;
+    bufferLimitBytes: number;
+    estimatedBufferedBytes: number;
+    isLargeTrack: boolean;
+    isThrottling: boolean;
+    recoveryAttempts: number;
+    recoveryErrorType: string | null;
+    prefetchAllowed: boolean;
+    prefetchReason: string;
+  };
 }
 
 export interface RetryConfig {
@@ -168,6 +192,20 @@ export class EnterpriseAudioEngine {
     sessionSuccessRate: 100,
     stallCount: 0,
     recoveryAttempts: 0,
+    iosWebkit: {
+      isIOSWebKit: false,
+      browserName: 'Unknown',
+      isCellular: false,
+      bufferGovernorActive: false,
+      bufferLimitBytes: 0,
+      estimatedBufferedBytes: 0,
+      isLargeTrack: false,
+      isThrottling: false,
+      recoveryAttempts: 0,
+      recoveryErrorType: null,
+      prefetchAllowed: true,
+      prefetchReason: 'nonIOSPlatform',
+    },
   };
 
   private metricsUpdateFrame: number | null = null;
@@ -182,10 +220,41 @@ export class EnterpriseAudioEngine {
   private stallDetectionDelay: number = 5000;
   private retryTimer: NodeJS.Timeout | null = null;
   private abortController: AbortController | null = null;
+  
+  // iOS WebKit Buffer Governor
+  private bufferGovernor: IosBufferGovernor;
+  private iosWebkitInfo: IosWebkitInfo;
 
   constructor(storageAdapter: StorageAdapter) {
     this.storageAdapter = storageAdapter;
     this.metrics.storageBackend = storageAdapter.name;
+
+    // Initialize iOS WebKit detection and buffer governor
+    this.iosWebkitInfo = getIosWebkitInfo();
+    this.bufferGovernor = getIosBufferGovernor();
+    
+    // Set up buffer governor callbacks
+    this.bufferGovernor.setCallbacks({
+      onRecoveryNeeded: (position) => this.handleBufferRecovery(position),
+      onRecoveryExhausted: () => this.handleBufferRecoveryExhausted(),
+      onThrottleStart: () => {
+        console.log('[IOS_BUFFER] Throttling started - disabling prefetch');
+      },
+      onThrottleEnd: () => {
+        console.log('[IOS_BUFFER] Throttling ended - prefetch may resume');
+      },
+    });
+
+    // Initialize iOS WebKit metrics
+    this.updateIosWebkitMetrics();
+
+    if (this.iosWebkitInfo.isIOSWebKit) {
+      console.log('[IOS_BUFFER] iOS WebKit detected - buffer governor active', {
+        browser: this.iosWebkitInfo.browserName,
+        cellular: this.iosWebkitInfo.isCellular,
+        version: this.iosWebkitInfo.iosVersion,
+      });
+    }
 
     this.primaryAudio = this.createAudioElement();
     this.secondaryAudio = this.createAudioElement();
@@ -198,6 +267,7 @@ export class EnterpriseAudioEngine {
     this.setupNetworkMonitoring();
     this.startMetricsLoop();
     this.initializeMediaSession();
+    this.exposeDebugInterface();
   }
 
   private createAudioElement(): HTMLAudioElement {
@@ -207,6 +277,10 @@ export class EnterpriseAudioEngine {
     audio.setAttribute('playsinline', 'true');
     audio.style.display = 'none';
     document.body.appendChild(audio);
+
+    // Apply iOS WebKit buffer governor configuration
+    // This may change preload to 'metadata' on iOS to prevent aggressive buffering
+    this.bufferGovernor.configureAudioElement(audio);
 
     audio.addEventListener('canplaythrough', () => {
       this.metrics.error = null;
@@ -261,11 +335,17 @@ export class EnterpriseAudioEngine {
     audio.addEventListener('error', (e) => {
       const error = audio.error;
       // Only track errors from the current audio element, ignore prefetch errors
-      if (error && audio === this.currentAudio && audio.readyState === 0 && audio.networkState === 3) {
+      if (error && audio === this.currentAudio) {
         const { message, category } = this.categorizeError(error);
         this.metrics.error = message;
         this.metrics.errorCategory = category;
         this.updateMetrics();
+        
+        // Check if buffer governor should handle this error
+        if (this.bufferGovernor.handleError(error, audio.networkState)) {
+          console.log('[IOS_BUFFER] Buffer-related error detected, attempting recovery');
+          this.bufferGovernor.attemptRecovery();
+        }
       }
     });
 
@@ -641,6 +721,9 @@ export class EnterpriseAudioEngine {
       this.lastBandwidthCheck = now;
     }
 
+    // Update iOS WebKit buffer governor metrics
+    this.updateIosWebkitMetrics();
+
     if (this.onDiagnosticsUpdate) {
       this.onDiagnosticsUpdate({ ...this.metrics });
     }
@@ -673,6 +756,13 @@ export class EnterpriseAudioEngine {
       return;
     }
 
+    // Check if buffer governor allows prefetching
+    if (!this.bufferGovernor.canPrefetch()) {
+      const state = this.bufferGovernor.getState();
+      console.log('[IOS_BUFFER] Prefetch blocked:', state.prefetch.reason);
+      return;
+    }
+
     this.nextTrackId = trackId;
 
     const prefetchAudio = this.currentAudio === this.primaryAudio ? this.secondaryAudio : this.primaryAudio;
@@ -683,6 +773,7 @@ export class EnterpriseAudioEngine {
       prefetchAudio.preload = 'auto';
 
       this.prefetchedNextTrack = true;
+      this.bufferGovernor.recordPrefetch(trackId);
       this.metrics.prefetchedTrackId = trackId;
       this.metrics.prefetchedTrackUrl = url;
 
@@ -720,6 +811,9 @@ export class EnterpriseAudioEngine {
     this.metrics.retryAttempt = 0;
     this.metrics.recoveryAttempts = 0;
     this.currentTrackId = trackId;
+    
+    // Reset buffer governor for new track
+    this.bufferGovernor.resetForNewTrack();
 
     if (this.abortController) {
       this.abortController.abort();
@@ -978,8 +1072,23 @@ export class EnterpriseAudioEngine {
         this.metrics.playbackState = 'playing';
         this.updateMetrics();
         console.log('[DIAGNOSTIC] play() completed successfully');
+        
+        // Start buffer governor monitoring
+        this.bufferGovernor.startMonitoring(this.currentAudio);
       } catch (error) {
         console.error('[DIAGNOSTIC] play() failed:', error);
+        
+        // Check if this is a NotSupportedError (iOS WebKit buffer issue)
+        if (error instanceof Error && error.message?.includes('NotSupported')) {
+          console.log('[IOS_BUFFER] NotSupportedError detected during play()');
+          if (this.bufferGovernor.handleError(error, this.currentAudio.networkState)) {
+            const recovered = await this.bufferGovernor.attemptRecovery();
+            if (recovered) {
+              return; // Recovery successful
+            }
+          }
+        }
+        
         this.metrics.error = `Play failed: ${error}`;
         this.metrics.errorCategory = 'unknown';
         this.updateMetrics();
@@ -1073,6 +1182,7 @@ export class EnterpriseAudioEngine {
     this.currentAudio.currentTime = 0;
     this.isPlayingState = false;
     this.metrics.playbackState = 'stopped';
+    this.bufferGovernor.stopMonitoring();
     this.updateMetrics();
   }
 
@@ -1109,6 +1219,153 @@ export class EnterpriseAudioEngine {
     return { ...this.metrics };
   }
 
+  /**
+   * Get buffer governor state (for diagnostics).
+   */
+  getBufferGovernorState(): BufferGovernorState {
+    return this.bufferGovernor.getState();
+  }
+
+  /**
+   * Check if buffer governor is active.
+   */
+  isBufferGovernorActive(): boolean {
+    return this.bufferGovernor.isActive();
+  }
+
+  /**
+   * Force buffer governor active state for testing.
+   * @internal Test hook only
+   */
+  _forceBufferGovernorActive(active: boolean): void {
+    this.bufferGovernor._forceActivate(active);
+    this.updateIosWebkitMetrics();
+  }
+
+  /**
+   * Simulate a buffer failure for testing.
+   * @internal Test hook only
+   */
+  _simulateBufferFailure(): void {
+    this.bufferGovernor._simulateBufferFailure();
+    this.bufferGovernor.attemptRecovery();
+  }
+
+  /**
+   * Handle buffer recovery request from governor.
+   */
+  private async handleBufferRecovery(resumePosition: number): Promise<boolean> {
+    if (!this.currentAudio.src || !this.isPlayingState) {
+      return false;
+    }
+
+    const currentUrl = this.currentAudio.src;
+
+    console.log('[RECOVERY] iOS WebKit buffer recovery, resuming at', resumePosition.toFixed(2) + 's');
+
+    try {
+      // Re-set the source to force WebKit to drop and restart the connection
+      this.currentAudio.src = currentUrl;
+      this.currentAudio.load();
+
+      // Wait for enough data to seek
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          cleanup();
+          reject(new Error('Recovery timeout'));
+        }, BUFFER_GOVERNOR_CONFIG.RECOVERY_TIMEOUT_MS);
+
+        const onCanPlay = () => {
+          cleanup();
+          resolve();
+        };
+
+        const onError = () => {
+          cleanup();
+          reject(new Error('Recovery load failed'));
+        };
+
+        const cleanup = () => {
+          clearTimeout(timeout);
+          this.currentAudio.removeEventListener('canplay', onCanPlay);
+          this.currentAudio.removeEventListener('error', onError);
+        };
+
+        this.currentAudio.addEventListener('canplay', onCanPlay, { once: true });
+        this.currentAudio.addEventListener('error', onError, { once: true });
+      });
+
+      // Seek and play
+      this.currentAudio.currentTime = resumePosition;
+      await this.currentAudio.play();
+
+      // Clear error state
+      this.metrics.error = null;
+      this.metrics.errorCategory = null;
+      this.updateMetrics();
+
+      console.log('[RECOVERY] Successfully resumed at', resumePosition.toFixed(2) + 's');
+      return true;
+
+    } catch (error) {
+      console.error('[RECOVERY] Buffer recovery failed:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Handle when buffer recovery attempts are exhausted.
+   */
+  private handleBufferRecoveryExhausted(): void {
+    console.log('[RECOVERY] iOS WebKit buffer recovery exhausted - skipping track');
+    this.metrics.error = 'iOS WebKit buffer failure - skipping track';
+    this.metrics.errorCategory = 'ios_webkit_buffer';
+    this.updateMetrics();
+
+    if (this.onTrackEnd) {
+      this.onTrackEnd();
+    }
+  }
+
+  /**
+   * Update iOS WebKit metrics from buffer governor state.
+   */
+  private updateIosWebkitMetrics(): void {
+    const state = this.bufferGovernor.getState();
+    
+    this.metrics.iosWebkit = {
+      isIOSWebKit: state.iosInfo.isIOSWebKit,
+      browserName: state.iosInfo.browserName,
+      isCellular: state.iosInfo.isCellular,
+      bufferGovernorActive: state.active,
+      bufferLimitBytes: state.limitBytes,
+      estimatedBufferedBytes: state.estimatedBufferedBytes,
+      isLargeTrack: state.isLargeTrack,
+      isThrottling: state.isThrottling,
+      recoveryAttempts: state.recovery.attempts,
+      recoveryErrorType: state.recovery.errorType,
+      prefetchAllowed: state.prefetch.allowed,
+      prefetchReason: state.prefetch.reason,
+    };
+  }
+
+  /**
+   * Expose debug interface on window for console debugging.
+   */
+  private exposeDebugInterface(): void {
+    if (typeof window !== 'undefined') {
+      (window as any).__playerDebug = {
+        getMetrics: () => this.getMetrics(),
+        getBufferGovernorState: () => this.getBufferGovernorState(),
+        isIOSWebKit: () => this.iosWebkitInfo.isIOSWebKit,
+        isBufferGovernorActive: () => this.isBufferGovernorActive(),
+        forceBufferGovernor: (active: boolean) => this._forceBufferGovernorActive(active),
+        simulateBufferFailure: () => this._simulateBufferFailure(),
+        config: BUFFER_GOVERNOR_CONFIG,
+      };
+    }
+  }
+
   destroy(): void {
     if (this.metricsUpdateFrame) {
       cancelAnimationFrame(this.metricsUpdateFrame);
@@ -1131,6 +1388,7 @@ export class EnterpriseAudioEngine {
     }
 
     this.stop();
+    this.bufferGovernor.destroy();
     this.primaryAudio.src = '';
     this.secondaryAudio.src = '';
     this.primaryAudio.load();
@@ -1148,6 +1406,11 @@ export class EnterpriseAudioEngine {
       navigator.mediaSession.setActionHandler('pause', null);
       navigator.mediaSession.setActionHandler('nexttrack', null);
       navigator.mediaSession.setActionHandler('seekto', null);
+    }
+
+    // Clean up debug interface
+    if (typeof window !== 'undefined') {
+      delete (window as any).__playerDebug;
     }
 
     window.removeEventListener('online', () => {});
