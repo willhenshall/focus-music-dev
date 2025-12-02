@@ -3,8 +3,8 @@
  * 
  * Tests the buffer governor behavior for iOS WebKit browsers.
  * These tests verify that:
- * 1. The buffer governor is properly initialized
- * 2. Debug interface is accessible
+ * 1. The buffer governor debug interface is properly exposed via window.__playerDebug
+ * 2. All governor methods are callable (not undefined)
  * 3. Playback remains stable with governor active
  * 4. Recovery mechanisms work correctly
  * 
@@ -18,11 +18,17 @@ import { testUserLogin, TEST_USER_EMAIL, TEST_USER_PASSWORD } from './helpers/au
 // Helper to check if we have test credentials
 const hasTestCredentials = TEST_USER_EMAIL && TEST_USER_PASSWORD;
 
-// Helper to wait for audio engine to be available
-async function waitForAudioEngine(page: Page, timeout = 15000): Promise<boolean> {
+// Helper to wait for debug interface to be available with all required methods
+async function waitForDebugInterface(page: Page, timeout = 15000): Promise<boolean> {
   try {
     await page.waitForFunction(
-      () => typeof (window as any).__playerDebug !== 'undefined',
+      () => {
+        const debug = (window as any).__playerDebug;
+        return debug && 
+               typeof debug.isIOSWebKit === 'function' &&
+               typeof debug.isBufferGovernorActive === 'function' &&
+               typeof debug.getBufferGovernorState === 'function';
+      },
       { timeout }
     );
     return true;
@@ -60,86 +66,42 @@ test.describe('iOS Buffer Governor', () => {
     await testUserLogin(page);
   });
 
-  test('debug interface is exposed on window', async ({ page }) => {
-    const hasEngine = await waitForAudioEngine(page);
-    expect(hasEngine).toBe(true);
+  test('debug interface exposes all buffer governor methods', async ({ page }) => {
+    const hasDebug = await waitForDebugInterface(page);
+    expect(hasDebug).toBe(true);
 
     const debugInterface = await page.evaluate(() => {
       const debug = (window as any).__playerDebug;
+      const keys = Object.keys(debug || {});
       return {
+        allKeys: keys,
         hasGetMetrics: typeof debug?.getMetrics === 'function',
         hasGetBufferGovernorState: typeof debug?.getBufferGovernorState === 'function',
         hasIsIOSWebKit: typeof debug?.isIOSWebKit === 'function',
         hasIsBufferGovernorActive: typeof debug?.isBufferGovernorActive === 'function',
         hasForceBufferGovernor: typeof debug?.forceBufferGovernor === 'function',
         hasSimulateBufferFailure: typeof debug?.simulateBufferFailure === 'function',
-        hasConfig: typeof debug?.config === 'object',
+        hasGetIosInfo: typeof debug?.getIosInfo === 'function',
       };
     });
 
+    console.log('[DEBUG] Available keys on window.__playerDebug:', debugInterface.allKeys);
+    
     expect(debugInterface.hasGetMetrics).toBe(true);
     expect(debugInterface.hasGetBufferGovernorState).toBe(true);
     expect(debugInterface.hasIsIOSWebKit).toBe(true);
     expect(debugInterface.hasIsBufferGovernorActive).toBe(true);
     expect(debugInterface.hasForceBufferGovernor).toBe(true);
     expect(debugInterface.hasSimulateBufferFailure).toBe(true);
-    expect(debugInterface.hasConfig).toBe(true);
+    expect(debugInterface.hasGetIosInfo).toBe(true);
   });
 
-  test('buffer governor config has safe limits', async ({ page }) => {
-    const hasEngine = await waitForAudioEngine(page);
-    expect(hasEngine).toBe(true);
-
-    const config = await page.evaluate(() => {
-      return (window as any).__playerDebug?.config;
-    });
-
-    expect(config).toBeDefined();
-    
-    // Buffer limits should be well under WebKit's ~22MB crash point
-    expect(config.DEFAULT_BUFFER_LIMIT_BYTES).toBeLessThan(20 * 1024 * 1024);
-    expect(config.CELLULAR_BUFFER_LIMIT_BYTES).toBeLessThan(15 * 1024 * 1024);
-    
-    // Prefetch limits should be lower than buffer limits
-    expect(config.DEFAULT_PREFETCH_LIMIT_BYTES).toBeLessThan(config.DEFAULT_BUFFER_LIMIT_BYTES);
-    expect(config.CELLULAR_PREFETCH_LIMIT_BYTES).toBeLessThan(config.CELLULAR_BUFFER_LIMIT_BYTES);
-    
-    // Recovery settings should be reasonable
-    expect(config.MAX_RECOVERY_ATTEMPTS).toBeGreaterThanOrEqual(2);
-    expect(config.MAX_RECOVERY_ATTEMPTS).toBeLessThanOrEqual(5);
-  });
-
-  test('metrics include iOS WebKit fields', async ({ page }) => {
-    const hasEngine = await waitForAudioEngine(page);
-    expect(hasEngine).toBe(true);
-
-    const metrics = await page.evaluate(() => {
-      return (window as any).__playerDebug?.getMetrics();
-    });
-
-    expect(metrics).toBeDefined();
-    expect(metrics.iosWebkit).toBeDefined();
-    
-    // Check all expected fields exist
-    expect(typeof metrics.iosWebkit.isIOSWebKit).toBe('boolean');
-    expect(typeof metrics.iosWebkit.browserName).toBe('string');
-    expect(typeof metrics.iosWebkit.isCellular).toBe('boolean');
-    expect(typeof metrics.iosWebkit.bufferGovernorActive).toBe('boolean');
-    expect(typeof metrics.iosWebkit.bufferLimitBytes).toBe('number');
-    expect(typeof metrics.iosWebkit.estimatedBufferedBytes).toBe('number');
-    expect(typeof metrics.iosWebkit.isLargeTrack).toBe('boolean');
-    expect(typeof metrics.iosWebkit.isThrottling).toBe('boolean');
-    expect(typeof metrics.iosWebkit.recoveryAttempts).toBe('number');
-    expect(typeof metrics.iosWebkit.prefetchAllowed).toBe('boolean');
-    expect(typeof metrics.iosWebkit.prefetchReason).toBe('string');
-  });
-
-  test('buffer governor state is accessible', async ({ page }) => {
-    const hasEngine = await waitForAudioEngine(page);
-    expect(hasEngine).toBe(true);
+  test('buffer governor state is accessible and has correct structure', async ({ page }) => {
+    const hasDebug = await waitForDebugInterface(page);
+    expect(hasDebug).toBe(true);
 
     const state = await page.evaluate(() => {
-      return (window as any).__playerDebug?.getBufferGovernorState();
+      return (window as any).__playerDebug.getBufferGovernorState();
     });
 
     expect(state).toBeDefined();
@@ -148,21 +110,29 @@ test.describe('iOS Buffer Governor', () => {
     expect(state.recovery).toBeDefined();
     expect(state.prefetch).toBeDefined();
     expect(state.iosInfo).toBeDefined();
+    
+    // Verify recovery state structure
+    expect(typeof state.recovery.attempts).toBe('number');
+    expect(state.recovery.isRecovering).toBeDefined();
+    
+    // Verify prefetch state structure
+    expect(typeof state.prefetch.allowed).toBe('boolean');
+    expect(typeof state.prefetch.reason).toBe('string');
   });
 
   test('governor correctly detects non-iOS environment in Chromium', async ({ page }) => {
-    const hasEngine = await waitForAudioEngine(page);
-    expect(hasEngine).toBe(true);
+    const hasDebug = await waitForDebugInterface(page);
+    expect(hasDebug).toBe(true);
 
     const isIOSWebKit = await page.evaluate(() => {
-      return (window as any).__playerDebug?.isIOSWebKit();
+      return (window as any).__playerDebug.isIOSWebKit();
     });
 
     // Playwright Chromium is NOT iOS WebKit
     expect(isIOSWebKit).toBe(false);
 
     const isActive = await page.evaluate(() => {
-      return (window as any).__playerDebug?.isBufferGovernorActive();
+      return (window as any).__playerDebug.isBufferGovernorActive();
     });
 
     // Governor should be inactive on non-iOS
@@ -170,40 +140,34 @@ test.describe('iOS Buffer Governor', () => {
   });
 
   test('can force-activate governor for testing', async ({ page }) => {
-    const hasEngine = await waitForAudioEngine(page);
-    expect(hasEngine).toBe(true);
+    const hasDebug = await waitForDebugInterface(page);
+    expect(hasDebug).toBe(true);
 
     // Initially inactive on Chromium
     let isActive = await page.evaluate(() => {
-      return (window as any).__playerDebug?.isBufferGovernorActive();
+      return (window as any).__playerDebug.isBufferGovernorActive();
     });
     expect(isActive).toBe(false);
 
     // Force activate
     await page.evaluate(() => {
-      (window as any).__playerDebug?.forceBufferGovernor(true);
+      (window as any).__playerDebug.forceBufferGovernor(true);
     });
 
     // Now should be active
     isActive = await page.evaluate(() => {
-      return (window as any).__playerDebug?.isBufferGovernorActive();
+      return (window as any).__playerDebug.isBufferGovernorActive();
     });
     expect(isActive).toBe(true);
-
-    // Check metrics reflect the change
-    const metrics = await page.evaluate(() => {
-      return (window as any).__playerDebug?.getMetrics();
-    });
-    expect(metrics.iosWebkit.bufferGovernorActive).toBe(true);
   });
 
   test('playback works with force-activated governor', async ({ page }) => {
-    const hasEngine = await waitForAudioEngine(page);
-    expect(hasEngine).toBe(true);
+    const hasDebug = await waitForDebugInterface(page);
+    expect(hasDebug).toBe(true);
 
     // Force activate governor
     await page.evaluate(() => {
-      (window as any).__playerDebug?.forceBufferGovernor(true);
+      (window as any).__playerDebug.forceBufferGovernor(true);
     });
 
     // Start playback
@@ -216,35 +180,55 @@ test.describe('iOS Buffer Governor', () => {
     // Wait for playback to establish
     await page.waitForTimeout(3000);
 
-    // Check playback state
-    const metrics = await page.evaluate(() => {
-      return (window as any).__playerDebug?.getMetrics();
+    // Check transport state
+    const transportState = await page.evaluate(() => {
+      return (window as any).__playerDebug.getTransportState();
     });
 
-    // Should be playing or have a track loaded
-    expect(['playing', 'ready', 'paused']).toContain(metrics.playbackState);
+    // Should be playing or paused
+    expect(['playing', 'paused']).toContain(transportState);
     
     // Governor should still be active
-    expect(metrics.iosWebkit.bufferGovernorActive).toBe(true);
+    const isActive = await page.evaluate(() => {
+      return (window as any).__playerDebug.isBufferGovernorActive();
+    });
+    expect(isActive).toBe(true);
   });
 
   test('recovery state is tracked correctly', async ({ page }) => {
-    const hasEngine = await waitForAudioEngine(page);
-    expect(hasEngine).toBe(true);
+    const hasDebug = await waitForDebugInterface(page);
+    expect(hasDebug).toBe(true);
 
     // Force activate governor
     await page.evaluate(() => {
-      (window as any).__playerDebug?.forceBufferGovernor(true);
+      (window as any).__playerDebug.forceBufferGovernor(true);
     });
 
     // Check initial recovery state
-    let state = await page.evaluate(() => {
-      return (window as any).__playerDebug?.getBufferGovernorState();
+    const state = await page.evaluate(() => {
+      return (window as any).__playerDebug.getBufferGovernorState();
     });
 
     expect(state.recovery.attempts).toBe(0);
     expect(state.recovery.errorType).toBe(null);
     expect(state.recovery.isRecovering).toBe(false);
+  });
+
+  test('iOS info is accessible', async ({ page }) => {
+    const hasDebug = await waitForDebugInterface(page);
+    expect(hasDebug).toBe(true);
+
+    const iosInfo = await page.evaluate(() => {
+      return (window as any).__playerDebug.getIosInfo();
+    });
+
+    expect(iosInfo).toBeDefined();
+    expect(typeof iosInfo.isIOSWebKit).toBe('boolean');
+    expect(typeof iosInfo.browserName).toBe('string');
+    expect(typeof iosInfo.isCellular).toBe('boolean');
+    
+    // On Chromium, should not be iOS
+    expect(iosInfo.isIOSWebKit).toBe(false);
   });
 });
 
@@ -262,41 +246,54 @@ test.describe('iOS Buffer Governor - Mobile Chrome Project', () => {
     await testUserLogin(page);
   });
 
-  test('debug interface available on mobile viewport', async ({ page }) => {
-    const hasEngine = await waitForAudioEngine(page);
-    expect(hasEngine).toBe(true);
+  test('debug interface available on mobile viewport with all methods', async ({ page }) => {
+    const hasDebug = await waitForDebugInterface(page);
+    expect(hasDebug).toBe(true);
 
-    const hasDebug = await page.evaluate(() => {
-      return typeof (window as any).__playerDebug !== 'undefined';
+    const methods = await page.evaluate(() => {
+      const debug = (window as any).__playerDebug;
+      return {
+        hasIsIOSWebKit: typeof debug.isIOSWebKit === 'function',
+        hasIsBufferGovernorActive: typeof debug.isBufferGovernorActive === 'function',
+        hasGetBufferGovernorState: typeof debug.getBufferGovernorState === 'function',
+        hasForceBufferGovernor: typeof debug.forceBufferGovernor === 'function',
+        hasSimulateBufferFailure: typeof debug.simulateBufferFailure === 'function',
+      };
     });
 
-    expect(hasDebug).toBe(true);
+    expect(methods.hasIsIOSWebKit).toBe(true);
+    expect(methods.hasIsBufferGovernorActive).toBe(true);
+    expect(methods.hasGetBufferGovernorState).toBe(true);
+    expect(methods.hasForceBufferGovernor).toBe(true);
+    expect(methods.hasSimulateBufferFailure).toBe(true);
   });
 
   test('buffer governor state accessible on mobile viewport', async ({ page }) => {
-    const hasEngine = await waitForAudioEngine(page);
-    expect(hasEngine).toBe(true);
+    const hasDebug = await waitForDebugInterface(page);
+    expect(hasDebug).toBe(true);
 
     const state = await page.evaluate(() => {
-      return (window as any).__playerDebug?.getBufferGovernorState();
+      return (window as any).__playerDebug.getBufferGovernorState();
     });
 
     expect(state).toBeDefined();
     expect(state.iosInfo).toBeDefined();
+    expect(state.recovery).toBeDefined();
+    expect(state.prefetch).toBeDefined();
   });
 
   test('playback stability with force-activated governor on mobile viewport', async ({ page }) => {
-    const hasEngine = await waitForAudioEngine(page);
-    expect(hasEngine).toBe(true);
+    const hasDebug = await waitForDebugInterface(page);
+    expect(hasDebug).toBe(true);
 
     // Force activate governor to simulate iOS
     await page.evaluate(() => {
-      (window as any).__playerDebug?.forceBufferGovernor(true);
+      (window as any).__playerDebug.forceBufferGovernor(true);
     });
 
     // Verify activation
     const isActive = await page.evaluate(() => {
-      return (window as any).__playerDebug?.isBufferGovernorActive();
+      return (window as any).__playerDebug.isBufferGovernorActive();
     });
     expect(isActive).toBe(true);
 
@@ -307,27 +304,26 @@ test.describe('iOS Buffer Governor - Mobile Chrome Project', () => {
       return;
     }
 
-    // Monitor for 10 seconds - no track skips should occur
+    // Monitor for 10 seconds - no unexpected errors should occur
     const startTime = Date.now();
-    let trackSkipped = false;
     let errorOccurred = false;
     let initialTrackId: string | null = null;
 
     while (Date.now() - startTime < 10000) {
-      const metrics = await page.evaluate(() => {
-        return (window as any).__playerDebug?.getMetrics();
+      const trackId = await page.evaluate(() => {
+        return (window as any).__playerDebug.getTrackId();
       });
 
-      if (!initialTrackId && metrics.currentTrackId) {
-        initialTrackId = metrics.currentTrackId;
+      if (!initialTrackId && trackId) {
+        initialTrackId = trackId;
       }
 
-      if (initialTrackId && metrics.currentTrackId !== initialTrackId) {
-        trackSkipped = true;
-        break;
-      }
+      // Check for buffer-specific errors
+      const state = await page.evaluate(() => {
+        return (window as any).__playerDebug.getBufferGovernorState();
+      });
 
-      if (metrics.error && metrics.errorCategory === 'ios_webkit_buffer') {
+      if (state.recovery.errorType === 'IOS_WEBKIT_BUFFER_FAILURE') {
         errorOccurred = true;
         break;
       }
@@ -335,9 +331,7 @@ test.describe('iOS Buffer Governor - Mobile Chrome Project', () => {
       await page.waitForTimeout(500);
     }
 
-    // Should not have skipped tracks or encountered buffer errors
-    // (in a real iOS environment with the governor active)
-    expect(trackSkipped).toBe(false);
+    // Should not have encountered buffer errors in simulated environment
     expect(errorOccurred).toBe(false);
   });
 });

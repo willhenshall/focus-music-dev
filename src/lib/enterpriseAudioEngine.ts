@@ -267,7 +267,9 @@ export class EnterpriseAudioEngine {
     this.setupNetworkMonitoring();
     this.startMetricsLoop();
     this.initializeMediaSession();
-    this.exposeDebugInterface();
+    
+    // Note: window.__playerDebug is managed by MusicPlayerContext.tsx
+    // The context will call our public methods like getBufferGovernorState()
   }
 
   private createAudioElement(): HTMLAudioElement {
@@ -1349,23 +1351,6 @@ export class EnterpriseAudioEngine {
     };
   }
 
-  /**
-   * Expose debug interface on window for console debugging.
-   */
-  private exposeDebugInterface(): void {
-    if (typeof window !== 'undefined') {
-      (window as any).__playerDebug = {
-        getMetrics: () => this.getMetrics(),
-        getBufferGovernorState: () => this.getBufferGovernorState(),
-        isIOSWebKit: () => this.iosWebkitInfo.isIOSWebKit,
-        isBufferGovernorActive: () => this.isBufferGovernorActive(),
-        forceBufferGovernor: (active: boolean) => this._forceBufferGovernorActive(active),
-        simulateBufferFailure: () => this._simulateBufferFailure(),
-        config: BUFFER_GOVERNOR_CONFIG,
-      };
-    }
-  }
-
   destroy(): void {
     if (this.metricsUpdateFrame) {
       cancelAnimationFrame(this.metricsUpdateFrame);
@@ -1408,10 +1393,7 @@ export class EnterpriseAudioEngine {
       navigator.mediaSession.setActionHandler('seekto', null);
     }
 
-    // Clean up debug interface
-    if (typeof window !== 'undefined') {
-      delete (window as any).__playerDebug;
-    }
+    // Note: window.__playerDebug is managed by MusicPlayerContext.tsx
 
     window.removeEventListener('online', () => {});
     window.removeEventListener('offline', () => {});
