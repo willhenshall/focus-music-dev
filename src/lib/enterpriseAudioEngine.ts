@@ -24,6 +24,12 @@ import {
   BUFFER_GOVERNOR_CONFIG,
 } from './iosBufferGovernor';
 import { getIosWebkitInfo, IosWebkitInfo } from './iosWebkitDetection';
+import { 
+  probeTrackSizeWithRange, 
+  shouldProbeTrackSize, 
+  extractTrackIdFromUrl,
+  TrackSizeInfo,
+} from './trackSizeProbe';
 
 export type ErrorCategory = 'network' | 'decode' | 'auth' | 'cors' | 'timeout' | 'ios_webkit_buffer' | 'unknown';
 
@@ -80,6 +86,7 @@ export interface AudioMetrics {
     bufferGovernorActive: boolean;
     bufferLimitBytes: number;
     estimatedBufferedBytes: number;
+    estimatedTrackSizeBytes: number;
     isLargeTrack: boolean;
     isThrottling: boolean;
     recoveryAttempts: number;
@@ -199,6 +206,7 @@ export class EnterpriseAudioEngine {
       bufferGovernorActive: false,
       bufferLimitBytes: 0,
       estimatedBufferedBytes: 0,
+      estimatedTrackSizeBytes: 0,
       isLargeTrack: false,
       isThrottling: false,
       recoveryAttempts: 0,
@@ -292,6 +300,11 @@ export class EnterpriseAudioEngine {
 
     audio.addEventListener('loadedmetadata', () => {
       this.updateMetrics();
+      
+      // Inform buffer governor of track duration for accurate byte calculations
+      if (audio.duration > 0 && !isNaN(audio.duration)) {
+        this.bufferGovernor.setTrackDuration(audio.duration);
+      }
     });
 
     audio.addEventListener('loadeddata', () => {
@@ -301,6 +314,12 @@ export class EnterpriseAudioEngine {
     audio.addEventListener('progress', () => {
       this.updateMetrics();
       this.updateConnectionQuality();
+      
+      // Update buffer governor with current buffered bytes
+      if (audio === this.currentAudio && audio.buffered.length > 0) {
+        const bufferedEnd = audio.buffered.end(audio.buffered.length - 1);
+        this.bufferGovernor.updateBufferedBytes(bufferedEnd);
+      }
     });
 
     audio.addEventListener('timeupdate', () => {
@@ -759,9 +778,14 @@ export class EnterpriseAudioEngine {
     }
 
     // Check if buffer governor allows prefetching
-    if (!this.bufferGovernor.canPrefetch()) {
+    if (!this.bufferGovernor.shouldAllowPrefetch()) {
       const state = this.bufferGovernor.getState();
-      console.log('[IOS_BUFFER] Prefetch blocked:', state.prefetch.reason);
+      console.log('[IOS_BUFFER] Prefetch blocked:', {
+        reason: state.prefetch.reason,
+        isLargeTrack: state.isLargeTrack,
+        estimatedBufferedMB: (state.estimatedBufferedBytes / (1024 * 1024)).toFixed(2),
+        limitMB: (state.limitBytes / (1024 * 1024)).toFixed(2),
+      });
       return;
     }
 
@@ -815,7 +839,7 @@ export class EnterpriseAudioEngine {
     this.currentTrackId = trackId;
     
     // Reset buffer governor for new track
-    this.bufferGovernor.resetForNewTrack();
+    this.bufferGovernor.resetForNewTrack(trackId);
 
     if (this.abortController) {
       this.abortController.abort();
@@ -837,6 +861,11 @@ export class EnterpriseAudioEngine {
       const url = await this.storageAdapter.getAudioUrl(filePath);
       this.metrics.currentTrackUrl = url;
 
+      // On iOS WebKit, probe for track size from CDN headers
+      if (shouldProbeTrackSize()) {
+        this.probeAndSetTrackSize(url, trackId);
+      }
+
       await this.loadTrackWithRetry(trackId, url, metadata);
       clearTimeout(overallTimeout);
       this.recordSuccess();
@@ -844,6 +873,32 @@ export class EnterpriseAudioEngine {
       clearTimeout(overallTimeout);
       this.recordFailure();
       throw error;
+    }
+  }
+  
+  /**
+   * Probe CDN for track size and inform the buffer governor.
+   * Runs asynchronously to not block track loading.
+   */
+  private async probeAndSetTrackSize(url: string, trackId: string): Promise<void> {
+    try {
+      const sizeInfo = await probeTrackSizeWithRange(url, trackId);
+      
+      if (sizeInfo.probeSuccess && sizeInfo.sizeBytes > 0) {
+        // Set track size in governor - this will determine if it's a "large" track
+        this.bufferGovernor.setTrackSize(trackId, sizeInfo.sizeBytes);
+        
+        // Update metrics
+        this.metrics.totalBytes = sizeInfo.sizeBytes;
+        this.updateMetrics();
+      } else {
+        console.log('[IOS_BUFFER] Track size unknown or probe failed, governor in passive mode', {
+          trackId,
+          error: sizeInfo.error,
+        });
+      }
+    } catch (error) {
+      console.warn('[IOS_BUFFER] Track size probe error:', error);
     }
   }
 
@@ -1342,6 +1397,7 @@ export class EnterpriseAudioEngine {
       bufferGovernorActive: state.active,
       bufferLimitBytes: state.limitBytes,
       estimatedBufferedBytes: state.estimatedBufferedBytes,
+      estimatedTrackSizeBytes: state.estimatedTrackSizeBytes,
       isLargeTrack: state.isLargeTrack,
       isThrottling: state.isThrottling,
       recoveryAttempts: state.recovery.attempts,
@@ -1349,6 +1405,11 @@ export class EnterpriseAudioEngine {
       prefetchAllowed: state.prefetch.allowed,
       prefetchReason: state.prefetch.reason,
     };
+    
+    // Also update totalBytes if we have track size from governor
+    if (state.estimatedTrackSizeBytes > 0 && this.metrics.totalBytes === 0) {
+      this.metrics.totalBytes = state.estimatedTrackSizeBytes;
+    }
   }
 
   destroy(): void {

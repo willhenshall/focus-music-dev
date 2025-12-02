@@ -155,6 +155,12 @@ export class IosBufferGovernor {
   private monitoringInterval: number | null = null;
   private lastLogTime: number = 0;
   private logThrottleMs: number = 5000;
+  
+  // Track-specific data for accurate buffer calculation
+  private currentTrackId: string | null = null;
+  private trackSizeBytes: number = 0;
+  private trackDuration: number = 0;
+  private bytesPerSecond: number = 0;
 
   constructor() {
     const iosInfo = getIosWebkitInfo();
@@ -262,7 +268,13 @@ export class IosBufferGovernor {
    * Reset state for a new track.
    * Call this when loading a new track.
    */
-  resetForNewTrack(estimatedSizeBytes?: number): void {
+  resetForNewTrack(trackId?: string, estimatedSizeBytes?: number): void {
+    // Reset track-specific data
+    this.currentTrackId = trackId || null;
+    this.trackSizeBytes = 0;
+    this.trackDuration = 0;
+    this.bytesPerSecond = 0;
+    
     this.state.recovery = {
       errorType: null,
       attempts: 0,
@@ -276,7 +288,8 @@ export class IosBufferGovernor {
     this.state.estimatedBufferedBytes = 0;
     this.state.isThrottling = false;
 
-    if (estimatedSizeBytes !== undefined) {
+    if (estimatedSizeBytes !== undefined && estimatedSizeBytes > 0) {
+      this.trackSizeBytes = estimatedSizeBytes;
       this.state.estimatedTrackSizeBytes = estimatedSizeBytes;
       this.state.isLargeTrack = estimatedSizeBytes > BUFFER_GOVERNOR_CONFIG.LARGE_TRACK_THRESHOLD_BYTES;
     } else {
@@ -287,31 +300,130 @@ export class IosBufferGovernor {
     this.updatePrefetchState();
 
     this.log('Reset for new track', {
+      trackId: this.currentTrackId,
       estimatedSizeMB: (this.state.estimatedTrackSizeBytes / (1024 * 1024)).toFixed(1),
       isLarge: this.state.isLargeTrack,
     });
   }
 
   /**
-   * Set estimated track size.
-   * Call this when track metadata becomes available.
+   * Set track size from CDN headers.
+   * Call this when track size is known from Content-Length or Content-Range.
+   * 
+   * @param trackId - Track identifier
+   * @param sizeBytes - Track file size in bytes
+   * @param duration - Track duration in seconds (optional, can be set later)
    */
-  setTrackSize(sizeBytes: number): void {
+  setTrackSize(trackId: string, sizeBytes: number, duration?: number): void {
+    this.currentTrackId = trackId;
+    this.trackSizeBytes = sizeBytes;
     this.state.estimatedTrackSizeBytes = sizeBytes;
     this.state.isLargeTrack = sizeBytes > BUFFER_GOVERNOR_CONFIG.LARGE_TRACK_THRESHOLD_BYTES;
+    
+    if (duration && duration > 0) {
+      this.trackDuration = duration;
+      this.bytesPerSecond = sizeBytes / duration;
+    }
+    
     this.updatePrefetchState();
 
-    this.log('Track size updated', {
+    this.log(`Track ${trackId} size=${sizeBytes} bytes (${(sizeBytes / (1024 * 1024)).toFixed(1)}MB) isLargeTrack=${this.state.isLargeTrack}`, {
+      trackId,
+      sizeBytes,
       sizeMB: (sizeBytes / (1024 * 1024)).toFixed(1),
       isLarge: this.state.isLargeTrack,
+      duration: duration?.toFixed(1),
+      bytesPerSecond: this.bytesPerSecond?.toFixed(0),
     });
   }
+  
+  /**
+   * Update track duration (used to calculate bytesPerSecond).
+   * Call this when audio metadata is loaded.
+   */
+  setTrackDuration(duration: number): void {
+    if (duration > 0) {
+      this.trackDuration = duration;
+      if (this.trackSizeBytes > 0) {
+        this.bytesPerSecond = this.trackSizeBytes / duration;
+        this.log('Track duration set', {
+          trackId: this.currentTrackId,
+          duration: duration.toFixed(1),
+          bytesPerSecond: this.bytesPerSecond.toFixed(0),
+        });
+      }
+    }
+  }
 
+  /**
+   * Update the estimated buffered bytes based on audio.buffered.
+   * Call this on progress/timeupdate events.
+   * 
+   * @param bufferedSeconds - Buffered end time in seconds (from audio.buffered.end(0))
+   */
+  updateBufferedBytes(bufferedSeconds: number): void {
+    if (!this.state.active) return;
+    
+    let estimatedBytes = 0;
+    
+    if (this.bytesPerSecond > 0) {
+      // Use actual bytes per second from track size / duration
+      estimatedBytes = Math.floor(bufferedSeconds * this.bytesPerSecond);
+    } else if (this.trackSizeBytes > 0 && this.trackDuration > 0) {
+      // Calculate on the fly
+      estimatedBytes = Math.floor(bufferedSeconds * (this.trackSizeBytes / this.trackDuration));
+    } else {
+      // Fall back to bitrate estimation
+      const bitrate = this.state.isLargeTrack 
+        ? BUFFER_GOVERNOR_CONFIG.HIGH_QUALITY_BITRATE_BPS
+        : BUFFER_GOVERNOR_CONFIG.DEFAULT_BITRATE_BPS;
+      estimatedBytes = Math.floor((bufferedSeconds * bitrate) / 8);
+    }
+    
+    this.state.estimatedBufferedBytes = estimatedBytes;
+    
+    // Check if we need to throttle
+    this.checkBufferHealth();
+  }
+  
   /**
    * Check if prefetching is currently allowed.
    */
   canPrefetch(): boolean {
     return this.state.prefetch.allowed;
+  }
+  
+  /**
+   * Check if prefetching should be allowed.
+   * More explicit version for engine integration.
+   */
+  shouldAllowPrefetch(): boolean {
+    if (!this.state.active) {
+      return true; // Non-iOS platforms always allow prefetch
+    }
+    
+    // Don't allow prefetch during recovery
+    if (this.state.recovery.isRecovering) {
+      return false;
+    }
+    
+    // For large tracks, check buffer level
+    if (this.state.isLargeTrack) {
+      const prefetchLimit = this.state.iosInfo.isCellular
+        ? BUFFER_GOVERNOR_CONFIG.CELLULAR_PREFETCH_LIMIT_BYTES
+        : BUFFER_GOVERNOR_CONFIG.DEFAULT_PREFETCH_LIMIT_BYTES;
+      
+      if (this.state.estimatedBufferedBytes > prefetchLimit) {
+        return false;
+      }
+    }
+    
+    // Don't allow if throttling
+    if (this.state.isThrottling) {
+      return false;
+    }
+    
+    return true;
   }
 
   /**
@@ -477,53 +589,73 @@ export class IosBufferGovernor {
   // --------------------------------------------------------------------------
 
   private handleProgress = (): void => {
+    if (!this.audioElement) return;
+    
+    const audio = this.audioElement;
+    
+    // Update buffer estimate from audio element
     this.updateBufferEstimate();
+    
+    // Check buffer health and throttling
+    this.checkBufferHealth();
+    
     this.updatePrefetchState();
   };
 
   private handleTimeUpdate = (): void => {
     if (!this.audioElement) return;
 
-    // Track last good position for recovery
     const audio = this.audioElement;
+    
+    // Track last good position for recovery
     if (audio.readyState >= 2 && audio.networkState === 2 && audio.currentTime > 0) {
       this.state.recovery.lastGoodPosition = audio.currentTime;
       this.state.recovery.lastGoodBufferedBytes = this.state.estimatedBufferedBytes;
     }
+    
+    // Also update buffer estimate on timeupdate
+    this.updateBufferEstimate();
   };
 
   private checkBufferHealth(): void {
-    this.updateBufferEstimate();
-
     if (!this.state.active) return;
 
     const bufferBytes = this.state.estimatedBufferedBytes;
     const limitBytes = this.state.limitBytes;
 
+    // Only check if we have meaningful buffer data
+    if (bufferBytes === 0 || limitBytes === 0) return;
+
     // Check if we're approaching the danger zone
     const bufferRatio = bufferBytes / limitBytes;
     const wasThrottling = this.state.isThrottling;
+    const bufferMB = bufferBytes / (1024 * 1024);
+    const limitMB = limitBytes / (1024 * 1024);
 
     if (bufferRatio > 0.9) {
       // Buffer is getting dangerously high
       if (!this.state.isThrottling) {
         this.state.isThrottling = true;
-        this.logThrottled('Buffer approaching limit - throttling', {
-          bufferMB: (bufferBytes / (1024 * 1024)).toFixed(2),
-          limitMB: (limitBytes / (1024 * 1024)).toFixed(2),
-          ratio: (bufferRatio * 100).toFixed(1) + '%',
-        });
+        // Log with the exact format expected by the user
+        console.log(`[IOS_BUFFER] Buffer at ${bufferMB.toFixed(1)} MB (limit ${limitMB.toFixed(1)} MB) – throttling prefetch`);
         
         if (this.callbacks.onThrottleStart) {
           this.callbacks.onThrottleStart();
         }
       }
+    } else if (bufferRatio > 0.8) {
+      // Approaching limit - log warning but don't throttle yet
+      this.logThrottled('Buffer approaching limit', {
+        bufferMB: bufferMB.toFixed(2),
+        limitMB: limitMB.toFixed(2),
+        ratio: (bufferRatio * 100).toFixed(1) + '%',
+      });
     } else if (bufferRatio < 0.7) {
       // Buffer is back to safe levels
       if (this.state.isThrottling) {
         this.state.isThrottling = false;
         this.log('Buffer under control - unthrottling', {
-          bufferMB: (bufferBytes / (1024 * 1024)).toFixed(2),
+          bufferMB: bufferMB.toFixed(2),
           ratio: (bufferRatio * 100).toFixed(1) + '%',
         });
         
@@ -541,22 +673,36 @@ export class IosBufferGovernor {
 
     const audio = this.audioElement;
     
-    if (audio.buffered.length > 0 && audio.duration > 0) {
+    // Update track duration if we don't have it
+    if (this.trackDuration === 0 && audio.duration > 0 && !isNaN(audio.duration)) {
+      this.trackDuration = audio.duration;
+      if (this.trackSizeBytes > 0) {
+        this.bytesPerSecond = this.trackSizeBytes / audio.duration;
+      }
+    }
+    
+    if (audio.buffered.length > 0) {
       const bufferedEnd = audio.buffered.end(audio.buffered.length - 1);
       
-      // Estimate bytes based on duration and assumed bitrate
-      // Use higher bitrate estimate for safety (overestimate buffer)
-      const bitrate = this.state.isLargeTrack 
-        ? BUFFER_GOVERNOR_CONFIG.HIGH_QUALITY_BITRATE_BPS
-        : BUFFER_GOVERNOR_CONFIG.DEFAULT_BITRATE_BPS;
-      
-      this.state.estimatedBufferedBytes = Math.floor((bufferedEnd * bitrate) / 8);
-      
-      // Also update track size estimate if we don't have it
-      if (this.state.estimatedTrackSizeBytes === 0) {
-        this.state.estimatedTrackSizeBytes = Math.floor((audio.duration * bitrate) / 8);
-        this.state.isLargeTrack = this.state.estimatedTrackSizeBytes > 
-          BUFFER_GOVERNOR_CONFIG.LARGE_TRACK_THRESHOLD_BYTES;
+      // Use the more accurate calculation based on known track size
+      if (this.bytesPerSecond > 0) {
+        this.state.estimatedBufferedBytes = Math.floor(bufferedEnd * this.bytesPerSecond);
+      } else if (this.trackSizeBytes > 0 && this.trackDuration > 0) {
+        this.state.estimatedBufferedBytes = Math.floor(bufferedEnd * (this.trackSizeBytes / this.trackDuration));
+      } else if (audio.duration > 0) {
+        // Estimate bytes based on duration and assumed bitrate
+        const bitrate = this.state.isLargeTrack 
+          ? BUFFER_GOVERNOR_CONFIG.HIGH_QUALITY_BITRATE_BPS
+          : BUFFER_GOVERNOR_CONFIG.DEFAULT_BITRATE_BPS;
+        
+        this.state.estimatedBufferedBytes = Math.floor((bufferedEnd * bitrate) / 8);
+        
+        // Also update track size estimate if we don't have it
+        if (this.state.estimatedTrackSizeBytes === 0) {
+          this.state.estimatedTrackSizeBytes = Math.floor((audio.duration * bitrate) / 8);
+          this.state.isLargeTrack = this.state.estimatedTrackSizeBytes > 
+            BUFFER_GOVERNOR_CONFIG.LARGE_TRACK_THRESHOLD_BYTES;
+        }
       }
     }
   }

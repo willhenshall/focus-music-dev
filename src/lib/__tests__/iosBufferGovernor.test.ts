@@ -90,6 +90,7 @@ describe('IosBufferGovernor', () => {
       const governor = new IosBufferGovernor();
 
       expect(governor.canPrefetch()).toBe(true);
+      expect(governor.shouldAllowPrefetch()).toBe(true);
       
       const state = governor.getState();
       expect(state.prefetch.allowed).toBe(true);
@@ -104,6 +105,42 @@ describe('IosBufferGovernor', () => {
       const state = governor.getState();
       expect(state.prefetch.reason).not.toBe('nonIOSPlatform');
     });
+    
+    it('should block prefetch for large tracks with high buffer', () => {
+      mockIOSNavigator();
+      const governor = new IosBufferGovernor();
+
+      // Set a large track
+      governor.setTrackSize('largeTrack', 50 * 1024 * 1024, 600);
+      
+      // Set high buffer estimate (above prefetch limit)
+      (governor as any).state.estimatedBufferedBytes = 10 * 1024 * 1024; // 10MB
+      
+      // Trigger prefetch state update
+      (governor as any).updatePrefetchState();
+      
+      expect(governor.shouldAllowPrefetch()).toBe(false);
+      
+      const state = governor.getState();
+      expect(state.prefetch.allowed).toBe(false);
+      expect(state.prefetch.reason).toBe('largeTrackOnIOS');
+    });
+    
+    it('should allow prefetch for small tracks', () => {
+      mockIOSNavigator();
+      const governor = new IosBufferGovernor();
+
+      // Set a small track (5MB)
+      governor.setTrackSize('smallTrack', 5 * 1024 * 1024, 60);
+      
+      // Low buffer estimate
+      (governor as any).state.estimatedBufferedBytes = 2 * 1024 * 1024; // 2MB
+      
+      // Trigger prefetch state update
+      (governor as any).updatePrefetchState();
+      
+      expect(governor.shouldAllowPrefetch()).toBe(true);
+    });
   });
 
   describe('track size management', () => {
@@ -112,7 +149,7 @@ describe('IosBufferGovernor', () => {
       const governor = new IosBufferGovernor();
 
       // Set a large track size (50MB)
-      governor.setTrackSize(50 * 1024 * 1024);
+      governor.setTrackSize('track123', 50 * 1024 * 1024);
 
       const state = governor.getState();
       expect(state.isLargeTrack).toBe(true);
@@ -124,10 +161,46 @@ describe('IosBufferGovernor', () => {
       const governor = new IosBufferGovernor();
 
       // Set a small track size (5MB)
-      governor.setTrackSize(5 * 1024 * 1024);
+      governor.setTrackSize('track456', 5 * 1024 * 1024);
 
       const state = governor.getState();
       expect(state.isLargeTrack).toBe(false);
+    });
+    
+    it('should calculate bytesPerSecond when duration is provided', () => {
+      mockIOSNavigator();
+      const governor = new IosBufferGovernor();
+
+      // Set a 48MB track that's 600 seconds (10 minutes)
+      const sizeBytes = 48 * 1024 * 1024;
+      const duration = 600;
+      governor.setTrackSize('track789', sizeBytes, duration);
+
+      // bytesPerSecond should be sizeBytes / duration
+      const expectedBps = sizeBytes / duration;
+      
+      // Access internal state for verification
+      expect((governor as any).bytesPerSecond).toBeCloseTo(expectedBps, 0);
+    });
+    
+    it('should update bytesPerSecond when duration is set separately', () => {
+      mockIOSNavigator();
+      const governor = new IosBufferGovernor();
+
+      // Set track size first without duration
+      const sizeBytes = 48 * 1024 * 1024;
+      governor.setTrackSize('track999', sizeBytes);
+      
+      // bytesPerSecond should be 0 initially
+      expect((governor as any).bytesPerSecond).toBe(0);
+      
+      // Now set duration
+      const duration = 600;
+      governor.setTrackDuration(duration);
+      
+      // bytesPerSecond should now be calculated
+      const expectedBps = sizeBytes / duration;
+      expect((governor as any).bytesPerSecond).toBeCloseTo(expectedBps, 0);
     });
   });
 
@@ -140,7 +213,7 @@ describe('IosBufferGovernor', () => {
       governor._simulateBufferFailure();
       
       // Reset
-      governor.resetForNewTrack();
+      governor.resetForNewTrack('newTrack123');
 
       const state = governor.getState();
       expect(state.recovery.attempts).toBe(0);
@@ -152,11 +225,28 @@ describe('IosBufferGovernor', () => {
       mockIOSNavigator();
       const governor = new IosBufferGovernor();
 
-      governor.resetForNewTrack(45 * 1024 * 1024);
+      governor.resetForNewTrack('track456', 45 * 1024 * 1024);
 
       const state = governor.getState();
       expect(state.isLargeTrack).toBe(true);
       expect(state.estimatedTrackSizeBytes).toBe(45 * 1024 * 1024);
+    });
+    
+    it('should reset internal track-specific data', () => {
+      mockIOSNavigator();
+      const governor = new IosBufferGovernor();
+
+      // Set up some track data
+      governor.setTrackSize('oldTrack', 50 * 1024 * 1024, 600);
+      
+      // Reset for new track
+      governor.resetForNewTrack('newTrack');
+      
+      // Internal data should be reset
+      expect((governor as any).trackSizeBytes).toBe(0);
+      expect((governor as any).trackDuration).toBe(0);
+      expect((governor as any).bytesPerSecond).toBe(0);
+      expect((governor as any).currentTrackId).toBe('newTrack');
     });
   });
 
@@ -165,9 +255,10 @@ describe('IosBufferGovernor', () => {
       mockIOSNavigator();
       const governor = new IosBufferGovernor();
 
-      // Simulate high buffer state
-      governor.setTrackSize(50 * 1024 * 1024);
-      // Manually set high buffer (would normally come from audio element)
+      // Simulate high buffer state - set large track with high buffer
+      governor.setTrackSize('track123', 50 * 1024 * 1024, 600);
+      // Manually set high buffer estimate to trigger buffer failure classification
+      (governor as any).state.estimatedBufferedBytes = 15 * 1024 * 1024; // 15MB
       governor._forceActivate(true);
 
       const result = governor.handleError(null, 3); // networkState === 3
@@ -175,7 +266,7 @@ describe('IosBufferGovernor', () => {
       expect(result).toBe(true);
       
       const state = governor.getState();
-      expect(state.recovery.errorType).not.toBe(null);
+      expect(state.recovery.errorType).toBe('IOS_WEBKIT_BUFFER_FAILURE');
     });
 
     it('should NOT handle errors on non-iOS platforms', () => {
@@ -185,6 +276,19 @@ describe('IosBufferGovernor', () => {
       const result = governor.handleError(null, 3);
 
       expect(result).toBe(false);
+    });
+    
+    it('should classify NotSupportedError', () => {
+      mockIOSNavigator();
+      const governor = new IosBufferGovernor();
+
+      const notSupportedError = new Error('NotSupportedError: The operation is not supported');
+      const result = governor.handleError(notSupportedError, 2);
+
+      expect(result).toBe(true);
+      
+      const state = governor.getState();
+      expect(state.recovery.errorType).toBe('NOT_SUPPORTED_ERROR');
     });
   });
 
@@ -323,6 +427,64 @@ describe('IosBufferGovernor', () => {
       const governor2 = getIosBufferGovernor();
 
       expect(governor1).not.toBe(governor2);
+    });
+  });
+
+  describe('buffer monitoring', () => {
+    it('should update estimatedBufferedBytes using bytesPerSecond', () => {
+      mockIOSNavigator();
+      const governor = new IosBufferGovernor();
+
+      // Set up track with known size and duration
+      const sizeBytes = 48 * 1024 * 1024; // 48MB
+      const duration = 600; // 10 minutes
+      governor.setTrackSize('track123', sizeBytes, duration);
+      
+      // Simulate buffer at 60 seconds
+      const bufferedSeconds = 60;
+      governor.updateBufferedBytes(bufferedSeconds);
+      
+      // Expected: 60 * (48MB / 600) = 4.8MB
+      const expectedBytes = Math.floor(bufferedSeconds * (sizeBytes / duration));
+      
+      const state = governor.getState();
+      expect(state.estimatedBufferedBytes).toBe(expectedBytes);
+    });
+    
+    it('should trigger throttling when buffer approaches limit', () => {
+      mockIOSNavigator();
+      const governor = new IosBufferGovernor();
+
+      const mockThrottleStart = vi.fn();
+      governor.setCallbacks({ onThrottleStart: mockThrottleStart });
+
+      // Set up large track
+      const sizeBytes = 100 * 1024 * 1024; // 100MB
+      const duration = 600;
+      governor.setTrackSize('bigTrack', sizeBytes, duration);
+      
+      // Simulate buffer approaching 90% of limit
+      // With cellular limit of 12MB, we need to buffer ~10.8MB
+      // 10.8MB = bufferedSeconds * (100MB / 600)
+      // bufferedSeconds = 10.8 * 600 / 100 = 64.8 seconds
+      const bufferedSeconds = 70; // Should exceed 90%
+      governor.updateBufferedBytes(bufferedSeconds);
+      
+      const state = governor.getState();
+      expect(state.isThrottling).toBe(true);
+      expect(mockThrottleStart).toHaveBeenCalled();
+    });
+    
+    it('should NOT update buffer on non-iOS platforms', () => {
+      mockDesktopNavigator();
+      const governor = new IosBufferGovernor();
+
+      governor.setTrackSize('track', 50 * 1024 * 1024, 600);
+      governor.updateBufferedBytes(60);
+      
+      const state = governor.getState();
+      // Should remain 0 since governor is not active
+      expect(state.estimatedBufferedBytes).toBe(0);
     });
   });
 });
