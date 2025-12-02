@@ -14,7 +14,10 @@
  * - Comprehensive error categorization
  * - Dual audio element architecture for gapless playback
  * - MediaSession API for lock screen controls
+ * - iOS WebKit buffer management for cellular networks
  */
+
+import { getIosBufferManager, IosBufferManager } from './iosBufferManager';
 
 export type ErrorCategory = 'network' | 'decode' | 'auth' | 'cors' | 'timeout' | 'unknown';
 
@@ -223,6 +226,9 @@ export class EnterpriseAudioEngine {
     trackUrl: null,
   };
   private isIosWebKit: boolean;
+  
+  // iOS buffer manager for proactive cellular buffer management
+  private iosBufferManager: IosBufferManager;
 
   constructor(storageAdapter: StorageAdapter) {
     this.storageAdapter = storageAdapter;
@@ -233,6 +239,12 @@ export class EnterpriseAudioEngine {
     if (this.isIosWebKit) {
       console.log('[AUDIO ENGINE] iOS WebKit detected - network glitch recovery enabled');
     }
+    
+    // Initialize iOS buffer manager for proactive cellular buffer management
+    this.iosBufferManager = getIosBufferManager();
+    this.iosBufferManager.setRecoveryCallback(async (resumePosition: number) => {
+      return this.handleIosBufferRecovery(resumePosition);
+    });
 
     this.primaryAudio = this.createAudioElement();
     this.secondaryAudio = this.createAudioElement();
@@ -273,6 +285,9 @@ export class EnterpriseAudioEngine {
     audio.setAttribute('playsinline', 'true');
     audio.style.display = 'none';
     document.body.appendChild(audio);
+    
+    // Apply iOS cellular buffer configuration (may change preload to 'metadata')
+    this.iosBufferManager.configureAudioElement(audio);
 
     audio.addEventListener('canplaythrough', () => {
       this.metrics.error = null;
@@ -659,6 +674,64 @@ export class EnterpriseAudioEngine {
     this.metrics.iosRecoveryActive = false;
     this.metrics.iosRecoveryLastPosition = 0;
   }
+  
+  /**
+   * Handle proactive iOS buffer recovery requested by the buffer manager.
+   * This is called BEFORE an error occurs, when buffer health issues are detected.
+   */
+  private async handleIosBufferRecovery(resumePosition: number): Promise<boolean> {
+    if (!this.currentAudio.src || !this.isPlayingState) {
+      return false;
+    }
+    
+    const currentUrl = this.currentAudio.src;
+    
+    console.log('[iOS BUFFER RECOVERY] Proactive recovery requested, resuming at', resumePosition.toFixed(2) + 's');
+    
+    try {
+      // Re-set the source to force WebKit to drop and restart the connection
+      this.currentAudio.src = currentUrl;
+      this.currentAudio.load();
+      
+      // Wait for enough data to seek
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          cleanup();
+          reject(new Error('Recovery timeout'));
+        }, 10000);
+        
+        const onCanPlay = () => {
+          cleanup();
+          resolve();
+        };
+        
+        const onError = () => {
+          cleanup();
+          reject(new Error('Recovery load failed'));
+        };
+        
+        const cleanup = () => {
+          clearTimeout(timeout);
+          this.currentAudio.removeEventListener('canplay', onCanPlay);
+          this.currentAudio.removeEventListener('error', onError);
+        };
+        
+        this.currentAudio.addEventListener('canplay', onCanPlay, { once: true });
+        this.currentAudio.addEventListener('error', onError, { once: true });
+      });
+      
+      // Seek and play
+      this.currentAudio.currentTime = resumePosition;
+      await this.currentAudio.play();
+      
+      console.log('[iOS BUFFER RECOVERY] Successfully resumed at', resumePosition.toFixed(2) + 's');
+      return true;
+      
+    } catch (error) {
+      console.error('[iOS BUFFER RECOVERY] Failed:', error);
+      return false;
+    }
+  }
 
   private categorizeError(error: MediaError): { message: string; category: ErrorCategory } {
     let message = 'Unknown error';
@@ -960,6 +1033,9 @@ export class EnterpriseAudioEngine {
     
     // Reset iOS recovery state for new track
     this.resetIosRecoveryState();
+    
+    // Reset iOS buffer manager for new track
+    this.iosBufferManager.resetForNewTrack();
 
     if (this.abortController) {
       this.abortController.abort();
@@ -1218,6 +1294,9 @@ export class EnterpriseAudioEngine {
         this.metrics.playbackState = 'playing';
         this.updateMetrics();
         console.log('[DIAGNOSTIC] play() completed successfully');
+        
+        // Start iOS buffer monitoring for cellular networks
+        this.iosBufferManager.startMonitoring(this.currentAudio);
       } catch (error) {
         console.error('[DIAGNOSTIC] play() failed:', error);
         this.metrics.error = `Play failed: ${error}`;
@@ -1314,6 +1393,7 @@ export class EnterpriseAudioEngine {
     this.isPlayingState = false;
     this.metrics.playbackState = 'stopped';
     this.resetIosRecoveryState();
+    this.iosBufferManager.stopMonitoring();
     this.updateMetrics();
   }
 
@@ -1420,6 +1500,7 @@ export class EnterpriseAudioEngine {
     }
 
     this.stop();
+    this.iosBufferManager.destroy();
     this.primaryAudio.src = '';
     this.secondaryAudio.src = '';
     this.primaryAudio.load();
