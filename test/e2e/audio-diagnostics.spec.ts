@@ -1,5 +1,5 @@
 import { test, expect, Page } from "@playwright/test";
-import { login } from "./login";
+import { loginAsUser } from "../../tests/helpers/auth";
 
 /**
  * E2E tests for the Audio Engine Diagnostics panel
@@ -9,6 +9,9 @@ import { login } from "./login";
  * - Delivery source detection (HLS vs MP3)
  * - Health score display
  * - HLS-specific metrics when streaming
+ * 
+ * Uses the same test user account as other E2E tests.
+ * Set TEST_USER_EMAIL and TEST_USER_PASSWORD environment variables.
  */
 
 const TEST_USER_EMAIL = process.env.TEST_USER_EMAIL;
@@ -16,7 +19,7 @@ const TEST_USER_PASSWORD = process.env.TEST_USER_PASSWORD;
 const hasTestCredentials = TEST_USER_EMAIL && TEST_USER_PASSWORD;
 
 /**
- * Signs in as test user and navigates to channels
+ * Signs in as test user using shared auth helper
  */
 async function signInAndNavigate(page: Page): Promise<boolean> {
   if (!TEST_USER_EMAIL || !TEST_USER_PASSWORD) {
@@ -24,29 +27,10 @@ async function signInAndNavigate(page: Page): Promise<boolean> {
   }
 
   try {
-    await login(page);
+    // Use the shared loginAsUser helper (same as other E2E tests)
+    await loginAsUser(page);
     
-    const signInButton = page.locator("header").getByRole("button", { name: /sign in/i });
-    await signInButton.click();
-    
-    await page.getByLabel(/email/i).waitFor({ state: "visible", timeout: 5000 });
-    await page.getByLabel(/email/i).fill(TEST_USER_EMAIL);
-    await page.getByLabel(/password/i).fill(TEST_USER_PASSWORD);
-    await page.locator("form").getByRole("button", { name: /sign in/i }).click();
-    
-    await page.waitForTimeout(3000);
-    
-    // Navigate to Channels
-    const isMobileMenuVisible = await page.locator('[data-testid="mobile-menu-button"]').isVisible().catch(() => false);
-    
-    if (isMobileMenuVisible) {
-      await page.locator('[data-testid="mobile-menu-button"]').click();
-      await page.waitForTimeout(500);
-      await page.locator('[data-testid="mobile-nav-channels"]').click();
-    } else {
-      await page.getByRole("button", { name: /^channels$/i }).first().click({ force: true });
-    }
-    
+    // Wait for channels to be visible
     await page.locator('[data-channel-id]').first().waitFor({ state: "visible", timeout: 10000 });
     return true;
   } catch (error) {
