@@ -45,8 +45,9 @@ function getEngineType(): AudioEngineType {
     }
   } catch {}
   
-  // Default to auto (will use streaming on iOS, legacy elsewhere)
-  return 'auto';
+  // Default to streaming for all platforms (HLS with MP3 fallback)
+  // This provides better resilience, faster starts, and lower memory usage
+  return 'streaming';
 }
 
 /**
