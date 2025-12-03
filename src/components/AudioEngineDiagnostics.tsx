@@ -1,13 +1,16 @@
-import { X, Activity, Wifi, WifiOff, Radio, AlertCircle, CheckCircle, Clock, TrendingUp, Zap, Move, Link } from 'lucide-react';
+import { X, Activity, Wifi, WifiOff, Radio, AlertCircle, CheckCircle, Clock, TrendingUp, Zap, Move, Link, Layers, PlayCircle, Server, Gauge, Heart } from 'lucide-react';
 import { AudioMetrics } from '../lib/enterpriseAudioEngine';
+import type { AudioEngineType } from '../contexts/MusicPlayerContext';
 import { useState, useEffect, useRef } from 'react';
 
 type AudioEngineDiagnosticsProps = {
   metrics: AudioMetrics | null;
   onClose: () => void;
+  engineType?: AudioEngineType;
+  isStreamingEngine?: boolean;
 };
 
-export function AudioEngineDiagnostics({ metrics, onClose }: AudioEngineDiagnosticsProps) {
+export function AudioEngineDiagnostics({ metrics, onClose, engineType = 'auto', isStreamingEngine = false }: AudioEngineDiagnosticsProps) {
   const [, setTick] = useState(0);
   const [position, setPosition] = useState({ x: window.innerWidth - 920, y: 80 });
   const [isDragging, setIsDragging] = useState(false);
@@ -123,6 +126,87 @@ export function AudioEngineDiagnostics({ metrics, onClose }: AudioEngineDiagnost
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
+
+  const formatBitrate = (bps: number) => {
+    if (bps >= 1000000) return `${(bps / 1000000).toFixed(1)} Mbps`;
+    if (bps >= 1000) return `${Math.round(bps / 1000)} kbps`;
+    return `${bps} bps`;
+  };
+
+  // Determine delivery source from URL
+  const getDeliverySource = (url: string | null): { source: string; type: 'hls' | 'mp3' | 'unknown' } => {
+    if (!url) return { source: 'None', type: 'unknown' };
+    if (url.includes('.m3u8') || url.includes('audio-hls')) {
+      return { source: 'Supabase HLS', type: 'hls' };
+    }
+    if (url.includes('r2.dev') || url.includes('cloudflare')) {
+      return { source: 'Cloudflare CDN', type: 'mp3' };
+    }
+    if (url.includes('supabase')) {
+      return { source: 'Supabase Storage', type: 'mp3' };
+    }
+    return { source: 'Unknown', type: 'unknown' };
+  };
+
+  // Calculate overall health score (0-100)
+  const calculateHealthScore = (): { score: number; status: 'excellent' | 'good' | 'fair' | 'poor' } => {
+    if (!metrics) return { score: 0, status: 'poor' };
+    
+    let score = 100;
+    
+    // Deduct for failures
+    if (metrics.failureCount > 0) score -= Math.min(metrics.failureCount * 10, 30);
+    
+    // Deduct for stalls
+    if (metrics.stallCount > 0) score -= Math.min(metrics.stallCount * 5, 20);
+    
+    // Deduct for poor connection
+    if (metrics.connectionQuality === 'poor') score -= 20;
+    else if (metrics.connectionQuality === 'fair') score -= 10;
+    else if (metrics.connectionQuality === 'offline') score -= 50;
+    
+    // Deduct for circuit breaker state
+    if (metrics.circuitBreakerState === 'open') score -= 30;
+    else if (metrics.circuitBreakerState === 'half-open') score -= 15;
+    
+    // HLS-specific deductions
+    const hls = metrics.hls;
+    if (hls?.isHLSActive) {
+      // Buffer health
+      const bufferRatio = hls.bufferLength / hls.targetBuffer;
+      if (bufferRatio < 0.3) score -= 15;
+      else if (bufferRatio < 0.5) score -= 5;
+      
+      // Fragment failures
+      const totalFrags = hls.fragmentStats.loaded + hls.fragmentStats.failed;
+      if (totalFrags > 0) {
+        const failRate = hls.fragmentStats.failed / totalFrags;
+        if (failRate > 0.1) score -= 20;
+        else if (failRate > 0.05) score -= 10;
+      }
+    }
+    
+    score = Math.max(0, Math.min(100, score));
+    
+    if (score >= 90) return { score, status: 'excellent' };
+    if (score >= 70) return { score, status: 'good' };
+    if (score >= 50) return { score, status: 'fair' };
+    return { score, status: 'poor' };
+  };
+
+  const getHealthColor = (status: string) => {
+    switch (status) {
+      case 'excellent': return 'text-green-600 bg-green-50 border-green-200';
+      case 'good': return 'text-blue-600 bg-blue-50 border-blue-200';
+      case 'fair': return 'text-yellow-600 bg-yellow-50 border-yellow-200';
+      case 'poor': return 'text-red-600 bg-red-50 border-red-200';
+      default: return 'text-slate-600 bg-slate-50 border-slate-200';
+    }
+  };
+
+  const deliveryInfo = getDeliverySource(metrics?.currentTrackUrl || null);
+  const healthInfo = calculateHealthScore();
+  const hlsMetrics = metrics?.hls;
 
   const exportDiagnostics = () => {
     const data = JSON.stringify(metrics, null, 2);
@@ -422,6 +506,213 @@ export function AudioEngineDiagnostics({ metrics, onClose }: AudioEngineDiagnost
               <div className="flex items-center gap-4">
                 <span className="text-xs text-blue-700">Progress: <span className="font-bold text-blue-900">{Math.round(metrics.prefetchProgress)}%</span></span>
                 <span className="text-xs text-blue-700">Ready: <span className="font-bold text-blue-900">{metrics.prefetchReadyState}</span></span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Streaming Engine Section Header */}
+        <div className="col-span-3 border-t border-slate-200 pt-3 mt-1">
+          <div className="flex items-center gap-2 mb-3">
+            <Layers className="w-5 h-5 text-indigo-600" />
+            <h4 className="text-sm font-bold text-slate-900">Streaming Engine</h4>
+            {hlsMetrics?.isHLSActive && (
+              <span className="px-2 py-0.5 text-xs font-bold bg-indigo-100 text-indigo-700 rounded-full">
+                HLS ACTIVE
+              </span>
+            )}
+            {isStreamingEngine && !hlsMetrics?.isHLSActive && (
+              <span className="px-2 py-0.5 text-xs font-bold bg-amber-100 text-amber-700 rounded-full">
+                MP3 FALLBACK
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Row 8: Delivery Source Card */}
+        <div className="bg-indigo-50 rounded-xl p-3 border border-indigo-200">
+          <div className="flex items-center gap-2 mb-2">
+            <Server className="w-4 h-4 text-indigo-600" />
+            <span className="text-xs font-bold text-slate-700">Delivery Source</span>
+          </div>
+          <div className="space-y-1 text-xs">
+            <div className="flex justify-between">
+              <span className="text-slate-600">Engine:</span>
+              <span className={`font-bold ${isStreamingEngine ? 'text-indigo-600' : 'text-slate-600'}`}>
+                {isStreamingEngine ? 'Streaming' : 'Legacy'}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-600">Format:</span>
+              <span className={`font-bold ${deliveryInfo.type === 'hls' ? 'text-indigo-600' : deliveryInfo.type === 'mp3' ? 'text-blue-600' : 'text-slate-400'}`}>
+                {deliveryInfo.type === 'hls' ? 'HLS' : deliveryInfo.type === 'mp3' ? 'MP3' : 'None'}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-600">Source:</span>
+              <span className="font-bold text-slate-900 truncate max-w-[120px]" title={deliveryInfo.source}>
+                {deliveryInfo.source}
+              </span>
+            </div>
+            {hlsMetrics?.isHLSActive && (
+              <div className="flex justify-between">
+                <span className="text-slate-600">HLS Mode:</span>
+                <span className="font-bold text-indigo-600">
+                  {hlsMetrics.isNativeHLS ? 'Native (Safari)' : 'hls.js'}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Row 9: HLS Quality Card (only when HLS active) */}
+        {hlsMetrics?.isHLSActive ? (
+          <div className="bg-indigo-50 rounded-xl p-3 border border-indigo-200">
+            <div className="flex items-center gap-2 mb-2">
+              <Gauge className="w-4 h-4 text-indigo-600" />
+              <span className="text-xs font-bold text-slate-700">HLS Quality</span>
+            </div>
+            <div className="space-y-1 text-xs">
+              <div className="flex justify-between">
+                <span className="text-slate-600">Level:</span>
+                <span className="font-bold text-indigo-600">
+                  {hlsMetrics.currentLevel >= 0 ? `Level ${hlsMetrics.currentLevel}` : 'Auto'}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-600">Bandwidth:</span>
+                <span className="font-bold text-slate-900">
+                  {formatBitrate(hlsMetrics.bandwidthEstimate)}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-600">Levels:</span>
+                <span className="font-bold text-slate-600">
+                  {hlsMetrics.levels.length > 0 ? hlsMetrics.levels.length : '-'}
+                </span>
+              </div>
+              {hlsMetrics.levels.length > 0 && (
+                <div className="mt-1 pt-1 border-t border-indigo-200">
+                  <div className="text-slate-500 text-[10px]">
+                    {hlsMetrics.levels.map((l, i) => (
+                      <span key={i} className={`${i === hlsMetrics.currentLevel ? 'text-indigo-600 font-bold' : ''}`}>
+                        {formatBitrate(l.bitrate)}{i < hlsMetrics.levels.length - 1 ? ' • ' : ''}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
+            <div className="flex items-center gap-2 mb-2">
+              <Gauge className="w-4 h-4 text-slate-400" />
+              <span className="text-xs font-bold text-slate-400">HLS Quality</span>
+            </div>
+            <div className="text-xs text-slate-400 italic text-center py-2">
+              Not using HLS
+            </div>
+          </div>
+        )}
+
+        {/* Row 10: Health Summary Card */}
+        <div className={`rounded-xl p-3 border ${getHealthColor(healthInfo.status)}`}>
+          <div className="flex items-center gap-2 mb-2">
+            <Heart className="w-4 h-4" />
+            <span className="text-xs font-bold">Playback Health</span>
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-2xl font-bold">{healthInfo.score}</span>
+              <span className="text-xs font-bold uppercase">{healthInfo.status}</span>
+            </div>
+            <div className="w-full bg-white/50 rounded-full h-2">
+              <div
+                className={`h-full rounded-full transition-all ${
+                  healthInfo.status === 'excellent' ? 'bg-green-500' :
+                  healthInfo.status === 'good' ? 'bg-blue-500' :
+                  healthInfo.status === 'fair' ? 'bg-yellow-500' : 'bg-red-500'
+                }`}
+                style={{ width: `${healthInfo.score}%` }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Row 11: HLS Buffer Card (only when HLS active) */}
+        {hlsMetrics?.isHLSActive && (
+          <div className="col-span-3 bg-indigo-50 rounded-xl p-3 border border-indigo-200">
+            <div className="flex items-center gap-2 mb-2">
+              <Clock className="w-4 h-4 text-indigo-600" />
+              <span className="text-xs font-bold text-slate-700">HLS Buffer</span>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <div className="text-xs text-slate-600 mb-1">Buffer Length</div>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-lg font-bold text-indigo-600">
+                    {hlsMetrics.bufferLength.toFixed(1)}s
+                  </span>
+                  <span className="text-xs text-slate-500">/ {hlsMetrics.targetBuffer}s</span>
+                </div>
+                <div className="w-full bg-indigo-200 rounded-full h-1.5 mt-1">
+                  <div
+                    className={`h-full rounded-full transition-all ${
+                      hlsMetrics.bufferLength / hlsMetrics.targetBuffer > 0.5 ? 'bg-indigo-600' :
+                      hlsMetrics.bufferLength / hlsMetrics.targetBuffer > 0.25 ? 'bg-yellow-500' : 'bg-red-500'
+                    }`}
+                    style={{ width: `${Math.min((hlsMetrics.bufferLength / hlsMetrics.targetBuffer) * 100, 100)}%` }}
+                  />
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-slate-600 mb-1">Segments Buffered</div>
+                <span className="text-lg font-bold text-slate-900">{hlsMetrics.bufferedSegments}</span>
+              </div>
+              <div>
+                <div className="text-xs text-slate-600 mb-1">Latency</div>
+                <span className="text-lg font-bold text-slate-900">{Math.round(hlsMetrics.latency)}ms</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Row 12: HLS Fragment Stats (only when HLS active) */}
+        {hlsMetrics?.isHLSActive && (
+          <div className="col-span-3 bg-indigo-50 rounded-xl p-3 border border-indigo-200">
+            <div className="flex items-center gap-2 mb-2">
+              <PlayCircle className="w-4 h-4 text-indigo-600" />
+              <span className="text-xs font-bold text-slate-700">HLS Fragment Stats</span>
+            </div>
+            <div className="grid grid-cols-4 gap-4">
+              <div>
+                <div className="text-xs text-slate-600 mb-1">Loaded</div>
+                <span className="text-lg font-bold text-green-600">{hlsMetrics.fragmentStats.loaded}</span>
+              </div>
+              <div>
+                <div className="text-xs text-slate-600 mb-1">Failed</div>
+                <span className={`text-lg font-bold ${hlsMetrics.fragmentStats.failed > 0 ? 'text-red-600' : 'text-slate-400'}`}>
+                  {hlsMetrics.fragmentStats.failed}
+                </span>
+              </div>
+              <div>
+                <div className="text-xs text-slate-600 mb-1">Retried</div>
+                <span className={`text-lg font-bold ${hlsMetrics.fragmentStats.retried > 0 ? 'text-yellow-600' : 'text-slate-400'}`}>
+                  {hlsMetrics.fragmentStats.retried}
+                </span>
+              </div>
+              <div>
+                <div className="text-xs text-slate-600 mb-1">Success Rate</div>
+                {(() => {
+                  const total = hlsMetrics.fragmentStats.loaded + hlsMetrics.fragmentStats.failed;
+                  const rate = total > 0 ? ((hlsMetrics.fragmentStats.loaded / total) * 100).toFixed(1) : '100.0';
+                  return (
+                    <span className={`text-lg font-bold ${parseFloat(rate) >= 99 ? 'text-green-600' : parseFloat(rate) >= 95 ? 'text-yellow-600' : 'text-red-600'}`}>
+                      {rate}%
+                    </span>
+                  );
+                })()}
               </div>
             </div>
           </div>

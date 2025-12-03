@@ -18,7 +18,7 @@ import { useMusicPlayer } from './contexts/MusicPlayerContext';
 
 function AppContent() {
   const { user, profile, loading, signOut } = useAuth();
-  const { audioMetrics } = useMusicPlayer();
+  const { audioMetrics, engineType, isStreamingEngine } = useMusicPlayer();
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
   const [showAuth, setShowAuth] = useState(false);
   const [viewMode, setViewMode] = useState<'user' | 'admin'>('user');
@@ -294,7 +294,7 @@ function AppContent() {
           <SlotStrategyEditor channelId={channelId} energyTier={energyTier} />
           <NowPlayingFooter onOpenSlideshow={() => setShowSlideshow(true)} />
           {showSlideshow && <SlideshowOverlay onClose={() => setShowSlideshow(false)} />}
-          {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} />}
+          {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} engineType={engineType} isStreamingEngine={isStreamingEngine} />}
         </>
       );
     }
@@ -313,7 +313,7 @@ function AppContent() {
           />
           <NowPlayingFooter onOpenSlideshow={() => setShowSlideshow(true)} />
           {showSlideshow && <SlideshowOverlay onClose={() => setShowSlideshow(false)} />}
-          {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} />}
+          {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} engineType={engineType} isStreamingEngine={isStreamingEngine} />}
         </>
       );
     }
@@ -332,7 +332,7 @@ function AppContent() {
         />
         <NowPlayingFooter onOpenSlideshow={() => setShowSlideshow(true)} />
         {showSlideshow && <SlideshowOverlay onClose={() => setShowSlideshow(false)} />}
-        {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} />}
+        {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} engineType={engineType} isStreamingEngine={isStreamingEngine} />}
       </>
     );
   }
@@ -347,7 +347,7 @@ function AppContent() {
       <UserDashboard initialTab={initialTab} />
       <NowPlayingFooter onOpenSlideshow={() => setShowSlideshow(true)} />
       {showSlideshow && <SlideshowOverlay onClose={() => setShowSlideshow(false)} />}
-      {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} />}
+      {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} engineType={engineType} isStreamingEngine={isStreamingEngine} />}
     </>
   );
 }
