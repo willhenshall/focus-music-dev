@@ -184,10 +184,13 @@ Deno.serve(async (req: Request) => {
         }
 
         if (track.file_path) {
-          const audioPath = track.file_path;
-          const jsonPath = track.file_path.replace(/\.(mp3|wav|flac|m4a|ogg)$/i, ".json");
+          // file_path stores the full public URL, extract just the filename
+          // e.g., "https://xxx.supabase.co/storage/v1/object/public/audio-files/180232.mp3" -> "180232.mp3"
+          const audioPath = track.file_path.split('/').pop() || track.file_path;
+          const jsonPath = audioPath.replace(/\.(mp3|wav|flac|m4a|ogg)$/i, ".json");
 
-          const { error: audioDeleteError } = await supabase.storage
+          console.log(`Deleting audio file from Supabase Storage: ${audioPath}`);
+          const { data: audioDeleteData, error: audioDeleteError } = await supabase.storage
             .from("audio-files")
             .remove([audioPath]);
 
@@ -195,54 +198,62 @@ Deno.serve(async (req: Request) => {
             console.error(`Failed to delete audio file ${audioPath}:`, audioDeleteError);
             deletionResults.errors.push(`Audio file ${audioPath}: ${audioDeleteError.message}`);
           } else {
+            console.log(`Audio file deletion result:`, audioDeleteData);
             deletionResults.filesDeleted++;
           }
 
-          const { error: jsonDeleteError } = await supabase.storage
+          console.log(`Deleting JSON sidecar from Supabase Storage: ${jsonPath}`);
+          const { data: jsonDeleteData, error: jsonDeleteError } = await supabase.storage
             .from("audio-files")
             .remove([jsonPath]);
 
           if (jsonDeleteError) {
-            console.log(`JSON file ${jsonPath} not found or already deleted`);
+            console.log(`JSON file ${jsonPath} not found or already deleted:`, jsonDeleteError);
           } else {
+            console.log(`JSON file deletion result:`, jsonDeleteData);
             deletionResults.filesDeleted++;
           }
         }
 
         // Delete HLS files from Supabase Storage (audio-hls bucket)
+        // Convert trackId to string for storage path operations
+        const trackIdStr = String(trackId);
+        console.log(`Track HLS path: ${track.hls_path}, checking for HLS files...`);
+        
         if (track.hls_path) {
-          console.log(`Deleting HLS files for track ${trackId} from Supabase Storage...`);
+          console.log(`Deleting HLS files for track ${trackIdStr} from Supabase Storage...`);
           try {
             // List all HLS files for this track
             const { data: hlsFiles, error: listError } = await supabase.storage
               .from("audio-hls")
-              .list(trackId);
+              .list(trackIdStr);
 
             if (listError) {
-              console.error(`Failed to list HLS files for ${trackId}:`, listError);
-              deletionResults.errors.push(`HLS list error for ${trackId}: ${listError.message}`);
+              console.error(`Failed to list HLS files for ${trackIdStr}:`, listError);
+              deletionResults.errors.push(`HLS list error for ${trackIdStr}: ${listError.message}`);
             } else if (hlsFiles && hlsFiles.length > 0) {
               // Build array of file paths to delete
-              const hlsFilePaths = hlsFiles.map(f => `${trackId}/${f.name}`);
-              console.log(`Found ${hlsFilePaths.length} HLS files to delete for track ${trackId}`);
+              const hlsFilePaths = hlsFiles.map(f => `${trackIdStr}/${f.name}`);
+              console.log(`Found ${hlsFilePaths.length} HLS files to delete for track ${trackIdStr}:`, hlsFilePaths);
 
-              const { error: hlsDeleteError } = await supabase.storage
+              const { data: hlsDeleteData, error: hlsDeleteError } = await supabase.storage
                 .from("audio-hls")
                 .remove(hlsFilePaths);
 
               if (hlsDeleteError) {
-                console.error(`Failed to delete HLS files for ${trackId}:`, hlsDeleteError);
-                deletionResults.errors.push(`HLS delete error for ${trackId}: ${hlsDeleteError.message}`);
+                console.error(`Failed to delete HLS files for ${trackIdStr}:`, hlsDeleteError);
+                deletionResults.errors.push(`HLS delete error for ${trackIdStr}: ${hlsDeleteError.message}`);
               } else {
+                console.log(`HLS deletion result:`, hlsDeleteData);
                 deletionResults.hlsFilesDeleted += hlsFilePaths.length;
-                console.log(`Successfully deleted ${hlsFilePaths.length} HLS files for track ${trackId}`);
+                console.log(`Successfully deleted ${hlsFilePaths.length} HLS files for track ${trackIdStr}`);
               }
             } else {
-              console.log(`No HLS files found in Supabase Storage for track ${trackId}`);
+              console.log(`No HLS files found in Supabase Storage for track ${trackIdStr}`);
             }
           } catch (hlsError: any) {
-            console.error(`HLS deletion error for ${trackId}:`, hlsError);
-            deletionResults.errors.push(`HLS deletion for ${trackId}: ${hlsError.message}`);
+            console.error(`HLS deletion error for ${trackIdStr}:`, hlsError);
+            deletionResults.errors.push(`HLS deletion for ${trackIdStr}: ${hlsError.message}`);
           }
         }
 
