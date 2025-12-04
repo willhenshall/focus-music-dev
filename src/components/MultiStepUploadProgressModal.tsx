@@ -1,24 +1,29 @@
-import { CheckCircle2, Loader, AlertCircle, Upload, FileJson, Database, Cloud, ChevronDown, ChevronUp } from 'lucide-react';
+import { CheckCircle2, Loader, AlertCircle, Upload, FileJson, Database, Cloud, ChevronDown, ChevronUp, Radio } from 'lucide-react';
 import { useState } from 'react';
 
-export type UploadStep = 'storage' | 'sidecar' | 'database' | 'cdn';
-export type StepStatus = 'pending' | 'in-progress' | 'completed' | 'failed';
+export type UploadStep = 'storage' | 'sidecar' | 'database' | 'cdn' | 'hls-storage' | 'hls-cdn';
+export type StepStatus = 'pending' | 'in-progress' | 'completed' | 'failed' | 'skipped';
 
 export interface TrackUploadProgress {
   trackId: string;
   trackName: string;
   currentStep: UploadStep;
+  hasHLS: boolean; // Whether this track has HLS files to upload
   steps: {
     storage: StepStatus;
     sidecar: StepStatus;
     database: StepStatus;
     cdn: StepStatus;
+    'hls-storage': StepStatus;
+    'hls-cdn': StepStatus;
   };
   stepProgress?: {
     storage?: number;
     sidecar?: number;
     database?: number;
     cdn?: number;
+    'hls-storage'?: number;
+    'hls-cdn'?: number;
   };
   error?: string;
 }
@@ -38,7 +43,7 @@ interface MultiStepUploadProgressModalProps {
 
 const STEP_CONFIG: Record<UploadStep, { label: string; icon: any; description: string }> = {
   storage: {
-    label: 'Upload to Supabase Storage',
+    label: 'Upload MP3 to Storage',
     icon: Upload,
     description: 'Uploading audio file to cloud storage',
   },
@@ -53,33 +58,59 @@ const STEP_CONFIG: Record<UploadStep, { label: string; icon: any; description: s
     description: 'Storing track metadata in database',
   },
   cdn: {
-    label: 'Sync to CDN',
+    label: 'Sync MP3 to CDN',
     icon: Cloud,
-    description: 'Syncing to content delivery network',
+    description: 'Syncing MP3 to content delivery network',
+  },
+  'hls-storage': {
+    label: 'Upload HLS to Storage',
+    icon: Radio,
+    description: 'Uploading HLS streaming files',
+  },
+  'hls-cdn': {
+    label: 'Sync HLS to CDN',
+    icon: Radio,
+    description: 'Syncing HLS files to CDN',
   },
 };
 
-const STEP_ORDER: UploadStep[] = ['storage', 'sidecar', 'database', 'cdn'];
+const STEP_ORDER: UploadStep[] = ['storage', 'sidecar', 'database', 'cdn', 'hls-storage', 'hls-cdn'];
 
 export function MultiStepUploadProgressModal({ progress, onClose }: MultiStepUploadProgressModalProps) {
   const [showAllTracks, setShowAllTracks] = useState(false);
   const tracks = Array.from(progress.tracks.values());
   const currentTrack = tracks[progress.currentTrackIndex];
-  const completedTracks = tracks.filter(t => t.steps.cdn === 'completed').length;
+  
+  // A track is complete when its final step is done (hls-cdn if has HLS, cdn otherwise)
+  const isTrackComplete = (track: TrackUploadProgress) => {
+    if (track.hasHLS) {
+      return track.steps['hls-cdn'] === 'completed';
+    }
+    return track.steps.cdn === 'completed';
+  };
+  
+  const completedTracks = tracks.filter(isTrackComplete).length;
   const failedTracks = tracks.filter(t =>
     Object.values(t.steps).some(status => status === 'failed')
   ).length;
 
   // Calculate overall progress based on all steps across all tracks, including in-progress percentages
-  const totalSteps = progress.totalTracks * 4; // 4 steps per track
+  // Each track has 4 base steps + 2 HLS steps if HLS is included
+  const totalSteps = tracks.reduce((sum, track) => sum + (track.hasHLS ? 6 : 4), 0);
   const completedSteps = tracks.reduce((sum, track) => {
     let trackProgress = 0;
-    Object.entries(track.steps).forEach(([step, status]) => {
+    const stepsToCount = track.hasHLS 
+      ? STEP_ORDER 
+      : STEP_ORDER.filter(s => !s.startsWith('hls'));
+    
+    stepsToCount.forEach((step) => {
+      const status = track.steps[step];
       if (status === 'completed') {
         trackProgress += 1;
+      } else if (status === 'skipped') {
+        trackProgress += 1; // Count skipped as complete for progress
       } else if (status === 'in-progress' && track.stepProgress) {
-        const stepKey = step as UploadStep;
-        const percentage = track.stepProgress[stepKey] || 0;
+        const percentage = track.stepProgress[step] || 0;
         trackProgress += percentage / 100;
       }
     });
@@ -98,6 +129,8 @@ export function MultiStepUploadProgressModal({ progress, onClose }: MultiStepUpl
         return <AlertCircle className="w-4 h-4 text-red-600" />;
       case 'in-progress':
         return <Loader className="w-4 h-4 text-blue-600 animate-spin" />;
+      case 'skipped':
+        return <div className="w-4 h-4 rounded-full border-2 border-slate-400 bg-slate-200" />;
       default:
         return <div className="w-4 h-4 rounded-full border-2 border-slate-300" />;
     }
@@ -111,6 +144,8 @@ export function MultiStepUploadProgressModal({ progress, onClose }: MultiStepUpl
         return 'bg-red-50 border-red-200';
       case 'in-progress':
         return 'bg-blue-50 border-blue-200';
+      case 'skipped':
+        return 'bg-slate-100 border-slate-300';
       default:
         return 'bg-slate-50 border-slate-200';
     }
@@ -179,9 +214,11 @@ export function MultiStepUploadProgressModal({ progress, onClose }: MultiStepUpl
                 <p className="text-xs text-slate-500">Track ID: {currentTrack.trackId}</p>
               </div>
 
-              {/* Compact 2x2 Grid for Steps */}
-              <div className="grid grid-cols-2 gap-2">
-                {STEP_ORDER.map((stepKey, index) => {
+              {/* Dynamic Grid for Steps - shows 4 or 6 steps based on HLS */}
+              <div className={`grid gap-2 ${currentTrack.hasHLS ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                {STEP_ORDER
+                  .filter(stepKey => currentTrack.hasHLS || !stepKey.startsWith('hls'))
+                  .map((stepKey, index) => {
                   const step = STEP_CONFIG[stepKey];
                   const status = currentTrack.steps[stepKey];
                   const StepIcon = step.icon;
@@ -207,11 +244,12 @@ export function MultiStepUploadProgressModal({ progress, onClose }: MultiStepUpl
                               {status === 'pending' && 'Waiting...'}
                               {status === 'in-progress' && (
                                 currentTrack.stepProgress?.[stepKey]
-                                  ? `${Math.round(currentTrack.stepProgress[stepKey])}%`
+                                  ? `${Math.round(currentTrack.stepProgress[stepKey]!)}%`
                                   : 'In progress...'
                               )}
                               {status === 'completed' && 'Completed'}
                               {status === 'failed' && 'Failed'}
+                              {status === 'skipped' && 'Skipped'}
                             </span>
                           </div>
                           {status === 'in-progress' && currentTrack.stepProgress?.[stepKey] && (
@@ -245,7 +283,7 @@ export function MultiStepUploadProgressModal({ progress, onClose }: MultiStepUpl
               </h4>
               <div className="space-y-1.5">
                 {displayedTracks.map((track, index) => {
-                  const isComplete = track.steps.cdn === 'completed';
+                  const isComplete = isTrackComplete(track);
                   const hasFailed = Object.values(track.steps).some(s => s === 'failed');
                   const isCurrent = index === progress.currentTrackIndex;
 
