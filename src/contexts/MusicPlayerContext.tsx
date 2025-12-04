@@ -471,8 +471,34 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       // Not at end of playlist, move to next track
       setCurrentTrackIndex(prev => prev + 1);
     } else {
-      // At end of playlist - restart from beginning
-      setCurrentTrackIndex(0);
+      // At end of playlist - restart from beginning (including single-track playlists)
+      // Clear lastLoadedTrackId to allow the same track to reload
+      lastLoadedTrackId.current = null;
+      
+      if (playlist.length === 1) {
+        // Single-track playlist: force reload by triggering the loadAndPlay effect
+        // Since setCurrentTrackIndex(0) won't change state (already 0), we need to
+        // manually trigger the track load
+        const track = playlist[0];
+        if (track && audioEngine) {
+          isLoadingTrack.current = true;
+          playbackSessionIdRef.current += 1;
+          
+          audioEngine.loadTrack(track.track_id, track.file_path, {
+            trackName: track.track_name,
+            artistName: track.artist_name,
+          }).then(() => {
+            lastLoadedTrackId.current = track.metadata?.track_id?.toString() || null;
+            if (isPlaying) {
+              audioEngine.play();
+            }
+          }).finally(() => {
+            isLoadingTrack.current = false;
+          });
+        }
+      } else {
+        setCurrentTrackIndex(0);
+      }
     }
   };
 
@@ -1226,6 +1252,25 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
     if (currentTrackIndex < playlist.length - 1) {
       setCurrentTrackIndex(prev => prev + 1);
+    } else if (playlist.length === 1) {
+      // Single-track playlist: manually reload the track since setCurrentTrackIndex(0) won't change state
+      const track = playlist[0];
+      if (track && audioEngine) {
+        isLoadingTrack.current = true;
+        playbackSessionIdRef.current += 1;
+        
+        audioEngine.loadTrack(track.track_id, track.file_path, {
+          trackName: track.track_name,
+          artistName: track.artist_name,
+        }).then(() => {
+          lastLoadedTrackId.current = track.metadata?.track_id?.toString() || null;
+          if (isPlaying) {
+            audioEngine.play();
+          }
+        }).finally(() => {
+          isLoadingTrack.current = false;
+        });
+      }
     } else {
       setCurrentTrackIndex(0);
     }
