@@ -10,7 +10,7 @@ const corsHeaders = {
 
 interface SyncRequest {
   trackId: string;
-  operation: 'upload' | 'delete';
+  operation: 'upload' | 'delete' | 'upload-hls';
   filePath?: string;
   sidecarPath?: string;
   // Optional: provide track data directly to avoid database lookup
@@ -29,6 +29,7 @@ const R2_CONFIG = {
   publicUrl: "https://pub-16f9274cf01948468de2d5af8a6fdb23.r2.dev",
   audioPath: "audio",
   metadataPath: "metadata",
+  hlsPath: "hls",
 };
 
 Deno.serve(async (req: Request) => {
@@ -260,6 +261,107 @@ Deno.serve(async (req: Request) => {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         }
       );
+
+    } else if (operation === 'upload-hls') {
+      // Upload HLS files from Supabase Storage to R2 CDN
+      console.log(`Starting HLS sync for track ${trackId}`);
+
+      // List all HLS files for this track in Supabase Storage
+      const { data: hlsFiles, error: listError } = await supabase.storage
+        .from('audio-hls')
+        .list(trackId);
+
+      if (listError) {
+        return new Response(
+          JSON.stringify({ error: "Failed to list HLS files", details: listError }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      if (!hlsFiles || hlsFiles.length === 0) {
+        return new Response(
+          JSON.stringify({ error: "No HLS files found for track" }),
+          {
+            status: 404,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      console.log(`Found ${hlsFiles.length} HLS files to sync`);
+
+      let uploadedCount = 0;
+      let failedCount = 0;
+      const errors: string[] = [];
+
+      // Upload each HLS file to R2
+      for (const file of hlsFiles) {
+        const filePath = `${trackId}/${file.name}`;
+        
+        // Download from Supabase
+        const { data: fileData, error: downloadError } = await supabase.storage
+          .from('audio-hls')
+          .download(filePath);
+
+        if (downloadError || !fileData) {
+          console.error(`Failed to download HLS file ${filePath}:`, downloadError);
+          errors.push(`Failed to download ${file.name}`);
+          failedCount++;
+          continue;
+        }
+
+        // Upload to R2
+        try {
+          await uploadHLSFileToCDN(trackId, file.name, fileData);
+          uploadedCount++;
+        } catch (uploadError: any) {
+          console.error(`Failed to upload HLS file ${file.name}:`, uploadError);
+          errors.push(`Failed to upload ${file.name}: ${uploadError.message}`);
+          failedCount++;
+        }
+      }
+
+      const segmentCount = hlsFiles.filter(f => f.name.endsWith('.ts')).length;
+      const hlsCdnUrl = `${R2_CONFIG.publicUrl}/${R2_CONFIG.hlsPath}/${trackId}/master.m3u8`;
+      const timestamp = new Date().toISOString();
+
+      // Update database with HLS info
+      const { error: updateError } = await supabase
+        .from('audio_tracks')
+        .update({
+          hls_path: `${trackId}/master.m3u8`,
+          hls_cdn_url: hlsCdnUrl,
+          hls_segment_count: segmentCount,
+          hls_transcoded_at: timestamp,
+        })
+        .eq('track_id', trackId);
+
+      if (updateError) {
+        console.error('Failed to update database with HLS info:', updateError);
+      }
+
+      const success = failedCount === 0;
+      return new Response(
+        JSON.stringify({
+          success,
+          message: success 
+            ? `HLS files synced to CDN successfully` 
+            : `HLS sync partially failed: ${failedCount} files failed`,
+          hls_cdn_url: hlsCdnUrl,
+          uploaded_count: uploadedCount,
+          failed_count: failedCount,
+          segment_count: segmentCount,
+          errors: errors.length > 0 ? errors : undefined,
+          timestamp,
+        }),
+        {
+          status: success ? 200 : 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
     }
 
     return new Response(
@@ -402,4 +504,31 @@ async function deleteMetadataFromCDN(fileName: string): Promise<boolean> {
     });
     return false;
   }
+}
+
+async function uploadHLSFileToCDN(trackId: string, fileName: string, fileData: Blob): Promise<string> {
+  const s3Client = getS3Client();
+  const key = `${R2_CONFIG.hlsPath}/${trackId}/${fileName}`;
+
+  const arrayBuffer = await fileData.arrayBuffer();
+  const buffer = new Uint8Array(arrayBuffer);
+
+  // Determine content type based on file extension
+  const contentType = fileName.endsWith('.m3u8') 
+    ? 'application/vnd.apple.mpegurl' 
+    : 'video/mp2t';
+
+  const command = new PutObjectCommand({
+    Bucket: R2_CONFIG.bucketName,
+    Key: key,
+    Body: buffer,
+    ContentType: contentType,
+  });
+
+  await s3Client.send(command);
+
+  const cdnUrl = `${R2_CONFIG.publicUrl}/${key}`;
+  console.log(`Uploaded HLS file to CDN: ${cdnUrl}`);
+
+  return cdnUrl;
 }
