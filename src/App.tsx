@@ -18,7 +18,7 @@ import { useMusicPlayer } from './contexts/MusicPlayerContext';
 
 function AppContent() {
   const { user, profile, loading, signOut } = useAuth();
-  const { audioMetrics, engineType, isStreamingEngine } = useMusicPlayer();
+  const { audioMetrics, engineType, isStreamingEngine, currentTrack, playlist, currentTrackIndex } = useMusicPlayer();
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
   const [showAuth, setShowAuth] = useState(false);
   const [viewMode, setViewMode] = useState<'user' | 'admin'>('user');
@@ -294,7 +294,7 @@ function AppContent() {
           <SlotStrategyEditor channelId={channelId} energyTier={energyTier} />
           <NowPlayingFooter onOpenSlideshow={() => setShowSlideshow(true)} />
           {showSlideshow && <SlideshowOverlay onClose={() => setShowSlideshow(false)} />}
-          {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} engineType={engineType} isStreamingEngine={isStreamingEngine} />}
+          {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} engineType={engineType} isStreamingEngine={isStreamingEngine} currentTrackInfo={{ trackName: currentTrack?.track_name, artistName: currentTrack?.artist_name }} prefetchTrackInfo={{ trackName: playlist[currentTrackIndex + 1]?.track_name, artistName: playlist[currentTrackIndex + 1]?.artist_name }} />}
         </>
       );
     }
@@ -313,7 +313,7 @@ function AppContent() {
           />
           <NowPlayingFooter onOpenSlideshow={() => setShowSlideshow(true)} />
           {showSlideshow && <SlideshowOverlay onClose={() => setShowSlideshow(false)} />}
-          {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} engineType={engineType} isStreamingEngine={isStreamingEngine} />}
+          {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} engineType={engineType} isStreamingEngine={isStreamingEngine} currentTrackInfo={{ trackName: currentTrack?.track_name, artistName: currentTrack?.artist_name }} prefetchTrackInfo={{ trackName: playlist[currentTrackIndex + 1]?.track_name, artistName: playlist[currentTrackIndex + 1]?.artist_name }} />}
         </>
       );
     }
@@ -332,7 +332,7 @@ function AppContent() {
         />
         <NowPlayingFooter onOpenSlideshow={() => setShowSlideshow(true)} />
         {showSlideshow && <SlideshowOverlay onClose={() => setShowSlideshow(false)} />}
-        {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} engineType={engineType} isStreamingEngine={isStreamingEngine} />}
+        {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} engineType={engineType} isStreamingEngine={isStreamingEngine} currentTrackInfo={{ trackName: currentTrack?.track_name, artistName: currentTrack?.artist_name }} prefetchTrackInfo={{ trackName: playlist[currentTrackIndex + 1]?.track_name, artistName: playlist[currentTrackIndex + 1]?.artist_name }} />}
       </>
     );
   }
@@ -347,7 +347,7 @@ function AppContent() {
       <UserDashboard initialTab={initialTab} />
       <NowPlayingFooter onOpenSlideshow={() => setShowSlideshow(true)} />
       {showSlideshow && <SlideshowOverlay onClose={() => setShowSlideshow(false)} />}
-      {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} engineType={engineType} isStreamingEngine={isStreamingEngine} />}
+      {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} engineType={engineType} isStreamingEngine={isStreamingEngine} currentTrackInfo={{ trackName: currentTrack?.track_name, artistName: currentTrack?.artist_name }} prefetchTrackInfo={{ trackName: playlist[currentTrackIndex + 1]?.track_name, artistName: playlist[currentTrackIndex + 1]?.artist_name }} />}
     </>
   );
 }

@@ -1,16 +1,23 @@
-import { X, Activity, Radio, AlertCircle, CheckCircle, Clock, TrendingUp, Zap, Move, Link, Layers, PlayCircle, Server, Gauge, Heart, Copy, Check } from 'lucide-react';
+import { X, Activity, Radio, AlertCircle, CheckCircle, Clock, TrendingUp, Zap, Move, Link, Layers, PlayCircle, Server, Gauge, Heart, Copy, Check, Music } from 'lucide-react';
 import type { AudioMetrics } from '../lib/types/audioEngine';
 import type { AudioEngineType } from '../contexts/MusicPlayerContext';
 import { useState, useEffect, useRef } from 'react';
+
+type TrackInfo = {
+  trackName?: string | null;
+  artistName?: string | null;
+};
 
 type AudioEngineDiagnosticsProps = {
   metrics: AudioMetrics | null;
   onClose: () => void;
   engineType?: AudioEngineType;
   isStreamingEngine?: boolean;
+  currentTrackInfo?: TrackInfo;
+  prefetchTrackInfo?: TrackInfo;
 };
 
-export function AudioEngineDiagnostics({ metrics, onClose, engineType: _engineType = 'auto', isStreamingEngine = false }: AudioEngineDiagnosticsProps) {
+export function AudioEngineDiagnostics({ metrics, onClose, engineType: _engineType = 'auto', isStreamingEngine = false, currentTrackInfo, prefetchTrackInfo }: AudioEngineDiagnosticsProps) {
   const [, setTick] = useState(0);
   const [position, setPosition] = useState({ x: window.innerWidth - 980, y: 60 });
   const [isDragging, setIsDragging] = useState(false);
@@ -427,49 +434,82 @@ export function AudioEngineDiagnostics({ metrics, onClose, engineType: _engineTy
           </div>
         </div>
 
-        {/* URLs Section - single-line with copy */}
+        {/* URLs Section - with track info */}
         <div className="mt-2.5 bg-slate-50 rounded-lg p-2.5 border border-slate-200">
           <div className="flex items-center gap-1.5 mb-2">
             <Link className="w-4 h-4 text-slate-600" />
             <span className="text-[11px] font-bold text-slate-600 uppercase">Audio URLs</span>
           </div>
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] text-slate-500 w-16 flex-shrink-0">Current:</span>
-              {metrics.currentTrackUrl ? (
-                <>
+          <div className="space-y-2">
+            {/* Current Track */}
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-slate-500 w-16 flex-shrink-0">Current:</span>
+                {currentTrackInfo?.trackName ? (
+                  <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                    <Music className="w-3.5 h-3.5 text-green-600 flex-shrink-0" />
+                    <span className="text-[12px] font-semibold text-slate-900 truncate">{currentTrackInfo.trackName}</span>
+                    {currentTrackInfo.artistName && (
+                      <>
+                        <span className="text-[11px] text-slate-400">·</span>
+                        <span className="text-[11px] text-slate-600 truncate">{currentTrackInfo.artistName}</span>
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <span className="text-[11px] text-slate-400 italic">No track info</span>
+                )}
+              </div>
+              {metrics.currentTrackUrl && (
+                <div className="flex items-center gap-2 ml-[72px]">
                   <div className="flex-1 bg-white border border-slate-200 rounded px-2 py-1 overflow-hidden">
-                    <span className="text-[11px] font-mono text-slate-700 truncate block">{metrics.currentTrackUrl}</span>
+                    <span className="text-[10px] font-mono text-slate-500 truncate block">{metrics.currentTrackUrl}</span>
                   </div>
                   <button
                     onClick={() => copyToClipboard(metrics.currentTrackUrl!, 'current')}
-                    className="p-1.5 hover:bg-slate-200 rounded transition-colors flex-shrink-0"
+                    className="p-1 hover:bg-slate-200 rounded transition-colors flex-shrink-0"
                     title="Copy URL"
                   >
-                    {copiedUrl === 'current' ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4 text-slate-400" />}
+                    {copiedUrl === 'current' ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
                   </button>
-                </>
-              ) : (
-                <span className="text-[11px] text-slate-400 italic">No track loaded</span>
+                </div>
               )}
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] text-slate-500 w-16 flex-shrink-0">Prefetch:</span>
-              {metrics.prefetchedTrackUrl ? (
-                <>
+
+            {/* Prefetch Track */}
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-slate-500 w-16 flex-shrink-0">Prefetch:</span>
+                {prefetchTrackInfo?.trackName ? (
+                  <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                    <Music className="w-3.5 h-3.5 text-blue-600 flex-shrink-0" />
+                    <span className="text-[12px] font-semibold text-slate-900 truncate">{prefetchTrackInfo.trackName}</span>
+                    {prefetchTrackInfo.artistName && (
+                      <>
+                        <span className="text-[11px] text-slate-400">·</span>
+                        <span className="text-[11px] text-slate-600 truncate">{prefetchTrackInfo.artistName}</span>
+                      </>
+                    )}
+                  </div>
+                ) : metrics.prefetchedTrackUrl ? (
+                  <span className="text-[11px] text-slate-400 italic">Loading...</span>
+                ) : (
+                  <span className="text-[11px] text-slate-400 italic">No prefetch active</span>
+                )}
+              </div>
+              {metrics.prefetchedTrackUrl && (
+                <div className="flex items-center gap-2 ml-[72px]">
                   <div className="flex-1 bg-blue-50 border border-blue-200 rounded px-2 py-1 overflow-hidden">
-                    <span className="text-[11px] font-mono text-slate-700 truncate block">{metrics.prefetchedTrackUrl}</span>
+                    <span className="text-[10px] font-mono text-slate-500 truncate block">{metrics.prefetchedTrackUrl}</span>
                   </div>
                   <button
                     onClick={() => copyToClipboard(metrics.prefetchedTrackUrl!, 'prefetch')}
-                    className="p-1.5 hover:bg-slate-200 rounded transition-colors flex-shrink-0"
+                    className="p-1 hover:bg-slate-200 rounded transition-colors flex-shrink-0"
                     title="Copy URL"
                   >
-                    {copiedUrl === 'prefetch' ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4 text-slate-400" />}
+                    {copiedUrl === 'prefetch' ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
                   </button>
-                </>
-              ) : (
-                <span className="text-[11px] text-slate-400 italic">No prefetch active</span>
+                </div>
               )}
             </div>
           </div>
