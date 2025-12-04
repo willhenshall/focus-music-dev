@@ -1,5 +1,5 @@
-import { CheckCircle2, Loader, AlertCircle, Upload, FileJson, Database, Cloud, ChevronDown, ChevronUp, Radio } from 'lucide-react';
-import { useState } from 'react';
+import { CheckCircle2, Loader, AlertCircle, Upload, FileJson, Database, Cloud, ChevronDown, ChevronUp, Radio, Terminal } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
 
 export type UploadStep = 'storage' | 'sidecar' | 'database' | 'cdn' | 'transcoding' | 'hls-storage' | 'hls-cdn';
 export type StepStatus = 'pending' | 'in-progress' | 'completed' | 'failed' | 'skipped';
@@ -30,12 +30,20 @@ export interface TrackUploadProgress {
   error?: string;
 }
 
+export interface UploadLogEntry {
+  timestamp: Date;
+  type: 'info' | 'success' | 'error' | 'warning';
+  message: string;
+  trackId?: string;
+}
+
 export interface MultiStepUploadProgress {
   totalTracks: number;
   currentTrackIndex: number;
   tracks: Map<string, TrackUploadProgress>;
   isComplete: boolean;
   hasErrors: boolean;
+  logs: UploadLogEntry[];
 }
 
 interface MultiStepUploadProgressModalProps {
@@ -85,8 +93,18 @@ const STEP_ORDER: UploadStep[] = ['storage', 'sidecar', 'database', 'cdn', 'tran
 
 export function MultiStepUploadProgressModal({ progress, onClose }: MultiStepUploadProgressModalProps) {
   const [showAllTracks, setShowAllTracks] = useState(false);
+  const [showLogs, setShowLogs] = useState(true);
+  const logEndRef = useRef<HTMLDivElement>(null);
   const tracks = Array.from(progress.tracks.values());
   const currentTrack = tracks[progress.currentTrackIndex];
+  const logs = progress.logs || [];
+
+  // Auto-scroll logs to bottom when new entries arrive
+  useEffect(() => {
+    if (showLogs && logEndRef.current) {
+      logEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [logs.length, showLogs]);
   
   // A track is complete when its final step is done (hls-cdn if has HLS, cdn otherwise)
   const isTrackComplete = (track: TrackUploadProgress) => {
@@ -344,6 +362,54 @@ export function MultiStepUploadProgressModal({ progress, onClose }: MultiStepUpl
               )}
             </div>
           )}
+
+          {/* Activity Log Panel */}
+          <div className="mt-4">
+            <button
+              onClick={() => setShowLogs(!showLogs)}
+              className="w-full flex items-center justify-between px-3 py-2 bg-slate-800 hover:bg-slate-700 rounded-t-lg transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <Terminal className="w-4 h-4 text-slate-400" />
+                <span className="text-xs font-medium text-slate-200">Activity Log</span>
+                <span className="text-xs text-slate-500">({logs.length} entries)</span>
+              </div>
+              {showLogs ? (
+                <ChevronDown className="w-4 h-4 text-slate-400" />
+              ) : (
+                <ChevronUp className="w-4 h-4 text-slate-400" />
+              )}
+            </button>
+            {showLogs && (
+              <div className="bg-slate-900 rounded-b-lg p-3 max-h-32 overflow-y-auto font-mono text-xs">
+                {logs.length === 0 ? (
+                  <p className="text-slate-500 italic">Waiting for activity...</p>
+                ) : (
+                  <div className="space-y-1">
+                    {logs.map((log, idx) => (
+                      <div key={idx} className="flex gap-2">
+                        <span className="text-slate-500 flex-shrink-0">
+                          {log.timestamp.toLocaleTimeString('en-US', { hour12: false })}
+                        </span>
+                        <span className={`flex-shrink-0 ${
+                          log.type === 'success' ? 'text-green-400' :
+                          log.type === 'error' ? 'text-red-400' :
+                          log.type === 'warning' ? 'text-amber-400' :
+                          'text-blue-400'
+                        }`}>
+                          {log.type === 'success' ? '✓' :
+                           log.type === 'error' ? '✗' :
+                           log.type === 'warning' ? '⚠' : '→'}
+                        </span>
+                        <span className="text-slate-300">{log.message}</span>
+                      </div>
+                    ))}
+                    <div ref={logEndRef} />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Compact Footer */}

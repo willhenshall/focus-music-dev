@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { X, Upload, Loader, AlertCircle } from 'lucide-react';
 import { supabase, AudioChannel } from '../lib/supabase';
 import { TrackUploadConfirmationModal } from './TrackUploadConfirmationModal';
-import { MultiStepUploadProgressModal, MultiStepUploadProgress, TrackUploadProgress, UploadStep, StepStatus } from './MultiStepUploadProgressModal';
+import { MultiStepUploadProgressModal, MultiStepUploadProgress, TrackUploadProgress, UploadStep, StepStatus, UploadLogEntry } from './MultiStepUploadProgressModal';
 import { useCDNSync } from '../hooks/useCDNSync';
 
 // HLS Transcoder service URL - can be configured via environment variable
@@ -233,6 +233,18 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
       tracks,
       isComplete: false,
       hasErrors: false,
+      logs: [{ timestamp: new Date(), type: 'info', message: `Starting upload of ${trackCount} track${trackCount > 1 ? 's' : ''}...` }],
+    });
+  };
+
+  // Helper function to add log entry
+  const addLogEntry = (type: UploadLogEntry['type'], message: string, trackId?: string) => {
+    setMultiStepProgress(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        logs: [...prev.logs, { timestamp: new Date(), type, message, trackId }],
+      };
     });
   };
 
@@ -633,26 +645,36 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
         for (let i = 0; i < audioFiles.length; i++) {
           const tempId = `temp-${i}`;
           const currentFile = audioFiles[i];
+          const trackName = currentFile.name.replace(/\.[^/.]+$/, '');
           
           try {
+            addLogEntry('info', `[${i + 1}/${audioFiles.length}] Processing "${trackName}"...`);
+            
             // Get unique track ID from database sequence (atomic operation)
             const preAssignedTrackId = await getNextTrackId();
+            addLogEntry('info', `Assigned track ID: ${preAssignedTrackId}`);
+            
             const trackInfo = await uploadSingleTrack(currentFile, undefined, (i + 1).toString(), undefined, tempId, preAssignedTrackId);
             trackIds.push(trackInfo.trackId);
+            addLogEntry('success', `MP3 uploaded to storage (${(currentFile.size / 1024 / 1024).toFixed(1)}MB)`);
 
             // STEP 4: Sync MP3 to CDN
             updateTrackStep(tempId, 'cdn', 'in-progress', trackInfo.trackId);
+            addLogEntry('info', 'Syncing MP3 to CDN...');
             try {
               await syncTracks([trackInfo.trackId]);
               updateTrackStep(tempId, 'cdn', 'completed', trackInfo.trackId);
+              addLogEntry('success', 'MP3 synced to CDN');
             } catch (cdnError: any) {
               console.error('CDN sync failed:', cdnError);
               updateTrackStep(tempId, 'cdn', 'failed', trackInfo.trackId, cdnError.message);
+              addLogEntry('error', `CDN sync failed: ${cdnError.message}`);
               hasErrors = true;
             }
 
             // STEP 5: Transcode MP3 to HLS using transcoder service
             updateTrackStep(tempId, 'transcoding', 'in-progress', trackInfo.trackId);
+            addLogEntry('info', 'Starting HLS transcoding...');
             try {
               const hlsResult = await transcodeToHLS(currentFile, (percent) => {
                 updateStepProgress(tempId, 'transcoding', percent);
@@ -662,9 +684,11 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
                 throw new Error(hlsResult.error || 'Transcoding failed');
               }
               updateTrackStep(tempId, 'transcoding', 'completed', trackInfo.trackId);
+              addLogEntry('success', `HLS transcoding complete (${hlsResult.segmentCount} segments, ${hlsResult.transcodeDurationMs}ms)`);
 
               // STEP 6: Upload HLS files to Supabase Storage
               updateTrackStep(tempId, 'hls-storage', 'in-progress', trackInfo.trackId);
+              addLogEntry('info', `Uploading ${hlsResult.files.length} HLS files to storage...`);
               let hlsUploadProgress = 0;
               for (const hlsFile of hlsResult.files) {
                 const storagePath = `${trackInfo.trackId}/${hlsFile.name}`;
@@ -692,9 +716,11 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
                 updateStepProgress(tempId, 'hls-storage', (hlsUploadProgress / hlsResult.files.length) * 100);
               }
               updateTrackStep(tempId, 'hls-storage', 'completed', trackInfo.trackId);
+              addLogEntry('success', 'HLS files uploaded to storage');
 
               // STEP 7: Sync HLS to CDN
               updateTrackStep(tempId, 'hls-cdn', 'in-progress', trackInfo.trackId);
+              addLogEntry('info', 'Syncing HLS files to CDN (this may take a moment)...');
               try {
                 const hlsCdnResponse = await fetch(
                   `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/sync-to-cdn`,
@@ -731,9 +757,11 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
                   .eq('track_id', parseInt(trackInfo.trackId, 10));
 
                 updateTrackStep(tempId, 'hls-cdn', 'completed', trackInfo.trackId);
+                addLogEntry('success', `Track "${trackName}" complete! HLS available at CDN`);
               } catch (hlsCdnError: any) {
                 console.error('HLS CDN sync failed:', hlsCdnError);
                 updateTrackStep(tempId, 'hls-cdn', 'failed', trackInfo.trackId, hlsCdnError.message);
+                addLogEntry('error', `HLS CDN sync failed: ${hlsCdnError.message}`);
                 hasErrors = true;
               }
             } catch (transcodeError: any) {
@@ -741,6 +769,7 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
               updateTrackStep(tempId, 'transcoding', 'failed', trackInfo.trackId, transcodeError.message);
               updateTrackStep(tempId, 'hls-storage', 'skipped', trackInfo.trackId);
               updateTrackStep(tempId, 'hls-cdn', 'skipped', trackInfo.trackId);
+              addLogEntry('error', `Transcoding failed: ${transcodeError.message}`);
               hasErrors = true;
             }
 
@@ -750,6 +779,7 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
             }
           } catch (error: any) {
             console.error('Track upload failed:', error);
+            addLogEntry('error', `Track upload failed: ${error.message}`);
             hasErrors = true;
             // Move to next track even on error
             if (i < audioFiles.length - 1) {
@@ -759,6 +789,7 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
         }
 
         setUploading(false);
+        addLogEntry(hasErrors ? 'warning' : 'success', hasErrors ? 'Upload completed with some errors' : `All ${audioFiles.length} tracks uploaded successfully!`);
         completeMultiStepUpload(hasErrors);
       } catch (error: any) {
         alert(`Upload failed: ${error.message}`);
@@ -796,22 +827,29 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
 
       try {
         const tempId = 'temp-0';
+        addLogEntry('info', `Processing "${trackName}"...`);
+        
         const trackInfo = await uploadSingleTrack(audioFile, undefined, undefined, undefined, tempId);
+        addLogEntry('success', `MP3 uploaded (${(audioFile.size / 1024 / 1024).toFixed(1)}MB), Track ID: ${trackInfo.trackId}`);
         let hasErrors = false;
 
         // STEP 4: Sync MP3 to CDN
         updateTrackStep(tempId, 'cdn', 'in-progress', trackInfo.trackId);
+        addLogEntry('info', 'Syncing MP3 to CDN...');
         try {
           await syncTracks([trackInfo.trackId]);
           updateTrackStep(tempId, 'cdn', 'completed', trackInfo.trackId);
+          addLogEntry('success', 'MP3 synced to CDN');
         } catch (cdnError: any) {
           console.error('CDN sync failed:', cdnError);
           updateTrackStep(tempId, 'cdn', 'failed', trackInfo.trackId, cdnError.message);
+          addLogEntry('error', `CDN sync failed: ${cdnError.message}`);
           hasErrors = true;
         }
 
         // STEP 5: Transcode MP3 to HLS using transcoder service
         updateTrackStep(tempId, 'transcoding', 'in-progress', trackInfo.trackId);
+        addLogEntry('info', 'Starting HLS transcoding...');
         try {
           const hlsResult = await transcodeToHLS(audioFile, (percent) => {
             updateStepProgress(tempId, 'transcoding', percent);
@@ -821,9 +859,11 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
             throw new Error(hlsResult.error || 'Transcoding failed');
           }
           updateTrackStep(tempId, 'transcoding', 'completed', trackInfo.trackId);
+          addLogEntry('success', `HLS transcoding complete (${hlsResult.segmentCount} segments)`);
 
           // STEP 6: Upload HLS files to Supabase Storage
           updateTrackStep(tempId, 'hls-storage', 'in-progress', trackInfo.trackId);
+          addLogEntry('info', `Uploading ${hlsResult.files.length} HLS files to storage...`);
           let hlsUploadProgress = 0;
           for (const hlsFile of hlsResult.files) {
             const storagePath = `${trackInfo.trackId}/${hlsFile.name}`;
@@ -851,9 +891,11 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
             updateStepProgress(tempId, 'hls-storage', (hlsUploadProgress / hlsResult.files.length) * 100);
           }
           updateTrackStep(tempId, 'hls-storage', 'completed', trackInfo.trackId);
+          addLogEntry('success', 'HLS files uploaded to storage');
 
           // STEP 7: Sync HLS to CDN
           updateTrackStep(tempId, 'hls-cdn', 'in-progress', trackInfo.trackId);
+          addLogEntry('info', 'Syncing HLS files to CDN...');
           try {
             const hlsCdnResponse = await fetch(
               `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/sync-to-cdn`,
@@ -890,9 +932,11 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
               .eq('track_id', parseInt(trackInfo.trackId, 10));
 
             updateTrackStep(tempId, 'hls-cdn', 'completed', trackInfo.trackId);
+            addLogEntry('success', 'HLS synced to CDN - Upload complete!');
           } catch (hlsCdnError: any) {
             console.error('HLS CDN sync failed:', hlsCdnError);
             updateTrackStep(tempId, 'hls-cdn', 'failed', trackInfo.trackId, hlsCdnError.message);
+            addLogEntry('error', `HLS CDN sync failed: ${hlsCdnError.message}`);
             hasErrors = true;
           }
         } catch (transcodeError: any) {
@@ -900,6 +944,7 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
           updateTrackStep(tempId, 'transcoding', 'failed', trackInfo.trackId, transcodeError.message);
           updateTrackStep(tempId, 'hls-storage', 'skipped', trackInfo.trackId);
           updateTrackStep(tempId, 'hls-cdn', 'skipped', trackInfo.trackId);
+          addLogEntry('error', `Transcoding failed: ${transcodeError.message}`);
           hasErrors = true;
         }
 
