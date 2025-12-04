@@ -1020,8 +1020,22 @@ export class StreamingAudioEngine implements IAudioEngine {
       ? this.secondaryAudio 
       : this.primaryAudio;
     
-    // For HLS, preload is handled differently
-    this.storageAdapter.getAudioUrl(filePath).then(url => {
+    // Check if HLS is available and use HLS URL if supported
+    const hlsAdapter = this.storageAdapter as HLSStorageAdapter;
+    const canUseHLS = this.useNativeHLS || this.useHLSJS;
+    
+    const getPrefetchUrl = async (): Promise<string> => {
+      if (canUseHLS && hlsAdapter.hasHLSSupport) {
+        const hasHLS = await hlsAdapter.hasHLSSupport(trackId);
+        if (hasHLS) {
+          return hlsAdapter.getHLSUrl(trackId, `${trackId}/master.m3u8`);
+        }
+      }
+      // Fall back to MP3
+      return this.storageAdapter.getAudioUrl(filePath);
+    };
+    
+    getPrefetchUrl().then(url => {
       prefetchAudio.src = url;
       prefetchAudio.preload = 'auto';
       prefetchAudio.load();
