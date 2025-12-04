@@ -1103,6 +1103,7 @@ export function MusicLibrary() {
       completed: false,
       database: { status: 'pending' },
       supabaseStorage: { status: 'pending' },
+      hlsStorage: { status: 'pending' },
       cdn: { status: 'pending' },
       playlists: { status: 'pending' },
       analytics: { status: 'pending' },
@@ -1143,10 +1144,15 @@ export function MusicLibrary() {
           status: details.filesDeleted > 0 ? 'success' : 'error',
           count: details.filesDeleted
         },
+        hlsStorage: {
+          status: 'success',
+          count: details.hlsFilesDeleted || 0
+        },
         cdn: {
           status: details.cdnDeletionFailed > 0 ? 'error' : 'success',
           count: details.cdnFilesDeleted,
-          failed: details.cdnDeletionFailed
+          failed: details.cdnDeletionFailed,
+          hlsCount: details.cdnHlsDeleted || 0
         },
         playlists: {
           status: 'success',
@@ -1169,6 +1175,7 @@ export function MusicLibrary() {
         error: error instanceof Error ? error.message : 'Unknown error',
         database: { status: 'error' },
         supabaseStorage: { status: 'error' },
+        hlsStorage: { status: 'error' },
         cdn: { status: 'error' },
         playlists: { status: 'error' },
         analytics: { status: 'error' },

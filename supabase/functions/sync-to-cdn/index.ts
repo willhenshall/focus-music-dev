@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { S3Client, PutObjectCommand, DeleteObjectCommand, HeadObjectCommand } from "npm:@aws-sdk/client-s3@3";
+import { S3Client, PutObjectCommand, DeleteObjectCommand, HeadObjectCommand, ListObjectsV2Command } from "npm:@aws-sdk/client-s3@3";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -214,11 +214,16 @@ Deno.serve(async (req: Request) => {
         console.error(`Error deleting metadata file ${sidecarFileName}:`, error.message);
       }
 
+      // Delete HLS files from CDN
+      console.log(`Deleting HLS files for track ${trackId} from CDN...`);
+      const hlsResult = await deleteHLSFromCDN(trackId);
+
       const { error: updateError } = await supabase
         .from('audio_tracks')
         .update({
           cdn_url: null,
           cdn_uploaded_at: null,
+          hls_cdn_url: null,
           storage_locations: {
             supabase: true,
             r2_cdn: false,
@@ -233,7 +238,7 @@ Deno.serve(async (req: Request) => {
         console.error('Failed to update database:', updateError);
       }
 
-      const success = audioDeleted && sidecarDeleted;
+      const success = audioDeleted && sidecarDeleted && hlsResult.failed === 0;
       const message = success
         ? "CDN deletion completed successfully"
         : "CDN deletion partially failed";
@@ -253,6 +258,11 @@ Deno.serve(async (req: Request) => {
               name: sidecarFileName,
               deleted: sidecarDeleted,
               error: sidecarError,
+            },
+            hlsFiles: {
+              deleted: hlsResult.deleted,
+              failed: hlsResult.failed,
+              errors: hlsResult.errors.length > 0 ? hlsResult.errors : undefined,
             },
           }
         }),
@@ -531,4 +541,65 @@ async function uploadHLSFileToCDN(trackId: string, fileName: string, fileData: B
   console.log(`Uploaded HLS file to CDN: ${cdnUrl}`);
 
   return cdnUrl;
+}
+
+interface HLSDeletionResult {
+  deleted: number;
+  failed: number;
+  errors: string[];
+}
+
+async function deleteHLSFromCDN(trackId: string): Promise<HLSDeletionResult> {
+  const s3Client = getS3Client();
+  const prefix = `${R2_CONFIG.hlsPath}/${trackId}/`;
+  
+  const result: HLSDeletionResult = {
+    deleted: 0,
+    failed: 0,
+    errors: [],
+  };
+
+  try {
+    // List all objects with the HLS prefix for this track
+    const listCommand = new ListObjectsV2Command({
+      Bucket: R2_CONFIG.bucketName,
+      Prefix: prefix,
+    });
+
+    const listResponse = await s3Client.send(listCommand);
+    
+    if (!listResponse.Contents || listResponse.Contents.length === 0) {
+      console.log(`No HLS files found for track ${trackId} in CDN`);
+      return result;
+    }
+
+    console.log(`Found ${listResponse.Contents.length} HLS files for track ${trackId}`);
+
+    // Delete each file
+    for (const object of listResponse.Contents) {
+      if (!object.Key) continue;
+
+      try {
+        const deleteCommand = new DeleteObjectCommand({
+          Bucket: R2_CONFIG.bucketName,
+          Key: object.Key,
+        });
+        await s3Client.send(deleteCommand);
+        result.deleted++;
+        console.log(`✅ Deleted HLS file: ${object.Key}`);
+      } catch (deleteError: any) {
+        result.failed++;
+        result.errors.push(`Failed to delete ${object.Key}: ${deleteError.message}`);
+        console.error(`❌ Failed to delete HLS file ${object.Key}:`, deleteError.message);
+      }
+    }
+
+    console.log(`HLS deletion complete for track ${trackId}: ${result.deleted} deleted, ${result.failed} failed`);
+    return result;
+
+  } catch (error: any) {
+    console.error(`Error listing HLS files for track ${trackId}:`, error.message);
+    result.errors.push(`Failed to list HLS files: ${error.message}`);
+    return result;
+  }
 }
