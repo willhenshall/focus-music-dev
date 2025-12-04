@@ -6,7 +6,8 @@ export interface DeletionStatus {
   completed: boolean;
   database: { status: 'pending' | 'success' | 'error'; count?: number };
   supabaseStorage: { status: 'pending' | 'success' | 'error'; count?: number };
-  cdn: { status: 'pending' | 'success' | 'error'; count?: number; failed?: number };
+  hlsStorage: { status: 'pending' | 'success' | 'error'; count?: number };
+  cdn: { status: 'pending' | 'success' | 'error'; count?: number; failed?: number; hlsCount?: number };
   playlists: { status: 'pending' | 'success' | 'error'; count?: number; affected?: number };
   analytics: { status: 'pending' | 'success' | 'error'; count?: number };
   error?: string;
@@ -83,6 +84,7 @@ export function DeleteConfirmationModal({
                 <ul className="text-sm text-neutral-300 space-y-1">
                   <li>• Database records will be removed</li>
                   <li>• Audio files will be deleted from Supabase storage</li>
+                  <li>• HLS streaming files will be deleted from storage</li>
                   <li>• Files will be removed from CDN (Cloudflare R2)</li>
                   <li>• Metadata sidecar files will be deleted</li>
                   <li>• All playlist references will be cleared</li>
@@ -141,14 +143,28 @@ export function DeleteConfirmationModal({
                   </div>
 
                   <div className="flex items-center justify-between">
+                    <span className="text-sm text-neutral-300">HLS Storage</span>
+                    <div className="flex items-center gap-2">
+                      <StatusIcon status={deletionStatus.hlsStorage?.status || 'pending'} />
+                      {deletionStatus.hlsStorage?.count !== undefined && (
+                        <span className="text-xs text-neutral-400">
+                          {deletionStatus.hlsStorage.count === 0 
+                            ? 'N/A (no HLS files)' 
+                            : `${deletionStatus.hlsStorage.count} files deleted`}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between">
                     <span className="text-sm text-neutral-300">CDN (Cloudflare R2)</span>
                     <div className="flex items-center gap-2">
                       <StatusIcon status={deletionStatus.cdn.status} />
                       {deletionStatus.cdn.count !== undefined && (
                         <span className="text-xs text-neutral-400">
-                          {deletionStatus.cdn.count === 0 && !deletionStatus.cdn.failed
+                          {deletionStatus.cdn.count === 0 && !deletionStatus.cdn.failed && !deletionStatus.cdn.hlsCount
                             ? 'N/A (not synced)'
-                            : `${deletionStatus.cdn.count} deleted${deletionStatus.cdn.failed ? ` (${deletionStatus.cdn.failed} failed)` : ''}`}
+                            : `${deletionStatus.cdn.count + (deletionStatus.cdn.hlsCount || 0)} deleted${deletionStatus.cdn.failed ? ` (${deletionStatus.cdn.failed} failed)` : ''}`}
                         </span>
                       )}
                     </div>
