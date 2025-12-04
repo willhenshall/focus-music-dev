@@ -1,7 +1,7 @@
 import { CheckCircle2, Loader, AlertCircle, Upload, FileJson, Database, Cloud, ChevronDown, ChevronUp, Radio } from 'lucide-react';
 import { useState } from 'react';
 
-export type UploadStep = 'storage' | 'sidecar' | 'database' | 'cdn' | 'hls-storage' | 'hls-cdn';
+export type UploadStep = 'storage' | 'sidecar' | 'database' | 'cdn' | 'transcoding' | 'hls-storage' | 'hls-cdn';
 export type StepStatus = 'pending' | 'in-progress' | 'completed' | 'failed' | 'skipped';
 
 export interface TrackUploadProgress {
@@ -14,6 +14,7 @@ export interface TrackUploadProgress {
     sidecar: StepStatus;
     database: StepStatus;
     cdn: StepStatus;
+    transcoding: StepStatus;
     'hls-storage': StepStatus;
     'hls-cdn': StepStatus;
   };
@@ -22,6 +23,7 @@ export interface TrackUploadProgress {
     sidecar?: number;
     database?: number;
     cdn?: number;
+    transcoding?: number;
     'hls-storage'?: number;
     'hls-cdn'?: number;
   };
@@ -62,6 +64,11 @@ const STEP_CONFIG: Record<UploadStep, { label: string; icon: any; description: s
     icon: Cloud,
     description: 'Syncing MP3 to content delivery network',
   },
+  transcoding: {
+    label: 'HLS Transcoding',
+    icon: Radio,
+    description: 'Converting MP3 to HLS streaming format',
+  },
   'hls-storage': {
     label: 'Upload HLS to Storage',
     icon: Radio,
@@ -74,7 +81,7 @@ const STEP_CONFIG: Record<UploadStep, { label: string; icon: any; description: s
   },
 };
 
-const STEP_ORDER: UploadStep[] = ['storage', 'sidecar', 'database', 'cdn', 'hls-storage', 'hls-cdn'];
+const STEP_ORDER: UploadStep[] = ['storage', 'sidecar', 'database', 'cdn', 'transcoding', 'hls-storage', 'hls-cdn'];
 
 export function MultiStepUploadProgressModal({ progress, onClose }: MultiStepUploadProgressModalProps) {
   const [showAllTracks, setShowAllTracks] = useState(false);
@@ -95,13 +102,13 @@ export function MultiStepUploadProgressModal({ progress, onClose }: MultiStepUpl
   ).length;
 
   // Calculate overall progress based on all steps across all tracks, including in-progress percentages
-  // Each track has 4 base steps + 2 HLS steps if HLS is included
-  const totalSteps = tracks.reduce((sum, track) => sum + (track.hasHLS ? 6 : 4), 0);
+  // Each track has 4 base steps + 3 HLS steps (transcoding, hls-storage, hls-cdn) if HLS is included
+  const totalSteps = tracks.reduce((sum, track) => sum + (track.hasHLS ? 7 : 4), 0);
   const completedSteps = tracks.reduce((sum, track) => {
     let trackProgress = 0;
     const stepsToCount = track.hasHLS 
       ? STEP_ORDER 
-      : STEP_ORDER.filter(s => !s.startsWith('hls'));
+      : STEP_ORDER.filter(s => !s.startsWith('hls') && s !== 'transcoding');
     
     stepsToCount.forEach((step) => {
       const status = track.steps[step];
@@ -214,10 +221,10 @@ export function MultiStepUploadProgressModal({ progress, onClose }: MultiStepUpl
                 <p className="text-xs text-slate-500">Track ID: {currentTrack.trackId}</p>
               </div>
 
-              {/* Dynamic Grid for Steps - shows 4 or 6 steps based on HLS */}
-              <div className={`grid gap-2 ${currentTrack.hasHLS ? 'grid-cols-3' : 'grid-cols-2'}`}>
+              {/* Dynamic Grid for Steps - shows 4 or 7 steps based on HLS */}
+              <div className={`grid gap-2 ${currentTrack.hasHLS ? 'grid-cols-3 lg:grid-cols-4' : 'grid-cols-2'}`}>
                 {STEP_ORDER
-                  .filter(stepKey => currentTrack.hasHLS || !stepKey.startsWith('hls'))
+                  .filter(stepKey => currentTrack.hasHLS || (!stepKey.startsWith('hls') && stepKey !== 'transcoding'))
                   .map((stepKey, index) => {
                   const step = STEP_CONFIG[stepKey];
                   const status = currentTrack.steps[stepKey];

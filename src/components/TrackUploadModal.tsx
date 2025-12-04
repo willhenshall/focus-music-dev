@@ -1,17 +1,28 @@
-import { useState, useRef } from 'react';
-import { X, Upload, Loader, AlertCircle, Radio } from 'lucide-react';
+import { useState } from 'react';
+import { X, Upload, Loader, AlertCircle } from 'lucide-react';
 import { supabase, AudioChannel } from '../lib/supabase';
 import { TrackUploadConfirmationModal } from './TrackUploadConfirmationModal';
 import { MultiStepUploadProgressModal, MultiStepUploadProgress, TrackUploadProgress, UploadStep, StepStatus } from './MultiStepUploadProgressModal';
 import { useCDNSync } from '../hooks/useCDNSync';
-import { useHLSSync } from '../hooks/useHLSSync';
 
-// HLS folder structure - contains master.m3u8 and segment files
-interface HLSFolder {
-  folderName: string; // Name of folder (should match MP3 filename stem)
-  files: File[]; // All files in the folder (master.m3u8 + segment_*.ts)
-  masterPlaylist?: File; // The master.m3u8 file
-  segmentCount: number; // Number of .ts segment files
+// HLS Transcoder service URL - can be configured via environment variable
+const HLS_TRANSCODER_URL = import.meta.env.VITE_HLS_TRANSCODER_URL || 'http://localhost:3000';
+
+// Response from HLS transcoder sync API
+interface HLSTranscodeResult {
+  success: boolean;
+  jobId: string;
+  originalFileName: string;
+  hlsFolder: string;
+  segmentCount: number;
+  files: Array<{
+    name: string;
+    size: number;
+    contentType: string;
+    data: string; // base64 encoded
+  }>;
+  transcodeDurationMs: number;
+  error?: string;
 }
 
 interface TrackUploadModalProps {
@@ -68,13 +79,6 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
   const [uploadedTrackInfo, setUploadedTrackInfo] = useState<UploadedTrackInfo | null>(null);
   const [uploadedTrackIds, setUploadedTrackIds] = useState<string[]>([]);
   const { isSyncing, progress: cdnProgress, syncTracks } = useCDNSync();
-  
-  // HLS file state
-  const [hlsFolder, setHlsFolder] = useState<HLSFolder | null>(null); // Single upload
-  const [hlsFolders, setHlsFolders] = useState<Map<string, HLSFolder>>(new Map()); // Bulk upload - keyed by folder name
-  const [hlsWarnings, setHlsWarnings] = useState<string[]>([]);
-  const hlsInputRef = useRef<HTMLInputElement>(null);
-  const { syncHLSToCDN } = useHLSSync();
   const [formData, setFormData] = useState({
     track_id: '',
     track_name: '',
@@ -152,114 +156,41 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
     }
   };
 
-  // Handle HLS folder selection
-  const handleHLSFolderChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+  // Transcode MP3 to HLS using the transcoder service
+  const transcodeToHLS = async (
+    file: File,
+    onProgress?: (percent: number) => void
+  ): Promise<HLSTranscodeResult> => {
+    const formData = new FormData();
+    formData.append('file', file);
 
-    const warnings: string[] = [];
-    const fileArray = Array.from(files);
-
-    if (bulkMode) {
-      // Bulk mode: Group files by their parent folder
-      const folderMap = new Map<string, File[]>();
+    try {
+      onProgress?.(10); // Starting upload to transcoder
       
-      fileArray.forEach(file => {
-        // Get folder name from webkitRelativePath (e.g., "hls-parent/track1/master.m3u8" -> "track1")
-        const pathParts = (file as any).webkitRelativePath?.split('/') || [];
-        if (pathParts.length >= 2) {
-          // For nested structure: parent/trackfolder/file.ext
-          const folderName = pathParts.length >= 3 ? pathParts[pathParts.length - 2] : pathParts[0];
-          const existing = folderMap.get(folderName) || [];
-          existing.push(file);
-          folderMap.set(folderName, existing);
-        }
+      const response = await fetch(`${HLS_TRANSCODER_URL}/api/transcode-sync`, {
+        method: 'POST',
+        body: formData,
       });
 
-      // Convert to HLSFolder objects
-      const newHlsFolders = new Map<string, HLSFolder>();
-      folderMap.forEach((folderFiles, folderName) => {
-        const masterPlaylist = folderFiles.find(f => f.name === 'master.m3u8');
-        const segmentCount = folderFiles.filter(f => f.name.endsWith('.ts')).length;
-        
-        if (!masterPlaylist) {
-          warnings.push(`Folder "${folderName}" is missing master.m3u8`);
-        }
-        if (segmentCount === 0) {
-          warnings.push(`Folder "${folderName}" has no .ts segment files`);
-        }
+      onProgress?.(50); // Transcoding in progress
 
-        newHlsFolders.set(folderName, {
-          folderName,
-          files: folderFiles,
-          masterPlaylist,
-          segmentCount,
-        });
-      });
-
-      setHlsFolders(newHlsFolders);
-
-      // Check for mismatches with MP3 files
-      if (audioFiles.length > 0) {
-        const mp3Names = new Set(audioFiles.map(f => f.name.replace(/\.[^/.]+$/, '')));
-        newHlsFolders.forEach((_, folderName) => {
-          if (!mp3Names.has(folderName)) {
-            warnings.push(`HLS folder "${folderName}" has no matching MP3 file`);
-          }
-        });
-        mp3Names.forEach(mp3Name => {
-          if (!newHlsFolders.has(mp3Name)) {
-            warnings.push(`MP3 "${mp3Name}.mp3" has no matching HLS folder`);
-          }
-        });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Transcoding failed');
       }
-    } else {
-      // Single mode: All files should be in one folder
-      const masterPlaylist = fileArray.find(f => f.name === 'master.m3u8');
-      const segmentCount = fileArray.filter(f => f.name.endsWith('.ts')).length;
+
+      const result = await response.json();
+      onProgress?.(100);
       
-      // Get folder name from first file's path
-      const firstFilePath = (fileArray[0] as any).webkitRelativePath || '';
-      const pathParts = firstFilePath.split('/');
-      const folderName = pathParts.length >= 2 ? pathParts[pathParts.length - 2] : 'hls';
-
-      if (!masterPlaylist) {
-        warnings.push('HLS folder is missing master.m3u8');
+      return result;
+    } catch (error: any) {
+      // Check if transcoder service is unavailable
+      if (error.message.includes('fetch') || error.message.includes('network')) {
+        throw new Error('HLS transcoder service unavailable. Please ensure the service is running.');
       }
-      if (segmentCount === 0) {
-        warnings.push('HLS folder has no .ts segment files');
-      }
-
-      setHlsFolder({
-        folderName,
-        files: fileArray,
-        masterPlaylist,
-        segmentCount,
-      });
-
-      // Check for mismatch with single MP3 file
-      if (audioFile) {
-        const mp3Name = audioFile.name.replace(/\.[^/.]+$/, '');
-        if (folderName !== mp3Name && !folderName.includes(mp3Name)) {
-          warnings.push(`HLS folder "${folderName}" may not match MP3 "${audioFile.name}"`);
-        }
-      }
+      throw error;
     }
-
-    setHlsWarnings(warnings);
   };
-
-  // Get HLS folder for a specific track (by MP3 filename stem)
-  const getHLSForTrack = (mp3FileName: string): HLSFolder | null => {
-    const mp3Stem = mp3FileName.replace(/\.[^/.]+$/, '');
-    if (bulkMode) {
-      return hlsFolders.get(mp3Stem) || null;
-    }
-    return hlsFolder;
-  };
-
-  // Check if any HLS files are provided
-  const hasAnyHLS = bulkMode ? hlsFolders.size > 0 : hlsFolder !== null;
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -274,6 +205,7 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
   };
 
   // Helper function to initialize multi-step progress
+  // hasHLS is now always true since we auto-transcode all tracks
   const initializeMultiStepProgress = (trackCount: number, trackNames: string[], trackHasHLS: boolean[]) => {
     const tracks = new Map<string, TrackUploadProgress>();
     trackNames.forEach((name, index) => {
@@ -288,6 +220,7 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
           sidecar: 'pending',
           database: 'pending',
           cdn: 'pending',
+          transcoding: hasHLS ? 'pending' : 'skipped',
           'hls-storage': hasHLS ? 'pending' : 'skipped',
           'hls-cdn': hasHLS ? 'pending' : 'skipped',
         },
@@ -686,12 +619,9 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
         return;
       }
 
-      // Initialize multi-step progress with HLS flags
+      // Initialize multi-step progress - always include HLS steps (auto-transcoding)
       const trackNames = audioFiles.map(f => f.name.replace(/\.[^/.]+$/, ''));
-      const trackHasHLS = audioFiles.map(f => {
-        const hlsData = getHLSForTrack(f.name);
-        return hlsData !== null && hlsData.files.length > 0;
-      });
+      const trackHasHLS = audioFiles.map(() => true); // Always transcode to HLS
       initializeMultiStepProgress(audioFiles.length, trackNames, trackHasHLS);
       setUploading(true);
 
@@ -699,15 +629,15 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
         const trackIds: string[] = [];
         let hasErrors = false;
 
-        // Generate track IDs atomically for each track to ensure uniqueness
+        // Process each track with automatic HLS transcoding
         for (let i = 0; i < audioFiles.length; i++) {
           const tempId = `temp-${i}`;
-          const hlsData = getHLSForTrack(audioFiles[i].name);
+          const currentFile = audioFiles[i];
           
           try {
             // Get unique track ID from database sequence (atomic operation)
             const preAssignedTrackId = await getNextTrackId();
-            const trackInfo = await uploadSingleTrack(audioFiles[i], undefined, (i + 1).toString(), undefined, tempId, preAssignedTrackId);
+            const trackInfo = await uploadSingleTrack(currentFile, undefined, (i + 1).toString(), undefined, tempId, preAssignedTrackId);
             trackIds.push(trackInfo.trackId);
 
             // STEP 4: Sync MP3 to CDN
@@ -721,83 +651,97 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
               hasErrors = true;
             }
 
-            // STEP 5 & 6: Upload HLS files if provided
-            if (hlsData && hlsData.files.length > 0) {
-              // Step 5: Upload HLS to Supabase Storage
+            // STEP 5: Transcode MP3 to HLS using transcoder service
+            updateTrackStep(tempId, 'transcoding', 'in-progress', trackInfo.trackId);
+            try {
+              const hlsResult = await transcodeToHLS(currentFile, (percent) => {
+                updateStepProgress(tempId, 'transcoding', percent);
+              });
+
+              if (!hlsResult.success) {
+                throw new Error(hlsResult.error || 'Transcoding failed');
+              }
+              updateTrackStep(tempId, 'transcoding', 'completed', trackInfo.trackId);
+
+              // STEP 6: Upload HLS files to Supabase Storage
               updateTrackStep(tempId, 'hls-storage', 'in-progress', trackInfo.trackId);
+              let hlsUploadProgress = 0;
+              for (const hlsFile of hlsResult.files) {
+                const storagePath = `${trackInfo.trackId}/${hlsFile.name}`;
+                
+                // Convert base64 to Blob
+                const binaryData = atob(hlsFile.data);
+                const bytes = new Uint8Array(binaryData.length);
+                for (let j = 0; j < binaryData.length; j++) {
+                  bytes[j] = binaryData.charCodeAt(j);
+                }
+                const blob = new Blob([bytes], { type: hlsFile.contentType });
+
+                const { error: hlsUploadError } = await supabase.storage
+                  .from('audio-hls')
+                  .upload(storagePath, blob, {
+                    contentType: hlsFile.contentType,
+                    upsert: true,
+                  });
+
+                if (hlsUploadError) {
+                  throw new Error(`Failed to upload ${hlsFile.name}: ${hlsUploadError.message}`);
+                }
+                
+                hlsUploadProgress++;
+                updateStepProgress(tempId, 'hls-storage', (hlsUploadProgress / hlsResult.files.length) * 100);
+              }
+              updateTrackStep(tempId, 'hls-storage', 'completed', trackInfo.trackId);
+
+              // STEP 7: Sync HLS to CDN
+              updateTrackStep(tempId, 'hls-cdn', 'in-progress', trackInfo.trackId);
               try {
-                let hlsUploadProgress = 0;
-                for (const hlsFile of hlsData.files) {
-                  const storagePath = `${trackInfo.trackId}/${hlsFile.name}`;
-                  const contentType = hlsFile.name.endsWith('.m3u8') 
-                    ? 'application/vnd.apple.mpegurl' 
-                    : 'video/mp2t';
-
-                  const { error: hlsUploadError } = await supabase.storage
-                    .from('audio-hls')
-                    .upload(storagePath, hlsFile, {
-                      contentType,
-                      upsert: true,
-                    });
-
-                  if (hlsUploadError) {
-                    throw new Error(`Failed to upload ${hlsFile.name}: ${hlsUploadError.message}`);
+                const hlsCdnResponse = await fetch(
+                  `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/sync-to-cdn`,
+                  {
+                    method: 'POST',
+                    headers: {
+                      'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+                      'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                      trackId: trackInfo.trackId,
+                      operation: 'upload-hls',
+                    }),
                   }
-                  
-                  hlsUploadProgress++;
-                  updateStepProgress(tempId, 'hls-storage', (hlsUploadProgress / hlsData.files.length) * 100);
+                );
+
+                if (!hlsCdnResponse.ok) {
+                  const errorData = await hlsCdnResponse.json();
+                  throw new Error(errorData.error || 'HLS CDN sync failed');
                 }
-                updateTrackStep(tempId, 'hls-storage', 'completed', trackInfo.trackId);
 
-                // Step 6: Sync HLS to CDN
-                updateTrackStep(tempId, 'hls-cdn', 'in-progress', trackInfo.trackId);
-                try {
-                  const hlsCdnResponse = await fetch(
-                    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/sync-to-cdn`,
-                    {
-                      method: 'POST',
-                      headers: {
-                        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-                        'Content-Type': 'application/json',
-                      },
-                      body: JSON.stringify({
-                        trackId: trackInfo.trackId,
-                        operation: 'upload-hls',
-                      }),
-                    }
-                  );
+                // Update database with HLS info
+                const hlsPath = `${trackInfo.trackId}/master.m3u8`;
+                const hlsCdnUrl = `https://pub-16f9274cf01948468de2d5af8a6fdb23.r2.dev/hls/${trackInfo.trackId}/master.m3u8`;
+                
+                await supabase
+                  .from('audio_tracks')
+                  .update({
+                    hls_path: hlsPath,
+                    hls_cdn_url: hlsCdnUrl,
+                    hls_segment_count: hlsResult.segmentCount,
+                    hls_transcoded_at: new Date().toISOString(),
+                  })
+                  .eq('track_id', parseInt(trackInfo.trackId, 10));
 
-                  if (!hlsCdnResponse.ok) {
-                    const errorData = await hlsCdnResponse.json();
-                    throw new Error(errorData.error || 'HLS CDN sync failed');
-                  }
-
-                  // Update database with HLS info
-                  const hlsPath = `${trackInfo.trackId}/master.m3u8`;
-                  const hlsCdnUrl = `https://pub-16f9274cf01948468de2d5af8a6fdb23.r2.dev/hls/${trackInfo.trackId}/master.m3u8`;
-                  
-                  await supabase
-                    .from('audio_tracks')
-                    .update({
-                      hls_path: hlsPath,
-                      hls_cdn_url: hlsCdnUrl,
-                      hls_segment_count: hlsData.segmentCount,
-                      hls_transcoded_at: new Date().toISOString(),
-                    })
-                    .eq('track_id', parseInt(trackInfo.trackId, 10));
-
-                  updateTrackStep(tempId, 'hls-cdn', 'completed', trackInfo.trackId);
-                } catch (hlsCdnError: any) {
-                  console.error('HLS CDN sync failed:', hlsCdnError);
-                  updateTrackStep(tempId, 'hls-cdn', 'failed', trackInfo.trackId, hlsCdnError.message);
-                  hasErrors = true;
-                }
-              } catch (hlsStorageError: any) {
-                console.error('HLS storage upload failed:', hlsStorageError);
-                updateTrackStep(tempId, 'hls-storage', 'failed', trackInfo.trackId, hlsStorageError.message);
-                updateTrackStep(tempId, 'hls-cdn', 'skipped', trackInfo.trackId);
+                updateTrackStep(tempId, 'hls-cdn', 'completed', trackInfo.trackId);
+              } catch (hlsCdnError: any) {
+                console.error('HLS CDN sync failed:', hlsCdnError);
+                updateTrackStep(tempId, 'hls-cdn', 'failed', trackInfo.trackId, hlsCdnError.message);
                 hasErrors = true;
               }
+            } catch (transcodeError: any) {
+              console.error('HLS transcoding failed:', transcodeError);
+              updateTrackStep(tempId, 'transcoding', 'failed', trackInfo.trackId, transcodeError.message);
+              updateTrackStep(tempId, 'hls-storage', 'skipped', trackInfo.trackId);
+              updateTrackStep(tempId, 'hls-cdn', 'skipped', trackInfo.trackId);
+              hasErrors = true;
             }
 
             // Move to next track if not the last one
@@ -845,11 +789,9 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
         return;
       }
 
-      // Initialize multi-step progress for single track with HLS flag
+      // Initialize multi-step progress for single track - always include HLS (auto-transcoding)
       const trackName = formData.track_name || audioFile.name.replace(/\.[^/.]+$/, '');
-      const hlsData = getHLSForTrack(audioFile.name);
-      const hasHLS = hlsData !== null && hlsData.files.length > 0;
-      initializeMultiStepProgress(1, [trackName], [hasHLS]);
+      initializeMultiStepProgress(1, [trackName], [true]); // Always transcode to HLS
       setUploading(true);
 
       try {
@@ -868,83 +810,97 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
           hasErrors = true;
         }
 
-        // STEP 5 & 6: Upload HLS files if provided
-        if (hlsData && hlsData.files.length > 0) {
-          // Step 5: Upload HLS to Supabase Storage
+        // STEP 5: Transcode MP3 to HLS using transcoder service
+        updateTrackStep(tempId, 'transcoding', 'in-progress', trackInfo.trackId);
+        try {
+          const hlsResult = await transcodeToHLS(audioFile, (percent) => {
+            updateStepProgress(tempId, 'transcoding', percent);
+          });
+
+          if (!hlsResult.success) {
+            throw new Error(hlsResult.error || 'Transcoding failed');
+          }
+          updateTrackStep(tempId, 'transcoding', 'completed', trackInfo.trackId);
+
+          // STEP 6: Upload HLS files to Supabase Storage
           updateTrackStep(tempId, 'hls-storage', 'in-progress', trackInfo.trackId);
+          let hlsUploadProgress = 0;
+          for (const hlsFile of hlsResult.files) {
+            const storagePath = `${trackInfo.trackId}/${hlsFile.name}`;
+            
+            // Convert base64 to Blob
+            const binaryData = atob(hlsFile.data);
+            const bytes = new Uint8Array(binaryData.length);
+            for (let j = 0; j < binaryData.length; j++) {
+              bytes[j] = binaryData.charCodeAt(j);
+            }
+            const blob = new Blob([bytes], { type: hlsFile.contentType });
+
+            const { error: hlsUploadError } = await supabase.storage
+              .from('audio-hls')
+              .upload(storagePath, blob, {
+                contentType: hlsFile.contentType,
+                upsert: true,
+              });
+
+            if (hlsUploadError) {
+              throw new Error(`Failed to upload ${hlsFile.name}: ${hlsUploadError.message}`);
+            }
+            
+            hlsUploadProgress++;
+            updateStepProgress(tempId, 'hls-storage', (hlsUploadProgress / hlsResult.files.length) * 100);
+          }
+          updateTrackStep(tempId, 'hls-storage', 'completed', trackInfo.trackId);
+
+          // STEP 7: Sync HLS to CDN
+          updateTrackStep(tempId, 'hls-cdn', 'in-progress', trackInfo.trackId);
           try {
-            let hlsUploadProgress = 0;
-            for (const hlsFile of hlsData.files) {
-              const storagePath = `${trackInfo.trackId}/${hlsFile.name}`;
-              const contentType = hlsFile.name.endsWith('.m3u8') 
-                ? 'application/vnd.apple.mpegurl' 
-                : 'video/mp2t';
-
-              const { error: hlsUploadError } = await supabase.storage
-                .from('audio-hls')
-                .upload(storagePath, hlsFile, {
-                  contentType,
-                  upsert: true,
-                });
-
-              if (hlsUploadError) {
-                throw new Error(`Failed to upload ${hlsFile.name}: ${hlsUploadError.message}`);
+            const hlsCdnResponse = await fetch(
+              `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/sync-to-cdn`,
+              {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  trackId: trackInfo.trackId,
+                  operation: 'upload-hls',
+                }),
               }
-              
-              hlsUploadProgress++;
-              updateStepProgress(tempId, 'hls-storage', (hlsUploadProgress / hlsData.files.length) * 100);
+            );
+
+            if (!hlsCdnResponse.ok) {
+              const errorData = await hlsCdnResponse.json();
+              throw new Error(errorData.error || 'HLS CDN sync failed');
             }
-            updateTrackStep(tempId, 'hls-storage', 'completed', trackInfo.trackId);
 
-            // Step 6: Sync HLS to CDN
-            updateTrackStep(tempId, 'hls-cdn', 'in-progress', trackInfo.trackId);
-            try {
-              const hlsCdnResponse = await fetch(
-                `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/sync-to-cdn`,
-                {
-                  method: 'POST',
-                  headers: {
-                    'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-                    'Content-Type': 'application/json',
-                  },
-                  body: JSON.stringify({
-                    trackId: trackInfo.trackId,
-                    operation: 'upload-hls',
-                  }),
-                }
-              );
+            // Update database with HLS info
+            const hlsPath = `${trackInfo.trackId}/master.m3u8`;
+            const hlsCdnUrl = `https://pub-16f9274cf01948468de2d5af8a6fdb23.r2.dev/hls/${trackInfo.trackId}/master.m3u8`;
+            
+            await supabase
+              .from('audio_tracks')
+              .update({
+                hls_path: hlsPath,
+                hls_cdn_url: hlsCdnUrl,
+                hls_segment_count: hlsResult.segmentCount,
+                hls_transcoded_at: new Date().toISOString(),
+              })
+              .eq('track_id', parseInt(trackInfo.trackId, 10));
 
-              if (!hlsCdnResponse.ok) {
-                const errorData = await hlsCdnResponse.json();
-                throw new Error(errorData.error || 'HLS CDN sync failed');
-              }
-
-              // Update database with HLS info
-              const hlsPath = `${trackInfo.trackId}/master.m3u8`;
-              const hlsCdnUrl = `https://pub-16f9274cf01948468de2d5af8a6fdb23.r2.dev/hls/${trackInfo.trackId}/master.m3u8`;
-              
-              await supabase
-                .from('audio_tracks')
-                .update({
-                  hls_path: hlsPath,
-                  hls_cdn_url: hlsCdnUrl,
-                  hls_segment_count: hlsData.segmentCount,
-                  hls_transcoded_at: new Date().toISOString(),
-                })
-                .eq('track_id', parseInt(trackInfo.trackId, 10));
-
-              updateTrackStep(tempId, 'hls-cdn', 'completed', trackInfo.trackId);
-            } catch (hlsCdnError: any) {
-              console.error('HLS CDN sync failed:', hlsCdnError);
-              updateTrackStep(tempId, 'hls-cdn', 'failed', trackInfo.trackId, hlsCdnError.message);
-              hasErrors = true;
-            }
-          } catch (hlsStorageError: any) {
-            console.error('HLS storage upload failed:', hlsStorageError);
-            updateTrackStep(tempId, 'hls-storage', 'failed', trackInfo.trackId, hlsStorageError.message);
-            updateTrackStep(tempId, 'hls-cdn', 'skipped', trackInfo.trackId);
+            updateTrackStep(tempId, 'hls-cdn', 'completed', trackInfo.trackId);
+          } catch (hlsCdnError: any) {
+            console.error('HLS CDN sync failed:', hlsCdnError);
+            updateTrackStep(tempId, 'hls-cdn', 'failed', trackInfo.trackId, hlsCdnError.message);
             hasErrors = true;
           }
+        } catch (transcodeError: any) {
+          console.error('HLS transcoding failed:', transcodeError);
+          updateTrackStep(tempId, 'transcoding', 'failed', trackInfo.trackId, transcodeError.message);
+          updateTrackStep(tempId, 'hls-storage', 'skipped', trackInfo.trackId);
+          updateTrackStep(tempId, 'hls-cdn', 'skipped', trackInfo.trackId);
+          hasErrors = true;
         }
 
         setUploading(false);
@@ -1080,9 +1036,6 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
                 setBulkMode(!bulkMode);
                 setAudioFile(null);
                 setAudioFiles([]);
-                setHlsFolder(null);
-                setHlsFolders(new Map());
-                setHlsWarnings([]);
               }}
               disabled={uploading}
               className="px-4 py-2 text-sm bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors font-medium border border-slate-300 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1142,82 +1095,22 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
             )}
           </div>
 
-          {/* HLS Folder Input */}
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-2">
-              <div className="flex items-center gap-2">
-                <Radio className="w-4 h-4 text-purple-600" />
-                HLS Streaming Files <span className="text-slate-400 text-xs font-normal">(Optional)</span>
+          {/* HLS Auto-Transcoding Info */}
+          <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0">
+                <span className="text-purple-600 text-lg">🎵</span>
               </div>
-            </label>
-            <div className="relative">
-              <input
-                ref={hlsInputRef}
-                type="file"
-                // @ts-ignore - webkitdirectory is a non-standard attribute
-                webkitdirectory=""
-                // @ts-ignore
-                directory=""
-                multiple
-                onChange={handleHLSFolderChange}
-                disabled={uploading}
-                className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-lg text-slate-900 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-purple-600 file:text-white file:cursor-pointer file:font-medium hover:file:bg-purple-700 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-purple-400"
-              />
-            </div>
-            <p className="mt-1.5 text-xs text-slate-500">
-              {bulkMode 
-                ? 'Select the parent folder containing HLS subfolders. Each subfolder should be named to match its MP3 file.'
-                : 'Select the HLS folder containing master.m3u8 and segment files.'
-              }
-            </p>
-            
-            {/* HLS Selection Summary */}
-            {bulkMode && hlsFolders.size > 0 && (
-              <div className="mt-3 space-y-2">
-                <p className="text-sm text-slate-600 font-medium">
-                  <span className="text-purple-600">{hlsFolders.size}</span> HLS folder{hlsFolders.size !== 1 ? 's' : ''} selected
+              <div>
+                <p className="text-sm font-semibold text-purple-900">
+                  Automatic HLS Transcoding
                 </p>
-                <div className="max-h-32 overflow-y-auto bg-purple-50 border border-purple-200 rounded-lg p-3 space-y-1">
-                  {Array.from(hlsFolders.values()).map((folder, idx) => (
-                    <div key={idx} className="text-xs text-slate-600 flex items-center gap-2">
-                      <Radio className="w-3 h-3 text-purple-500" />
-                      <span className="font-medium">{folder.folderName}/</span>
-                      <span className="text-slate-400">
-                        ({folder.segmentCount} segments)
-                      </span>
-                      {!folder.masterPlaylist && (
-                        <span className="text-amber-600 text-xs">⚠️ missing m3u8</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
+                <p className="text-xs text-purple-700 mt-1">
+                  MP3 files will be automatically transcoded to HLS streaming format during upload. 
+                  No manual conversion needed!
+                </p>
               </div>
-            )}
-            
-            {!bulkMode && hlsFolder && (
-              <div className="mt-3 bg-purple-50 border border-purple-200 rounded-lg p-3">
-                <div className="flex items-center gap-2 text-sm text-slate-700">
-                  <Radio className="w-4 h-4 text-purple-600" />
-                  <span className="font-medium">{hlsFolder.folderName}/</span>
-                  <span className="text-slate-500">
-                    ({hlsFolder.files.length} files, {hlsFolder.segmentCount} segments)
-                  </span>
-                </div>
-                {!hlsFolder.masterPlaylist && (
-                  <p className="mt-1 text-xs text-amber-600">⚠️ Warning: No master.m3u8 found</p>
-                )}
-              </div>
-            )}
-
-            {/* HLS Warnings */}
-            {hlsWarnings.length > 0 && (
-              <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                <p className="text-xs font-semibold text-amber-800 mb-1">Warnings:</p>
-                {hlsWarnings.map((warning, idx) => (
-                  <p key={idx} className="text-xs text-amber-700">• {warning}</p>
-                ))}
-              </div>
-            )}
+            </div>
           </div>
 
           {bulkMode && (
