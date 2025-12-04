@@ -1,5 +1,5 @@
-import { X, Activity, Wifi, WifiOff, Radio, AlertCircle, CheckCircle, Clock, TrendingUp, Zap, Move, Link, Layers, PlayCircle, Server, Gauge, Heart } from 'lucide-react';
-import { AudioMetrics } from '../lib/enterpriseAudioEngine';
+import { X, Activity, Radio, AlertCircle, CheckCircle, Clock, TrendingUp, Zap, Move, Link, Layers, PlayCircle, Server, Gauge, Heart, Copy, Check } from 'lucide-react';
+import type { AudioMetrics } from '../lib/types/audioEngine';
 import type { AudioEngineType } from '../contexts/MusicPlayerContext';
 import { useState, useEffect, useRef } from 'react';
 
@@ -10,11 +10,12 @@ type AudioEngineDiagnosticsProps = {
   isStreamingEngine?: boolean;
 };
 
-export function AudioEngineDiagnostics({ metrics, onClose, engineType = 'auto', isStreamingEngine = false }: AudioEngineDiagnosticsProps) {
+export function AudioEngineDiagnostics({ metrics, onClose, engineType: _engineType = 'auto', isStreamingEngine = false }: AudioEngineDiagnosticsProps) {
   const [, setTick] = useState(0);
-  const [position, setPosition] = useState({ x: window.innerWidth - 920, y: 80 });
+  const [position, setPosition] = useState({ x: window.innerWidth - 820, y: 60 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [copiedUrl, setCopiedUrl] = useState<'current' | 'prefetch' | null>(null);
   const dragRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -59,26 +60,34 @@ export function AudioEngineDiagnostics({ metrics, onClose, engineType = 'auto', 
     }
   };
 
+  const copyToClipboard = async (url: string, type: 'current' | 'prefetch') => {
+    await navigator.clipboard.writeText(url);
+    setCopiedUrl(type);
+    setTimeout(() => setCopiedUrl(null), 2000);
+  };
+
   if (!metrics) {
     return (
       <div
         ref={dragRef}
         style={{ left: `${position.x}px`, top: `${position.y}px` }}
-        className="fixed bg-white border-2 border-slate-300 rounded-2xl shadow-2xl p-6 w-[400px] z-50"
+        className="fixed bg-white border-2 border-slate-300 rounded-xl shadow-2xl p-4 w-[360px] z-50"
       >
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <Move className="w-4 h-4 text-slate-400 cursor-move" onMouseDown={handleMouseDown} />
-            <h3 className="text-lg font-bold text-slate-900">Audio Engine Diagnostics</h3>
+            <div onMouseDown={handleMouseDown} className="cursor-move">
+              <Move className="w-4 h-4 text-slate-400" />
+            </div>
+            <h3 className="text-sm font-bold text-slate-900">Audio Engine Diagnostics</h3>
           </div>
           <button
             onClick={onClose}
             className="p-1 hover:bg-slate-100 rounded-lg transition-colors"
           >
-            <X className="w-5 h-5 text-slate-600" />
+            <X className="w-4 h-4 text-slate-600" />
           </button>
         </div>
-        <div className="text-center text-slate-500 py-8">
+        <div className="text-center text-slate-500 py-6 text-sm">
           No audio engine active
         </div>
       </div>
@@ -219,504 +228,382 @@ export function AudioEngineDiagnostics({ metrics, onClose, engineType = 'auto', 
     URL.revokeObjectURL(url);
   };
 
+  // Compact stat row component
+  const StatRow = ({ label, value, valueClass = '' }: { label: string; value: string | number; valueClass?: string }) => (
+    <div className="flex justify-between items-center">
+      <span className="text-[10px] text-slate-500">{label}</span>
+      <span className={`text-[11px] font-semibold ${valueClass || 'text-slate-900'}`}>{value}</span>
+    </div>
+  );
+
   return (
     <div
       ref={dragRef}
       style={{ left: `${position.x}px`, top: `${position.y}px` }}
-      className="fixed bg-white border-2 border-slate-300 rounded-2xl shadow-2xl w-[900px] z-50 select-none"
+      className="fixed bg-white border border-slate-300 rounded-xl shadow-2xl w-[800px] z-50 select-none"
     >
-      {/* Header */}
-      <div className="sticky top-0 bg-white border-b border-slate-200 p-4 rounded-t-2xl">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Move
-              className="w-5 h-5 text-slate-400 cursor-move hover:text-slate-600"
-              onMouseDown={handleMouseDown}
-              title="Drag to move"
-            />
-            <Activity className="w-5 h-5 text-blue-600" />
-            <h3 className="text-lg font-bold text-slate-900">Audio Engine Diagnostics</h3>
+      {/* Compact Header */}
+      <div className="flex items-center justify-between px-3 py-2 border-b border-slate-200 bg-slate-50 rounded-t-xl">
+        <div className="flex items-center gap-2">
+          <div
+            className="cursor-move hover:bg-slate-100 rounded p-0.5"
+            onMouseDown={handleMouseDown}
+            title="Drag to move"
+          >
+            <Move className="w-4 h-4 text-slate-400 hover:text-slate-600" />
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={exportDiagnostics}
-              className="px-3 py-1 text-xs font-bold bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
-            >
-              Export
-            </button>
-            <button
-              onClick={onClose}
-              className="p-1 hover:bg-slate-100 rounded-lg transition-colors"
-            >
-              <X className="w-5 h-5 text-slate-600" />
-            </button>
+          <Activity className="w-4 h-4 text-blue-600" />
+          <h3 className="text-sm font-bold text-slate-900">Audio Engine Diagnostics</h3>
+        </div>
+        <div className="flex items-center gap-3">
+          {/* Quick Status Pills */}
+          <div className="flex items-center gap-1.5">
+            <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded ${getStatusColor(metrics.playbackState)} bg-opacity-10`}>
+              {metrics.playbackState.toUpperCase()}
+            </span>
+            <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded ${getConnectionQualityColor(metrics.connectionQuality)}`}>
+              {metrics.connectionQuality.toUpperCase()}
+            </span>
+            {hlsMetrics?.isHLSActive && (
+              <span className="px-1.5 py-0.5 text-[10px] font-bold bg-indigo-100 text-indigo-700 rounded">
+                HLS
+              </span>
+            )}
           </div>
+          <button
+            onClick={exportDiagnostics}
+            className="px-2 py-1 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 rounded transition-colors"
+          >
+            Export
+          </button>
+          <button
+            onClick={onClose}
+            className="p-1 hover:bg-slate-200 rounded transition-colors"
+          >
+            <X className="w-4 h-4 text-slate-600" />
+          </button>
         </div>
       </div>
 
-      {/* Content - Grid Layout */}
-      <div className="p-4 grid grid-cols-3 gap-3">
-        {/* Row 1: Status, Network, Storage */}
-        <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold text-slate-700 uppercase">Status</span>
-            <span className={`text-sm font-bold ${getStatusColor(metrics.playbackState)}`}>
-              {metrics.playbackState.toUpperCase()}
-            </span>
-          </div>
-          <div className="text-xs text-slate-600 font-mono truncate" title={metrics.currentTrackId || 'No track'}>
-            {metrics.currentTrackId || 'No track loaded'}
-          </div>
-        </div>
-
-        <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
-          <div className="flex items-center gap-2 mb-2">
-            {metrics.isOnline ? (
-              <Wifi className="w-4 h-4 text-green-600" />
-            ) : (
-              <WifiOff className="w-4 h-4 text-red-600" />
-            )}
-            <span className="text-xs font-bold text-slate-700">Network</span>
-          </div>
-          <div className={`text-xs font-bold px-2 py-1 rounded ${getConnectionQualityColor(metrics.connectionQuality)}`}>
-            {metrics.connectionQuality.toUpperCase()}
-          </div>
-        </div>
-
-        <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
-          <div className="flex items-center gap-2 mb-2">
-            <Radio className="w-4 h-4 text-blue-600" />
-            <span className="text-xs font-bold text-slate-700">Storage</span>
-          </div>
-          <div className="text-xs font-bold text-slate-900 truncate" title={metrics.storageBackend}>
-            {metrics.storageBackend}
-          </div>
-        </div>
-
-        {/* Row 2: Retry Status (spans full width if active) */}
-        {metrics.retryAttempt > 0 && (
-          <div className="col-span-3 bg-amber-50 border-2 border-amber-200 rounded-xl p-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-amber-600" />
-                <span className="text-xs font-bold text-amber-900">RETRY IN PROGRESS</span>
-              </div>
-              <div className="flex gap-4 text-xs">
-                <span className="text-amber-700">Attempt: <span className="font-bold text-amber-900">{metrics.retryAttempt}/{metrics.maxRetries}</span></span>
-                {metrics.nextRetryIn > 0 && (
-                  <span className="text-amber-700">Next: <span className="font-bold text-amber-900">{Math.ceil(metrics.nextRetryIn / 1000)}s</span></span>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Row 3: Error (spans full width if present) */}
-        {metrics.error && (
-          <div className="col-span-3 bg-red-50 border-2 border-red-200 rounded-xl p-3">
-            <div className="flex items-center gap-2 mb-1">
-              <AlertCircle className="w-4 h-4 text-red-600" />
-              <span className="text-xs font-bold text-red-900">ERROR</span>
-              <span className="text-xs text-red-600 font-mono ml-auto">
-                {metrics.errorCategory || 'unknown'}
-              </span>
-            </div>
-            <div className="text-xs text-red-700">{metrics.error}</div>
-          </div>
-        )}
-
-        {/* Row 4: Circuit Breaker, Performance, Buffer */}
-        <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
-          <div className="flex items-center gap-2 mb-2">
-            <Zap className="w-4 h-4 text-purple-600" />
-            <span className="text-xs font-bold text-slate-700">Circuit Breaker</span>
-          </div>
-          <div className="space-y-1">
-            <div className={`text-xs font-bold px-2 py-1 rounded ${getCircuitBreakerColor(metrics.circuitBreakerState)}`}>
-              {metrics.circuitBreakerState.toUpperCase()}
-            </div>
-            <div className="flex justify-between text-xs">
-              <span className="text-slate-600">F/S:</span>
-              <span className="font-bold">
-                <span className="text-red-600">{metrics.failureCount}</span>
-                <span className="text-slate-400">/</span>
-                <span className="text-green-600">{metrics.successCount}</span>
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
-          <div className="flex items-center gap-2 mb-2">
-            <TrendingUp className="w-4 h-4 text-blue-600" />
-            <span className="text-xs font-bold text-slate-700">Performance</span>
-          </div>
-          <div className="space-y-1 text-xs">
-            <div className="flex justify-between">
-              <span className="text-slate-600">Load:</span>
-              <span className="font-bold">{Math.round(metrics.loadDuration)}ms</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-600">Bandwidth:</span>
-              <span className="font-bold">{metrics.estimatedBandwidth} kbps</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-600">Success:</span>
-              <span className={`font-bold ${metrics.sessionSuccessRate >= 95 ? 'text-green-600' : metrics.sessionSuccessRate >= 80 ? 'text-yellow-600' : 'text-red-600'}`}>
-                {metrics.sessionSuccessRate}%
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
-          <div className="flex items-center gap-2 mb-2">
-            <Clock className="w-4 h-4 text-green-600" />
-            <span className="text-xs font-bold text-slate-700">Buffer</span>
-          </div>
-          <div className="space-y-1">
-            <div className="flex justify-between text-xs mb-1">
-              <span className="text-slate-600">Buffered:</span>
-              <span className="font-bold">{Math.round(metrics.bufferPercentage)}%</span>
-            </div>
-            <div className="w-full bg-slate-200 rounded-full h-2">
-              <div
-                className="bg-green-600 h-full rounded-full transition-all"
-                style={{ width: `${Math.min(metrics.bufferPercentage, 100)}%` }}
-              />
-            </div>
-            <div className="flex justify-between text-xs">
-              <span className="text-slate-600">{formatBytes(metrics.bytesLoaded)}</span>
-              <span className="text-slate-600">{formatBytes(metrics.totalBytes)}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Row 5: Playback, Stats */}
-        <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
-          <div className="flex items-center gap-2 mb-2">
-            <CheckCircle className="w-4 h-4 text-blue-600" />
-            <span className="text-xs font-bold text-slate-700">Playback</span>
-          </div>
-          <div className="space-y-1 text-xs">
-            <div className="flex justify-between">
-              <span className="text-slate-600">Time:</span>
-              <span className="font-bold font-mono">
-                {formatTime(metrics.currentTime)} / {formatTime(metrics.duration)}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-600">Volume:</span>
-              <span className="font-bold">{Math.round(metrics.volume * 100)}%</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-600">Element:</span>
-              <span className="font-bold">{metrics.audioElement?.toUpperCase() || 'NONE'}</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="col-span-2 bg-slate-50 rounded-xl p-3 border border-slate-200">
-          <div className="flex items-center gap-2 mb-2">
-            <Activity className="w-4 h-4 text-slate-600" />
-            <span className="text-xs font-bold text-slate-700">Status Flags</span>
-          </div>
-          <div className="grid grid-cols-3 gap-2 text-xs">
-            <div className="flex justify-between">
-              <span className="text-slate-600">Waiting:</span>
-              <span className={`font-bold ${metrics.isWaiting ? 'text-yellow-600' : 'text-slate-400'}`}>
-                {metrics.isWaiting ? 'Yes' : 'No'}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-600">Stalled:</span>
-              <span className={`font-bold ${metrics.isStalled ? 'text-red-600' : 'text-slate-400'}`}>
-                {metrics.isStalled ? 'Yes' : 'No'}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-600">MediaSess:</span>
-              <span className={`font-bold ${metrics.mediaSessionActive ? 'text-green-600' : 'text-slate-400'}`}>
-                {metrics.mediaSessionActive ? 'Yes' : 'No'}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-600">Stalls:</span>
-              <span className="font-bold text-orange-600">{metrics.stallCount}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-600">Recovery:</span>
-              <span className="font-bold text-orange-600">{metrics.recoveryAttempts}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-600">Ready:</span>
-              <span className="font-bold text-slate-600">{metrics.readyState}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Row 6: Audio URLs */}
-        <div className="col-span-3 bg-slate-50 rounded-xl p-3 border border-slate-200">
-          <div className="flex items-center gap-2 mb-3">
-            <Link className="w-4 h-4 text-slate-600" />
-            <span className="text-xs font-bold text-slate-700">Audio URLs</span>
-          </div>
-          <div className="space-y-2">
-            {/* Current Track URL */}
-            <div>
-              <div className="text-xs font-bold text-slate-600 mb-1">Current Track:</div>
-              {metrics.currentTrackUrl ? (
-                <div className="bg-white border border-slate-200 rounded-lg p-2">
-                  <div className="text-xs font-mono text-slate-900 break-all">
-                    {metrics.currentTrackUrl}
-                  </div>
+      {/* Content - Compact Grid */}
+      <div className="p-2 max-h-[580px] overflow-y-auto">
+        {/* Alert Banners (Retry / Error) - only show if active */}
+        {(metrics.retryAttempt > 0 || metrics.error) && (
+          <div className="space-y-1.5 mb-2">
+            {metrics.retryAttempt > 0 && (
+              <div className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
+                <div className="flex items-center gap-1.5">
+                  <AlertCircle className="w-3 h-3 text-amber-600" />
+                  <span className="text-[10px] font-bold text-amber-900">RETRY</span>
                 </div>
-              ) : (
-                <div className="text-xs text-slate-400 italic">No track loaded</div>
-              )}
-            </div>
-
-            {/* Prefetch Track URL */}
-            <div>
-              <div className="text-xs font-bold text-slate-600 mb-1">Prefetch Track:</div>
-              {metrics.prefetchedTrackUrl ? (
-                <div className="bg-white border border-blue-200 rounded-lg p-2">
-                  <div className="text-xs font-mono text-slate-900 break-all">
-                    {metrics.prefetchedTrackUrl}
-                  </div>
-                </div>
-              ) : (
-                <div className="text-xs text-slate-400 italic">No prefetch active</div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Row 7: Prefetch (only if active) */}
-        {metrics.prefetchedTrackId && (
-          <div className="col-span-3 bg-blue-50 rounded-xl p-3 border border-blue-200">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <TrendingUp className="w-4 h-4 text-blue-600" />
-                <span className="text-xs font-bold text-blue-900">PREFETCH</span>
-                <span className="text-xs text-blue-700 font-mono truncate max-w-md" title={metrics.prefetchedTrackId}>
-                  {metrics.prefetchedTrackId}
+                <span className="text-[10px] text-amber-700">
+                  Attempt <span className="font-bold">{metrics.retryAttempt}/{metrics.maxRetries}</span>
+                  {metrics.nextRetryIn > 0 && <> · Next in <span className="font-bold">{Math.ceil(metrics.nextRetryIn / 1000)}s</span></>}
                 </span>
               </div>
-              <div className="flex items-center gap-4">
-                <span className="text-xs text-blue-700">Progress: <span className="font-bold text-blue-900">{Math.round(metrics.prefetchProgress)}%</span></span>
-                <span className="text-xs text-blue-700">Ready: <span className="font-bold text-blue-900">{metrics.prefetchReadyState}</span></span>
+            )}
+            {metrics.error && (
+              <div className="bg-red-50 border border-red-200 rounded-lg px-2 py-1.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <AlertCircle className="w-3 h-3 text-red-600" />
+                    <span className="text-[10px] font-bold text-red-900">ERROR</span>
+                  </div>
+                  <span className="text-[10px] text-red-600 font-mono">{metrics.errorCategory || 'unknown'}</span>
+                </div>
+                <div className="text-[10px] text-red-700 mt-0.5 truncate" title={metrics.error}>{metrics.error}</div>
               </div>
-            </div>
+            )}
           </div>
         )}
 
-        {/* Streaming Engine Section Header */}
-        <div className="col-span-3 border-t border-slate-200 pt-3 mt-1">
-          <div className="flex items-center gap-2 mb-3">
-            <Layers className="w-5 h-5 text-indigo-600" />
-            <h4 className="text-sm font-bold text-slate-900">Streaming Engine</h4>
+        {/* Main 4-Column Grid */}
+        <div className="grid grid-cols-4 gap-1.5">
+          {/* Card: Circuit Breaker */}
+          <div className="bg-slate-50 rounded-lg p-2 border border-slate-200">
+            <div className="flex items-center gap-1 mb-1.5">
+              <Zap className="w-3 h-3 text-purple-600" />
+              <span className="text-[10px] font-bold text-slate-600 uppercase">Circuit Breaker</span>
+            </div>
+            <div className={`text-[10px] font-bold px-1.5 py-0.5 rounded inline-block mb-1 ${getCircuitBreakerColor(metrics.circuitBreakerState)}`}>
+              {metrics.circuitBreakerState.toUpperCase()}
+            </div>
+            <StatRow label="F/S" value={`${metrics.failureCount}/${metrics.successCount}`} valueClass={metrics.failureCount > 0 ? 'text-red-600' : 'text-green-600'} />
+          </div>
+
+          {/* Card: Performance */}
+          <div className="bg-slate-50 rounded-lg p-2 border border-slate-200">
+            <div className="flex items-center gap-1 mb-1.5">
+              <TrendingUp className="w-3 h-3 text-blue-600" />
+              <span className="text-[10px] font-bold text-slate-600 uppercase">Performance</span>
+            </div>
+            <StatRow label="Load" value={`${Math.round(metrics.loadDuration)}ms`} />
+            <StatRow label="Bandwidth" value={`${metrics.estimatedBandwidth} kbps`} />
+            <StatRow label="Success" value={`${metrics.sessionSuccessRate}%`} valueClass={metrics.sessionSuccessRate >= 95 ? 'text-green-600' : metrics.sessionSuccessRate >= 80 ? 'text-yellow-600' : 'text-red-600'} />
+          </div>
+
+          {/* Card: Buffer */}
+          <div className="bg-slate-50 rounded-lg p-2 border border-slate-200">
+            <div className="flex items-center gap-1 mb-1.5">
+              <Clock className="w-3 h-3 text-green-600" />
+              <span className="text-[10px] font-bold text-slate-600 uppercase">Buffer</span>
+            </div>
+            <div className="flex items-center gap-1 mb-1">
+              <span className="text-[11px] font-bold">{Math.round(metrics.bufferPercentage)}%</span>
+              <div className="flex-1 bg-slate-200 rounded-full h-1.5">
+                <div
+                  className="bg-green-500 h-full rounded-full transition-all"
+                  style={{ width: `${Math.min(metrics.bufferPercentage, 100)}%` }}
+                />
+              </div>
+            </div>
+            <StatRow label="Loaded" value={formatBytes(metrics.bytesLoaded)} />
+            <StatRow label="Total" value={formatBytes(metrics.totalBytes)} />
+          </div>
+
+          {/* Card: Playback Health */}
+          <div className={`rounded-lg p-2 border ${getHealthColor(healthInfo.status)}`}>
+            <div className="flex items-center gap-1 mb-1.5">
+              <Heart className="w-3 h-3" />
+              <span className="text-[10px] font-bold uppercase">Health</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xl font-bold">{healthInfo.score}</span>
+              <div className="flex-1">
+                <div className="text-[10px] font-bold uppercase mb-0.5">{healthInfo.status}</div>
+                <div className="w-full bg-white/50 rounded-full h-1.5">
+                  <div
+                    className={`h-full rounded-full ${
+                      healthInfo.status === 'excellent' ? 'bg-green-500' :
+                      healthInfo.status === 'good' ? 'bg-blue-500' :
+                      healthInfo.status === 'fair' ? 'bg-yellow-500' : 'bg-red-500'
+                    }`}
+                    style={{ width: `${healthInfo.score}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Card: Playback Info */}
+          <div className="bg-slate-50 rounded-lg p-2 border border-slate-200">
+            <div className="flex items-center gap-1 mb-1.5">
+              <CheckCircle className="w-3 h-3 text-blue-600" />
+              <span className="text-[10px] font-bold text-slate-600 uppercase">Playback</span>
+            </div>
+            <StatRow label="Time" value={`${formatTime(metrics.currentTime)} / ${formatTime(metrics.duration)}`} />
+            <StatRow label="Volume" value={`${Math.round(metrics.volume * 100)}%`} />
+            <StatRow label="Element" value={metrics.audioElement?.toUpperCase() || 'NONE'} />
+          </div>
+
+          {/* Card: Status Flags - spans 2 columns */}
+          <div className="col-span-2 bg-slate-50 rounded-lg p-2 border border-slate-200">
+            <div className="flex items-center gap-1 mb-1.5">
+              <Activity className="w-3 h-3 text-slate-600" />
+              <span className="text-[10px] font-bold text-slate-600 uppercase">Status Flags</span>
+            </div>
+            <div className="grid grid-cols-3 gap-x-3 gap-y-0.5">
+              <StatRow label="Waiting" value={metrics.isWaiting ? 'Yes' : 'No'} valueClass={metrics.isWaiting ? 'text-yellow-600' : 'text-slate-400'} />
+              <StatRow label="Stalled" value={metrics.isStalled ? 'Yes' : 'No'} valueClass={metrics.isStalled ? 'text-red-600' : 'text-slate-400'} />
+              <StatRow label="MediaSess" value={metrics.mediaSessionActive ? 'Yes' : 'No'} valueClass={metrics.mediaSessionActive ? 'text-green-600' : 'text-slate-400'} />
+              <StatRow label="Stalls" value={metrics.stallCount} valueClass="text-orange-600" />
+              <StatRow label="Recovery" value={metrics.recoveryAttempts} valueClass="text-orange-600" />
+              <StatRow label="Ready" value={metrics.readyState} />
+            </div>
+          </div>
+
+          {/* Card: Storage */}
+          <div className="bg-slate-50 rounded-lg p-2 border border-slate-200">
+            <div className="flex items-center gap-1 mb-1.5">
+              <Radio className="w-3 h-3 text-blue-600" />
+              <span className="text-[10px] font-bold text-slate-600 uppercase">Storage</span>
+            </div>
+            <div className="text-[11px] font-semibold text-slate-900 truncate" title={metrics.storageBackend}>
+              {metrics.storageBackend}
+            </div>
+            <div className="text-[10px] text-slate-500 font-mono truncate mt-0.5" title={metrics.currentTrackId || ''}>
+              {metrics.currentTrackId || 'No track'}
+            </div>
+          </div>
+        </div>
+
+        {/* URLs Section - Compact single-line with copy */}
+        <div className="mt-2 bg-slate-50 rounded-lg p-2 border border-slate-200">
+          <div className="flex items-center gap-1 mb-1.5">
+            <Link className="w-3 h-3 text-slate-600" />
+            <span className="text-[10px] font-bold text-slate-600 uppercase">Audio URLs</span>
+          </div>
+          <div className="space-y-1">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-slate-500 w-14 flex-shrink-0">Current:</span>
+              {metrics.currentTrackUrl ? (
+                <>
+                  <div className="flex-1 bg-white border border-slate-200 rounded px-1.5 py-0.5 overflow-hidden">
+                    <span className="text-[10px] font-mono text-slate-700 truncate block">{metrics.currentTrackUrl}</span>
+                  </div>
+                  <button
+                    onClick={() => copyToClipboard(metrics.currentTrackUrl!, 'current')}
+                    className="p-1 hover:bg-slate-200 rounded transition-colors flex-shrink-0"
+                    title="Copy URL"
+                  >
+                    {copiedUrl === 'current' ? <Check className="w-3 h-3 text-green-600" /> : <Copy className="w-3 h-3 text-slate-400" />}
+                  </button>
+                </>
+              ) : (
+                <span className="text-[10px] text-slate-400 italic">No track loaded</span>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-slate-500 w-14 flex-shrink-0">Prefetch:</span>
+              {metrics.prefetchedTrackUrl ? (
+                <>
+                  <div className="flex-1 bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5 overflow-hidden">
+                    <span className="text-[10px] font-mono text-slate-700 truncate block">{metrics.prefetchedTrackUrl}</span>
+                  </div>
+                  <button
+                    onClick={() => copyToClipboard(metrics.prefetchedTrackUrl!, 'prefetch')}
+                    className="p-1 hover:bg-slate-200 rounded transition-colors flex-shrink-0"
+                    title="Copy URL"
+                  >
+                    {copiedUrl === 'prefetch' ? <Check className="w-3 h-3 text-green-600" /> : <Copy className="w-3 h-3 text-slate-400" />}
+                  </button>
+                </>
+              ) : (
+                <span className="text-[10px] text-slate-400 italic">No prefetch active</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Prefetch Status - Compact inline */}
+        {metrics.prefetchedTrackId && (
+          <div className="mt-1.5 flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-lg px-2 py-1.5">
+            <TrendingUp className="w-3 h-3 text-blue-600 flex-shrink-0" />
+            <span className="text-[10px] font-bold text-blue-900">PREFETCH</span>
+            <span className="text-[10px] text-blue-700 font-mono truncate flex-1" title={metrics.prefetchedTrackId}>
+              {metrics.prefetchedTrackId}
+            </span>
+            <span className="text-[10px] text-blue-700">
+              <span className="font-bold">{Math.round(metrics.prefetchProgress)}%</span>
+              <span className="mx-1">·</span>
+              Ready: <span className="font-bold">{metrics.prefetchReadyState}</span>
+            </span>
+          </div>
+        )}
+
+        {/* Streaming Engine Section */}
+        <div className="mt-2 pt-2 border-t border-slate-200">
+          <div className="flex items-center gap-2 mb-1.5">
+            <Layers className="w-4 h-4 text-indigo-600" />
+            <span className="text-xs font-bold text-slate-900">Streaming Engine</span>
             {hlsMetrics?.isHLSActive && (
-              <span className="px-2 py-0.5 text-xs font-bold bg-indigo-100 text-indigo-700 rounded-full">
+              <span className="px-1.5 py-0.5 text-[10px] font-bold bg-indigo-100 text-indigo-700 rounded">
                 HLS ACTIVE
               </span>
             )}
             {isStreamingEngine && !hlsMetrics?.isHLSActive && (
-              <span className="px-2 py-0.5 text-xs font-bold bg-amber-100 text-amber-700 rounded-full">
+              <span className="px-1.5 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-700 rounded">
                 MP3 FALLBACK
               </span>
             )}
           </div>
-        </div>
 
-        {/* Row 8: Delivery Source Card */}
-        <div className="bg-indigo-50 rounded-xl p-3 border border-indigo-200">
-          <div className="flex items-center gap-2 mb-2">
-            <Server className="w-4 h-4 text-indigo-600" />
-            <span className="text-xs font-bold text-slate-700">Delivery Source</span>
-          </div>
-          <div className="space-y-1 text-xs">
-            <div className="flex justify-between">
-              <span className="text-slate-600">Engine:</span>
-              <span className={`font-bold ${isStreamingEngine ? 'text-indigo-600' : 'text-slate-600'}`}>
-                {isStreamingEngine ? 'Streaming' : 'Legacy'}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-600">Format:</span>
-              <span className={`font-bold ${deliveryInfo.type === 'hls' ? 'text-indigo-600' : deliveryInfo.type === 'mp3' ? 'text-blue-600' : 'text-slate-400'}`}>
-                {deliveryInfo.type === 'hls' ? 'HLS' : deliveryInfo.type === 'mp3' ? 'MP3' : 'None'}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-600">Source:</span>
-              <span className="font-bold text-slate-900 truncate max-w-[120px]" title={deliveryInfo.source}>
-                {deliveryInfo.source}
-              </span>
-            </div>
-            {hlsMetrics?.isHLSActive && (
-              <div className="flex justify-between">
-                <span className="text-slate-600">HLS Mode:</span>
-                <span className="font-bold text-indigo-600">
-                  {hlsMetrics.isNativeHLS ? 'Native (Safari)' : 'hls.js'}
-                </span>
+          <div className="grid grid-cols-4 gap-1.5">
+            {/* Delivery Source */}
+            <div className="bg-indigo-50 rounded-lg p-2 border border-indigo-200">
+              <div className="flex items-center gap-1 mb-1.5">
+                <Server className="w-3 h-3 text-indigo-600" />
+                <span className="text-[10px] font-bold text-slate-600 uppercase">Delivery</span>
               </div>
-            )}
-          </div>
-        </div>
-
-        {/* Row 9: HLS Quality Card (only when HLS active) */}
-        {hlsMetrics?.isHLSActive ? (
-          <div className="bg-indigo-50 rounded-xl p-3 border border-indigo-200">
-            <div className="flex items-center gap-2 mb-2">
-              <Gauge className="w-4 h-4 text-indigo-600" />
-              <span className="text-xs font-bold text-slate-700">HLS Quality</span>
-            </div>
-            <div className="space-y-1 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-600">Level:</span>
-                <span className="font-bold text-indigo-600">
-                  {hlsMetrics.currentLevel >= 0 ? `Level ${hlsMetrics.currentLevel}` : 'Auto'}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-600">Bandwidth:</span>
-                <span className="font-bold text-slate-900">
-                  {formatBitrate(hlsMetrics.bandwidthEstimate)}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-600">Levels:</span>
-                <span className="font-bold text-slate-600">
-                  {hlsMetrics.levels.length > 0 ? hlsMetrics.levels.length : '-'}
-                </span>
-              </div>
-              {hlsMetrics.levels.length > 0 && (
-                <div className="mt-1 pt-1 border-t border-indigo-200">
-                  <div className="text-slate-500 text-[10px]">
-                    {hlsMetrics.levels.map((l, i) => (
-                      <span key={i} className={`${i === hlsMetrics.currentLevel ? 'text-indigo-600 font-bold' : ''}`}>
-                        {formatBitrate(l.bitrate)}{i < hlsMetrics.levels.length - 1 ? ' • ' : ''}
-                      </span>
-                    ))}
-                  </div>
-                </div>
+              <StatRow label="Engine" value={isStreamingEngine ? 'Streaming' : 'Legacy'} valueClass={isStreamingEngine ? 'text-indigo-600' : ''} />
+              <StatRow label="Format" value={deliveryInfo.type === 'hls' ? 'HLS' : deliveryInfo.type === 'mp3' ? 'MP3' : 'None'} valueClass={deliveryInfo.type === 'hls' ? 'text-indigo-600' : ''} />
+              <StatRow label="Source" value={deliveryInfo.source} />
+              {hlsMetrics?.isHLSActive && (
+                <StatRow label="Mode" value={hlsMetrics.isNativeHLS ? 'Native' : 'hls.js'} valueClass="text-indigo-600" />
               )}
             </div>
-          </div>
-        ) : (
-          <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
-            <div className="flex items-center gap-2 mb-2">
-              <Gauge className="w-4 h-4 text-slate-400" />
-              <span className="text-xs font-bold text-slate-400">HLS Quality</span>
-            </div>
-            <div className="text-xs text-slate-400 italic text-center py-2">
-              Not using HLS
-            </div>
-          </div>
-        )}
 
-        {/* Row 10: Health Summary Card */}
-        <div className={`rounded-xl p-3 border ${getHealthColor(healthInfo.status)}`}>
-          <div className="flex items-center gap-2 mb-2">
-            <Heart className="w-4 h-4" />
-            <span className="text-xs font-bold">Playback Health</span>
-          </div>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-2xl font-bold">{healthInfo.score}</span>
-              <span className="text-xs font-bold uppercase">{healthInfo.status}</span>
-            </div>
-            <div className="w-full bg-white/50 rounded-full h-2">
-              <div
-                className={`h-full rounded-full transition-all ${
-                  healthInfo.status === 'excellent' ? 'bg-green-500' :
-                  healthInfo.status === 'good' ? 'bg-blue-500' :
-                  healthInfo.status === 'fair' ? 'bg-yellow-500' : 'bg-red-500'
-                }`}
-                style={{ width: `${healthInfo.score}%` }}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Row 11: HLS Buffer Card (only when HLS active) */}
-        {hlsMetrics?.isHLSActive && (
-          <div className="col-span-3 bg-indigo-50 rounded-xl p-3 border border-indigo-200">
-            <div className="flex items-center gap-2 mb-2">
-              <Clock className="w-4 h-4 text-indigo-600" />
-              <span className="text-xs font-bold text-slate-700">HLS Buffer</span>
-            </div>
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <div className="text-xs text-slate-600 mb-1">Buffer Length</div>
-                <div className="flex items-baseline gap-1">
-                  <span className="text-lg font-bold text-indigo-600">
-                    {hlsMetrics.bufferLength.toFixed(1)}s
-                  </span>
-                  <span className="text-xs text-slate-500">/ {hlsMetrics.targetBuffer}s</span>
+            {/* HLS Quality */}
+            {hlsMetrics?.isHLSActive ? (
+              <div className="bg-indigo-50 rounded-lg p-2 border border-indigo-200">
+                <div className="flex items-center gap-1 mb-1.5">
+                  <Gauge className="w-3 h-3 text-indigo-600" />
+                  <span className="text-[10px] font-bold text-slate-600 uppercase">HLS Quality</span>
                 </div>
-                <div className="w-full bg-indigo-200 rounded-full h-1.5 mt-1">
+                <StatRow label="Level" value={hlsMetrics.currentLevel >= 0 ? `L${hlsMetrics.currentLevel}` : 'Auto'} valueClass="text-indigo-600" />
+                <StatRow label="Bandwidth" value={formatBitrate(hlsMetrics.bandwidthEstimate)} />
+                <StatRow label="Levels" value={hlsMetrics.levels.length || '-'} />
+              </div>
+            ) : (
+              <div className="bg-slate-50 rounded-lg p-2 border border-slate-200 opacity-50">
+                <div className="flex items-center gap-1 mb-1.5">
+                  <Gauge className="w-3 h-3 text-slate-400" />
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">HLS Quality</span>
+                </div>
+                <div className="text-[10px] text-slate-400 italic text-center py-1">Not using HLS</div>
+              </div>
+            )}
+
+            {/* HLS Buffer */}
+            {hlsMetrics?.isHLSActive ? (
+              <div className="bg-indigo-50 rounded-lg p-2 border border-indigo-200">
+                <div className="flex items-center gap-1 mb-1.5">
+                  <Clock className="w-3 h-3 text-indigo-600" />
+                  <span className="text-[10px] font-bold text-slate-600 uppercase">HLS Buffer</span>
+                </div>
+                <div className="flex items-center gap-1 mb-1">
+                  <span className="text-[11px] font-bold text-indigo-600">{hlsMetrics.bufferLength.toFixed(1)}s</span>
+                  <span className="text-[10px] text-slate-500">/ {hlsMetrics.targetBuffer}s</span>
+                </div>
+                <div className="w-full bg-indigo-200 rounded-full h-1 mb-1">
                   <div
-                    className={`h-full rounded-full transition-all ${
+                    className={`h-full rounded-full ${
                       hlsMetrics.bufferLength / hlsMetrics.targetBuffer > 0.5 ? 'bg-indigo-600' :
                       hlsMetrics.bufferLength / hlsMetrics.targetBuffer > 0.25 ? 'bg-yellow-500' : 'bg-red-500'
                     }`}
                     style={{ width: `${Math.min((hlsMetrics.bufferLength / hlsMetrics.targetBuffer) * 100, 100)}%` }}
                   />
                 </div>
+                <StatRow label="Segments" value={hlsMetrics.bufferedSegments} />
+                <StatRow label="Latency" value={`${Math.round(hlsMetrics.latency)}ms`} />
               </div>
-              <div>
-                <div className="text-xs text-slate-600 mb-1">Segments Buffered</div>
-                <span className="text-lg font-bold text-slate-900">{hlsMetrics.bufferedSegments}</span>
+            ) : (
+              <div className="bg-slate-50 rounded-lg p-2 border border-slate-200 opacity-50">
+                <div className="flex items-center gap-1 mb-1.5">
+                  <Clock className="w-3 h-3 text-slate-400" />
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">HLS Buffer</span>
+                </div>
+                <div className="text-[10px] text-slate-400 italic text-center py-1">N/A</div>
               </div>
-              <div>
-                <div className="text-xs text-slate-600 mb-1">Latency</div>
-                <span className="text-lg font-bold text-slate-900">{Math.round(hlsMetrics.latency)}ms</span>
-              </div>
-            </div>
-          </div>
-        )}
+            )}
 
-        {/* Row 12: HLS Fragment Stats (only when HLS active) */}
-        {hlsMetrics?.isHLSActive && (
-          <div className="col-span-3 bg-indigo-50 rounded-xl p-3 border border-indigo-200">
-            <div className="flex items-center gap-2 mb-2">
-              <PlayCircle className="w-4 h-4 text-indigo-600" />
-              <span className="text-xs font-bold text-slate-700">HLS Fragment Stats</span>
-            </div>
-            <div className="grid grid-cols-4 gap-4">
-              <div>
-                <div className="text-xs text-slate-600 mb-1">Loaded</div>
-                <span className="text-lg font-bold text-green-600">{hlsMetrics.fragmentStats.loaded}</span>
-              </div>
-              <div>
-                <div className="text-xs text-slate-600 mb-1">Failed</div>
-                <span className={`text-lg font-bold ${hlsMetrics.fragmentStats.failed > 0 ? 'text-red-600' : 'text-slate-400'}`}>
-                  {hlsMetrics.fragmentStats.failed}
-                </span>
-              </div>
-              <div>
-                <div className="text-xs text-slate-600 mb-1">Retried</div>
-                <span className={`text-lg font-bold ${hlsMetrics.fragmentStats.retried > 0 ? 'text-yellow-600' : 'text-slate-400'}`}>
-                  {hlsMetrics.fragmentStats.retried}
-                </span>
-              </div>
-              <div>
-                <div className="text-xs text-slate-600 mb-1">Success Rate</div>
+            {/* HLS Fragment Stats */}
+            {hlsMetrics?.isHLSActive ? (
+              <div className="bg-indigo-50 rounded-lg p-2 border border-indigo-200">
+                <div className="flex items-center gap-1 mb-1.5">
+                  <PlayCircle className="w-3 h-3 text-indigo-600" />
+                  <span className="text-[10px] font-bold text-slate-600 uppercase">Fragments</span>
+                </div>
+                <StatRow label="Loaded" value={hlsMetrics.fragmentStats.loaded} valueClass="text-green-600" />
+                <StatRow label="Failed" value={hlsMetrics.fragmentStats.failed} valueClass={hlsMetrics.fragmentStats.failed > 0 ? 'text-red-600' : 'text-slate-400'} />
+                <StatRow label="Retried" value={hlsMetrics.fragmentStats.retried} valueClass={hlsMetrics.fragmentStats.retried > 0 ? 'text-yellow-600' : 'text-slate-400'} />
                 {(() => {
                   const total = hlsMetrics.fragmentStats.loaded + hlsMetrics.fragmentStats.failed;
-                  const rate = total > 0 ? ((hlsMetrics.fragmentStats.loaded / total) * 100).toFixed(1) : '100.0';
-                  return (
-                    <span className={`text-lg font-bold ${parseFloat(rate) >= 99 ? 'text-green-600' : parseFloat(rate) >= 95 ? 'text-yellow-600' : 'text-red-600'}`}>
-                      {rate}%
-                    </span>
-                  );
+                  const rate = total > 0 ? ((hlsMetrics.fragmentStats.loaded / total) * 100).toFixed(0) : '100';
+                  return <StatRow label="Success" value={`${rate}%`} valueClass={parseFloat(rate) >= 99 ? 'text-green-600' : parseFloat(rate) >= 95 ? 'text-yellow-600' : 'text-red-600'} />;
                 })()}
               </div>
-            </div>
+            ) : (
+              <div className="bg-slate-50 rounded-lg p-2 border border-slate-200 opacity-50">
+                <div className="flex items-center gap-1 mb-1.5">
+                  <PlayCircle className="w-3 h-3 text-slate-400" />
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">Fragments</span>
+                </div>
+                <div className="text-[10px] text-slate-400 italic text-center py-1">N/A</div>
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
