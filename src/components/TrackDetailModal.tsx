@@ -238,6 +238,16 @@ export function TrackDetailModal({ track, channelAssignments, channels, onClose,
 
       if (uploadError) throw uploadError;
 
+      // Derive energy_level string from boolean fields (for Music Library list display)
+      // Priority: high > medium > low
+      const derivedEnergyLevel = editedMetadata.energy_high
+        ? 'high'
+        : editedMetadata.energy_medium
+        ? 'medium'
+        : editedMetadata.energy_low
+        ? 'low'
+        : null;
+
       // Update database with top-level columns and energy levels
       const { error: dbError } = await supabase
         .from('audio_tracks')
@@ -253,6 +263,7 @@ export function TrackDetailModal({ track, channelAssignments, channels, onClose,
           brightness: editedMetadata.brightness ? Number(editedMetadata.brightness) : null,
           complexity: editedMetadata.complexity ? Number(editedMetadata.complexity) : null,
           music_key_value: editedMetadata.music_key_value || null,
+          energy_level: derivedEnergyLevel,
           energy_low: editedMetadata.energy_low || false,
           energy_medium: editedMetadata.energy_medium || false,
           energy_high: editedMetadata.energy_high || false,
@@ -271,6 +282,7 @@ export function TrackDetailModal({ track, channelAssignments, channels, onClose,
       track.genre = editedMetadata.genre;
       track.tempo = editedMetadata.tempo;
       // Update energy level fields so the UI reflects the saved values
+      track.energy_level = derivedEnergyLevel;
       track.energy_low = editedMetadata.energy_low || false;
       track.energy_medium = editedMetadata.energy_medium || false;
       track.energy_high = editedMetadata.energy_high || false;
