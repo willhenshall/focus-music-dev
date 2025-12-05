@@ -470,7 +470,10 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
       file_size_bytes: file.size,
       mimetype: file.type,
       original_filename: file.name,
-      energy_level: formData.energy_level,
+      // Store energy as boolean fields in metadata (single source of truth)
+      energy_low: formData.energy_level === 'low',
+      energy_medium: formData.energy_level === 'medium',
+      energy_high: formData.energy_level === 'high',
       upload_date: new Date().toISOString(),
       // Channel assignments (for reference in sidecar)
       assigned_channels: skipChannelAssignment ? [] : selectedChannels,
@@ -484,10 +487,14 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
     if (tempId) updateTrackStep(tempId, 'database', 'in-progress', trackId);
 
     // Prepare common fields for database insertion
+    // Convert energy_level selection to boolean fields (single source of truth)
     const commonTrackData = {
       track_id: trackIdValue,
       file_path: publicUrl,
-      energy_level: formData.energy_level,
+      // Set boolean energy fields based on selection
+      energy_low: formData.energy_level === 'low',
+      energy_medium: formData.energy_level === 'medium',
+      energy_high: formData.energy_level === 'high',
       duration_seconds: durationSeconds,
       metadata,
       // Add top-level fields for track name, artist, genre, and tempo
