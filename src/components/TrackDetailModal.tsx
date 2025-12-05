@@ -270,6 +270,10 @@ export function TrackDetailModal({ track, channelAssignments, channels, onClose,
       track.artist_name = editedMetadata.artist_name;
       track.genre = editedMetadata.genre;
       track.tempo = editedMetadata.tempo;
+      // Update energy level fields so the UI reflects the saved values
+      track.energy_low = editedMetadata.energy_low || false;
+      track.energy_medium = editedMetadata.energy_medium || false;
+      track.energy_high = editedMetadata.energy_high || false;
       track.metadata = {
         ...track.metadata,
         ...editedMetadata
