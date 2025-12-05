@@ -618,9 +618,16 @@ export function MusicLibrary() {
       let bValue: any;
 
       if (sortField === 'energy_level') {
-        const energyOrder = { low: 1, medium: 2, high: 3 };
-        aValue = energyOrder[a.energy_level as keyof typeof energyOrder] || 0;
-        bValue = energyOrder[b.energy_level as keyof typeof energyOrder] || 0;
+        // Derive sort value from boolean fields (priority: high=3, medium=2, low=1)
+        // For multi-energy tracks, use the highest energy level for sorting
+        const getEnergyScore = (track: AudioTrack) => {
+          if (track.energy_high) return 3;
+          if (track.energy_medium) return 2;
+          if (track.energy_low) return 1;
+          return 0;
+        };
+        aValue = getEnergyScore(a);
+        bValue = getEnergyScore(b);
       } else if (sortField === 'channels') {
         aValue = (trackAssignmentsCache[a.metadata?.track_id || ''] || []).length;
         bValue = (trackAssignmentsCache[b.metadata?.track_id || ''] || []).length;
@@ -897,20 +904,54 @@ export function MusicLibrary() {
             {track.artist_name || <><span className="font-bold">focus</span>.music</>}
           </span>
         );
-      case 'energy_level':
+      case 'energy_level': {
+        // Derive energy display from boolean fields (single source of truth)
+        const energyLevels: string[] = [];
+        if (track.energy_low) energyLevels.push('low');
+        if (track.energy_medium) energyLevels.push('medium');
+        if (track.energy_high) energyLevels.push('high');
+        
+        if (energyLevels.length === 0) {
+          return (
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">
+              not defined
+            </span>
+          );
+        }
+        
+        // For single energy level, show colored badge
+        if (energyLevels.length === 1) {
+          const level = energyLevels[0];
+          return (
+            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+              level === 'high'
+                ? 'bg-red-100 text-red-800'
+                : level === 'medium'
+                ? 'bg-yellow-100 text-yellow-800'
+                : 'bg-green-100 text-green-800'
+            }`}>
+              {level}
+            </span>
+          );
+        }
+        
+        // For multiple energy levels, show stacked badges
         return (
-          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-            track.energy_level === 'high'
-              ? 'bg-red-100 text-red-800'
-              : track.energy_level === 'medium'
-              ? 'bg-yellow-100 text-yellow-800'
-              : track.energy_level === 'low'
-              ? 'bg-green-100 text-green-800'
-              : 'bg-slate-100 text-slate-600'
-          }`}>
-            {track.energy_level || 'not defined'}
-          </span>
+          <div className="flex flex-wrap gap-1">
+            {energyLevels.map(level => (
+              <span key={level} className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                level === 'high'
+                  ? 'bg-red-100 text-red-800'
+                  : level === 'medium'
+                  ? 'bg-yellow-100 text-yellow-800'
+                  : 'bg-green-100 text-green-800'
+              }`}>
+                {level[0].toUpperCase()}
+              </span>
+            ))}
+          </div>
         );
+      }
       case 'energy_low':
         return (
           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
@@ -1331,8 +1372,14 @@ export function MusicLibrary() {
                 return escapeCSV(metadata.album_name || '');
               case 'genre_category':
                 return escapeCSV(metadata.genre_category || '');
-              case 'energy_level':
-                return escapeCSV(track.energy_level || '');
+              case 'energy_level': {
+                // Derive from boolean fields for CSV export
+                const levels: string[] = [];
+                if (track.energy_low) levels.push('low');
+                if (track.energy_medium) levels.push('medium');
+                if (track.energy_high) levels.push('high');
+                return escapeCSV(levels.join(', ') || '');
+              }
               case 'energy_low':
                 return escapeCSV(track.energy_low ? 'Yes' : 'No');
               case 'energy_medium':
@@ -1863,7 +1910,8 @@ FROM audio_tracks;
               brightness: track.brightness || '',
               complexity: track.complexity || '',
               music_key_value: track.music_key_value || '',
-              energy_level: track.energy_level || '',
+              // Derive energy_level from booleans for backwards compatibility
+              energy_level: track.energy_high ? 'high' : track.energy_medium ? 'medium' : track.energy_low ? 'low' : '',
               energy_low: track.energy_low || false,
               energy_medium: track.energy_medium || false,
               energy_high: track.energy_high || false,

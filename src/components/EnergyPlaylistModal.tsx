@@ -28,6 +28,32 @@ type PlaylistTrack = {
 type SortField = 'track_id' | 'track_name' | 'artist' | 'energy_level' | 'file_size' | 'duration' | 'bpm';
 type SortDirection = 'asc' | 'desc';
 
+// Helper to derive energy display from boolean fields
+const getEnergyDisplay = (track: AudioTrack | undefined): { label: string; className: string } => {
+  if (!track) return { label: 'N/A', className: 'bg-slate-100 text-slate-800' };
+  
+  const levels: string[] = [];
+  if (track.energy_low) levels.push('low');
+  if (track.energy_medium) levels.push('medium');
+  if (track.energy_high) levels.push('high');
+  
+  if (levels.length === 0) {
+    return { label: 'N/A', className: 'bg-slate-100 text-slate-800' };
+  }
+  
+  // For single level, return appropriate color
+  if (levels.length === 1) {
+    const level = levels[0];
+    const className = level === 'high' ? 'bg-red-100 text-red-800' :
+                      level === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                      'bg-green-100 text-green-800';
+    return { label: level, className };
+  }
+  
+  // For multiple levels, show abbreviated
+  return { label: levels.map(l => l[0].toUpperCase()).join('/'), className: 'bg-purple-100 text-purple-800' };
+};
+
 type Props = {
   channel?: AudioChannel;
   onClose: () => void;
@@ -1510,7 +1536,12 @@ export function EnergyPlaylistModal({ channel, onClose, onUpdate, onClearSearch,
       const album = track.album?.toLowerCase() || '';
       const genre = track.genre?.toLowerCase() || '';
       const bpm = track.tempo?.toString() || '';
-      const energyLevel = track.energy_level?.toLowerCase() || '';
+      // Derive energy level string from boolean fields for search
+      const energyLevels: string[] = [];
+      if (track.energy_low) energyLevels.push('low');
+      if (track.energy_medium) energyLevels.push('medium');
+      if (track.energy_high) energyLevels.push('high');
+      const energyLevel = energyLevels.join(' ').toLowerCase();
 
       return searchTerms.every(term => {
         const termLower = term.toLowerCase();
@@ -1541,11 +1572,18 @@ export function EnergyPlaylistModal({ channel, onClose, onUpdate, onClearSearch,
           aValue = a.artist_name || '';
           bValue = b.artist_name || '';
           break;
-        case 'energy_level':
-          const energyOrder = { low: 1, medium: 2, high: 3 };
-          aValue = energyOrder[a.energy_level as EnergyLevel] || 0;
-          bValue = energyOrder[b.energy_level as EnergyLevel] || 0;
+        case 'energy_level': {
+          // Derive energy score from boolean fields (priority: high=3, medium=2, low=1)
+          const getEnergyScore = (track: any) => {
+            if (track.energy_high) return 3;
+            if (track.energy_medium) return 2;
+            if (track.energy_low) return 1;
+            return 0;
+          };
+          aValue = getEnergyScore(a);
+          bValue = getEnergyScore(b);
           break;
+        }
         case 'file_size':
           aValue = typeof a.file_size === 'string' ? parseFloat(a.file_size) : a.file_size || 0;
           bValue = typeof b.file_size === 'string' ? parseFloat(b.file_size) : b.file_size || 0;
@@ -2535,14 +2573,14 @@ export function EnergyPlaylistModal({ channel, onClose, onUpdate, onClearSearch,
                                 <div className="overflow-x-auto whitespace-nowrap scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-slate-100">{track?.artist_name || 'Unknown'}</div>
                               </td>
                               <td className="px-3 py-2 w-32">
-                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                  track?.energy_level === 'high' ? 'bg-red-100 text-red-800' :
-                                  track?.energy_level === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                                  track?.energy_level === 'low' ? 'bg-green-100 text-green-800' :
-                                  'bg-slate-100 text-slate-800'
-                                }`}>
-                                  {track?.energy_level || 'N/A'}
-                                </span>
+                                {(() => {
+                                  const energy = getEnergyDisplay(track);
+                                  return (
+                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${energy.className}`}>
+                                      {energy.label}
+                                    </span>
+                                  );
+                                })()}
                               </td>
                               <td className="px-3 py-2 text-sm text-slate-600 w-28">{formatFileSize(track?.file_size)}</td>
                               <td className="px-3 py-2 text-sm text-slate-600 w-24">{getChannelCount(trackId)}</td>
@@ -2679,14 +2717,14 @@ export function EnergyPlaylistModal({ channel, onClose, onUpdate, onClearSearch,
                               <div className="overflow-x-auto whitespace-nowrap scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-slate-100">{track?.artist_name || 'Unknown'}</div>
                             </td>
                             <td className="px-3 py-2 w-32">
-                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                track?.energy_level === 'high' ? 'bg-red-100 text-red-800' :
-                                track?.energy_level === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                                track?.energy_level === 'low' ? 'bg-green-100 text-green-800' :
-                                'bg-slate-100 text-slate-800'
-                              }`}>
-                                {track?.energy_level || 'N/A'}
-                              </span>
+                              {(() => {
+                                const energy = getEnergyDisplay(track);
+                                return (
+                                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${energy.className}`}>
+                                    {energy.label}
+                                  </span>
+                                );
+                              })()}
                             </td>
                             <td className="px-3 py-2 text-sm text-slate-600 w-28">{formatFileSize(track?.file_size)}</td>
                             <td className="px-3 py-2 text-sm text-slate-600 w-24">{getChannelCount(trackId)}</td>
@@ -2923,14 +2961,14 @@ export function EnergyPlaylistModal({ channel, onClose, onUpdate, onClearSearch,
                               <div className="overflow-x-auto whitespace-nowrap scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-slate-100">{track.artist_name || 'Unknown'}</div>
                             </td>
                             <td className="px-3 py-2 w-32">
-                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                track.energy_level === 'high' ? 'bg-red-100 text-red-800' :
-                                track.energy_level === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                                track.energy_level === 'low' ? 'bg-green-100 text-green-800' :
-                                'bg-slate-100 text-slate-800'
-                              }`}>
-                                {track.energy_level || 'N/A'}
-                              </span>
+                              {(() => {
+                                const energy = getEnergyDisplay(track);
+                                return (
+                                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${energy.className}`}>
+                                    {energy.label}
+                                  </span>
+                                );
+                              })()}
                             </td>
                             <td className="px-3 py-2 text-sm text-slate-600 w-28">
                               {formatFileSize(track.file_size)}
@@ -3364,14 +3402,14 @@ export function EnergyPlaylistModal({ channel, onClose, onUpdate, onClearSearch,
                               <div className="overflow-x-auto whitespace-nowrap scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-slate-100">{track.artist_name || channel?.channel_name || 'Unknown'}</div>
                             </td>
                             <td className="px-3 py-2">
-                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                track.energy_level === 'high' ? 'bg-red-100 text-red-800' :
-                                track.energy_level === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                                track.energy_level === 'low' ? 'bg-green-100 text-green-800' :
-                                'bg-slate-100 text-slate-800'
-                              }`}>
-                                {track.energy_level || 'N/A'}
-                              </span>
+                              {(() => {
+                                const energy = getEnergyDisplay(track);
+                                return (
+                                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${energy.className}`}>
+                                    {energy.label}
+                                  </span>
+                                );
+                              })()}
                             </td>
                             <td className="px-3 py-2 text-sm text-slate-600">{formatFileSize(track.file_size)}</td>
                             <td className="px-3 py-2 text-sm text-slate-600">N/A</td>
