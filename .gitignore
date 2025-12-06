@@ -14,3 +14,7 @@ pnpm-lock.yaml
 playwright-report/
 test-results/
 *.last-run.json
+
+# Generated/temp files
+assets/
+supabase/.temp/
