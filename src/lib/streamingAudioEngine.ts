@@ -71,9 +71,20 @@ const CELLULAR_RETRY_CONFIG: RetryConfig = {
 // ============================================================================
 
 /**
- * Check if browser supports native HLS (Safari, iOS)
+ * Check if browser should use native HLS (Safari/iOS only)
+ * Chrome reports 'maybe' for HLS but doesn't fully support ABR,
+ * so we only use native for actual Safari/iOS where it works properly.
  */
 function supportsNativeHLS(): boolean {
+  // Only use native HLS for Safari/iOS - Chrome's partial support doesn't work well for ABR
+  const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  
+  if (!isSafari && !isIOS) {
+    return false; // Use HLS.js for Chrome, Firefox, etc.
+  }
+  
   const video = document.createElement('video');
   return Boolean(
     video.canPlayType('application/vnd.apple.mpegurl') ||
@@ -411,11 +422,18 @@ export class StreamingAudioEngine implements IAudioEngine {
     const levelTimeout = this.isCellular ? 30000 : 10000;     // 30s for cell, 10s for WiFi
     const manifestTimeout = this.isCellular ? 30000 : 10000;  // 30s for cell, 10s for WiFi
     
+    // [CELLBUG FIX] Lower initial bandwidth estimate on slow networks
+    // This makes HLS start with lower quality (if available) instead of buffering
+    const initialBandwidthEstimate = this.isCellular 
+      ? 150000   // 150 kbps - assume very slow on cellular/throttled
+      : this.hlsConfig.abrEwmaDefaultEstimate;  // 500 kbps default
+    
     console.log('[AUDIO][CELLBUG][HLS] Creating HLS instance', {
       fragTimeout,
       fragRetries,
       levelTimeout,
       manifestTimeout,
+      initialBandwidthEstimate,
       isCellular: this.isCellular,
     });
     
@@ -426,7 +444,10 @@ export class StreamingAudioEngine implements IAudioEngine {
       maxBufferHole: this.hlsConfig.maxBufferHole,
       lowLatencyMode: this.hlsConfig.lowLatencyMode,
       startLevel: this.hlsConfig.startLevel,
-      abrEwmaDefaultEstimate: this.hlsConfig.abrEwmaDefaultEstimate,
+      abrEwmaDefaultEstimate: initialBandwidthEstimate,
+      // [CELLBUG FIX] Enable ABR (adaptive bitrate) switching
+      abrBandWidthFactor: 0.8,        // Be conservative - use 80% of measured bandwidth
+      abrBandWidthUpFactor: 0.5,      // Be very conservative when upgrading quality
       // Additional optimizations for audio
       enableWorker: true,
       // [CELLBUG FIX] Extended timeouts for cellular networks
@@ -441,8 +462,26 @@ export class StreamingAudioEngine implements IAudioEngine {
     
     // HLS event handlers
     hls.on(Hls.Events.MANIFEST_PARSED, (event, data) => {
-      console.log('[HLS] Manifest parsed, levels:', data.levels.length);
-      this.hlsMetrics.levels = data.levels.map((level, index) => ({
+      // [CELLBUG FIX] Log available quality levels for ABR
+      const levelInfo = data.levels.map((level: any, index: number) => ({
+        index,
+        bitrate: level.bitrate,
+        bitrateKbps: Math.round(level.bitrate / 1000),
+      }));
+      
+      console.log('[AUDIO][CELLBUG][HLS] Manifest parsed', {
+        levelCount: data.levels.length,
+        levels: levelInfo,
+        hasMultipleQualities: data.levels.length > 1,
+        isCellular: this.isCellular,
+      });
+      
+      // Warn if only single quality available (no ABR possible)
+      if (data.levels.length === 1) {
+        console.warn('[AUDIO][CELLBUG][HLS] ⚠️ Only 1 quality level available - ABR cannot help on slow networks. Consider encoding audio at multiple bitrates.');
+      }
+      
+      this.hlsMetrics.levels = data.levels.map((level: any, index: number) => ({
         index,
         bitrate: level.bitrate,
         width: level.width,
@@ -453,7 +492,12 @@ export class StreamingAudioEngine implements IAudioEngine {
     });
     
     hls.on(Hls.Events.LEVEL_SWITCHED, (event, data) => {
-      console.log('[HLS] Level switched to:', data.level);
+      const level = this.hlsMetrics.levels[data.level];
+      console.log('[AUDIO][CELLBUG][HLS] Level switched', {
+        newLevel: data.level,
+        bitrate: level?.bitrate,
+        bitrateKbps: level?.bitrate ? Math.round(level.bitrate / 1000) : 'unknown',
+      });
       this.hlsMetrics.currentLevel = data.level;
       this.updateMetrics();
     });
@@ -586,22 +630,35 @@ export class StreamingAudioEngine implements IAudioEngine {
   private updateConnectionQuality(): void {
     if (!navigator.onLine) {
       this.metrics.connectionQuality = 'offline';
+      this.isCellular = false;
       return;
     }
     
     if ('connection' in navigator) {
       const connection = (navigator as any).connection;
       const effectiveType = connection?.effectiveType;
-      
-      // [CELLBUG FIX] Detect cellular connection for more lenient error handling
-      // connection.type can be: 'bluetooth', 'cellular', 'ethernet', 'none', 'wifi', 'wimax', 'other', 'unknown'
       const connectionType = connection?.type;
+      const downlink = connection?.downlink;  // Mbps
+      
+      // [CELLBUG FIX] Detect "slow network" conditions for more lenient handling
+      // Use BOTH connection type AND effectiveType for better detection:
+      // - connectionType === 'cellular' means actual cellular network
+      // - effectiveType === '2g'/'3g'/'slow-2g' means slow network (works with DevTools throttling!)
+      // - downlink < 1 Mbps also indicates slow network
+      const isSlowEffectiveType = effectiveType === '2g' || effectiveType === 'slow-2g' || effectiveType === '3g';
+      const isSlowDownlink = downlink !== undefined && downlink < 1;  // Less than 1 Mbps
+      
       this.isCellular = connectionType === 'cellular' || 
+                        isSlowEffectiveType ||
+                        isSlowDownlink ||
                         (this.isIOS && connectionType !== 'wifi' && connectionType !== 'ethernet');
       
       console.log('[AUDIO][CELLBUG][NETWORK] Connection updated', {
         effectiveType,
         connectionType,
+        downlink,
+        isSlowEffectiveType,
+        isSlowDownlink,
         isCellular: this.isCellular,
         isIOS: this.isIOS,
       });
