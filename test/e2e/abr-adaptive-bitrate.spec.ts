@@ -17,12 +17,9 @@ import { loginAsUser } from "../../tests/helpers/auth";
  * - HIGH:    96 kbps
  * - PREMIUM: 128 kbps
  * 
- * Prerequisites:
- *   - Test user account must exist
- *   - Environment variables must be set:
- *     - TEST_USER_EMAIL
- *     - TEST_USER_PASSWORD
- *   - Tracks must have HLS with 4-bitrate ladder
+ * Uses the same test user account as other E2E tests.
+ * Set TEST_USER_EMAIL and TEST_USER_PASSWORD environment variables,
+ * or uses defaults from tests/helpers/auth.ts
  */
 
 const TEST_USER_EMAIL = process.env.TEST_USER_EMAIL;
@@ -34,13 +31,10 @@ const hasTestCredentials = TEST_USER_EMAIL && TEST_USER_PASSWORD;
 // =============================================================================
 
 /**
- * Signs in as test user using shared auth helper
+ * Signs in as test user using shared auth helper.
+ * Uses loginAsUser which has fallback defaults if env vars not set.
  */
 async function signInAndNavigate(page: Page): Promise<boolean> {
-  if (!TEST_USER_EMAIL || !TEST_USER_PASSWORD) {
-    return false;
-  }
-
   try {
     await loginAsUser(page);
     await page.locator('[data-channel-id]').first().waitFor({ state: "visible", timeout: 15000 });
