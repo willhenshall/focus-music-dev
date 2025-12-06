@@ -18,17 +18,29 @@ import { createClient } from '@supabase/supabase-js';
  * Prerequisites:
  *   - TEST_ADMIN_EMAIL and TEST_ADMIN_PASSWORD must be set
  *   - SUPABASE_URL and SUPABASE_ANON_KEY must be set
+ * 
+ * Run with:
+ *   npx playwright test tests/energy-field-consolidation.spec.ts
  */
 
-const supabaseUrl = process.env.SUPABASE_URL!;
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY!;
+// Environment variable checks
+const TEST_ADMIN_EMAIL = process.env.TEST_ADMIN_EMAIL;
+const TEST_ADMIN_PASSWORD = process.env.TEST_ADMIN_PASSWORD;
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
 
-const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false
-  }
-});
+const hasAdminCredentials = Boolean(TEST_ADMIN_EMAIL && TEST_ADMIN_PASSWORD);
+const hasSupabaseConfig = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
+
+// Only create client if config exists
+const supabase = hasSupabaseConfig 
+  ? createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
+    })
+  : null;
 
 interface AudioTrack {
   id: string;
@@ -73,11 +85,23 @@ function getEnergySortScore(track: AudioTrack): number {
 }
 
 test.describe('Energy Field Consolidation - Database Validation', () => {
+  // Skip all tests if credentials are not configured
+  test.skip(
+    !hasAdminCredentials || !hasSupabaseConfig,
+    'Skipping: TEST_ADMIN_EMAIL, TEST_ADMIN_PASSWORD, SUPABASE_URL, and SUPABASE_ANON_KEY must be set'
+  );
+
   test.beforeEach(async () => {
+    if (!supabase) {
+      console.log('[SETUP] Supabase client not configured, skipping');
+      test.skip();
+      return;
+    }
+
     // Authenticate Supabase client
     const { error } = await supabase.auth.signInWithPassword({
-      email: process.env.TEST_ADMIN_EMAIL!,
-      password: process.env.TEST_ADMIN_PASSWORD!,
+      email: TEST_ADMIN_EMAIL!,
+      password: TEST_ADMIN_PASSWORD!,
     });
     
     if (error) {
@@ -90,6 +114,11 @@ test.describe('Energy Field Consolidation - Database Validation', () => {
     console.log('═══════════════════════════════════════════════════════════════');
     console.log('🔍 ENERGY FIELD CONSISTENCY CHECK');
     console.log('═══════════════════════════════════════════════════════════════\n');
+
+    if (!supabase) {
+      test.skip();
+      return;
+    }
 
     // Fetch all tracks with energy fields
     const { data: tracks, error } = await supabase
@@ -167,6 +196,11 @@ test.describe('Energy Field Consolidation - Database Validation', () => {
     console.log('🔍 MULTI-ENERGY TRACK VALIDATION');
     console.log('═══════════════════════════════════════════════════════════════\n');
 
+    if (!supabase) {
+      test.skip();
+      return;
+    }
+
     // Fetch tracks with multiple energy levels
     const { data: multiEnergyTracks, error } = await supabase
       .from('audio_tracks')
@@ -218,6 +252,11 @@ test.describe('Energy Field Consolidation - Database Validation', () => {
     console.log('═══════════════════════════════════════════════════════════════');
     console.log('🔍 ENERGY SORTING VALIDATION');
     console.log('═══════════════════════════════════════════════════════════════\n');
+
+    if (!supabase) {
+      test.skip();
+      return;
+    }
 
     // Fetch sample tracks
     const { data: tracks, error } = await supabase
@@ -273,10 +312,21 @@ test.describe('Energy Field Consolidation - Database Validation', () => {
 });
 
 test.describe('Energy Field Consolidation - Channel Playlists', () => {
+  // Skip all tests if credentials are not configured
+  test.skip(
+    !hasAdminCredentials || !hasSupabaseConfig,
+    'Skipping: TEST_ADMIN_EMAIL, TEST_ADMIN_PASSWORD, SUPABASE_URL, and SUPABASE_ANON_KEY must be set'
+  );
+
   test.beforeEach(async () => {
+    if (!supabase) {
+      test.skip();
+      return;
+    }
+
     const { error } = await supabase.auth.signInWithPassword({
-      email: process.env.TEST_ADMIN_EMAIL!,
-      password: process.env.TEST_ADMIN_PASSWORD!,
+      email: TEST_ADMIN_EMAIL!,
+      password: TEST_ADMIN_PASSWORD!,
     });
     
     if (error) {
@@ -291,6 +341,11 @@ test.describe('Energy Field Consolidation - Channel Playlists', () => {
     console.log('═══════════════════════════════════════════════════════════════');
     console.log('🔍 CHANNEL PLAYLIST ENERGY VALIDATION');
     console.log('═══════════════════════════════════════════════════════════════\n');
+
+    if (!supabase) {
+      test.skip();
+      return;
+    }
 
     // Fetch channels with playlist_data
     const { data: channels, error: channelError } = await supabase
@@ -396,6 +451,12 @@ test.describe('Energy Field Consolidation - Channel Playlists', () => {
 });
 
 test.describe('Energy Field Consolidation - UI Tests', () => {
+  // Skip all tests if admin credentials are not configured
+  test.skip(
+    !hasAdminCredentials,
+    'Skipping: TEST_ADMIN_EMAIL and TEST_ADMIN_PASSWORD must be set'
+  );
+
   test('5) Music Library displays energy from boolean fields', async ({ page }) => {
     test.setTimeout(90000);
     
@@ -466,6 +527,42 @@ test.describe('Energy Field Consolidation - UI Tests', () => {
 
     expect(badgeCount).toBeGreaterThan(0);
     console.log('\n✅ Music Library energy display test completed');
+  });
+});
+
+/**
+ * Configuration Verification - Always runs
+ */
+test.describe('Energy Field Consolidation - Configuration', () => {
+  test('shows clear messages about test configuration', async () => {
+    console.log('\n' + '═'.repeat(70));
+    console.log('📋 TEST CONFIGURATION STATUS');
+    console.log('═'.repeat(70));
+    
+    console.log('\nAdmin credentials:');
+    console.log(`  TEST_ADMIN_EMAIL: ${TEST_ADMIN_EMAIL ? '✓ Set' : '✗ Not set'}`);
+    console.log(`  TEST_ADMIN_PASSWORD: ${TEST_ADMIN_PASSWORD ? '✓ Set' : '✗ Not set'}`);
+    
+    console.log('\nSupabase configuration:');
+    console.log(`  SUPABASE_URL: ${SUPABASE_URL ? '✓ Set' : '✗ Not set'}`);
+    console.log(`  SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY ? '✓ Set' : '✗ Not set'}`);
+    
+    console.log('\nTest availability:');
+    console.log(`  Database tests: ${hasAdminCredentials && hasSupabaseConfig ? '✓ Will run' : '✗ Will skip'}`);
+    console.log(`  UI tests: ${hasAdminCredentials ? '✓ Will run' : '✗ Will skip'}`);
+    
+    if (!hasAdminCredentials || !hasSupabaseConfig) {
+      console.log('\n⚠️  To run all tests, set the following environment variables:');
+      console.log('   export TEST_ADMIN_EMAIL="your-admin@email.com"');
+      console.log('   export TEST_ADMIN_PASSWORD="your-password"');
+      console.log('   export SUPABASE_URL="your-supabase-url"');
+      console.log('   export SUPABASE_ANON_KEY="your-anon-key"');
+    }
+    
+    console.log('═'.repeat(70) + '\n');
+    
+    // This test always passes - it's informational
+    expect(true).toBe(true);
   });
 });
 
