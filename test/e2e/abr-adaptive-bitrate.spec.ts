@@ -22,9 +22,8 @@ import { loginAsUser } from "../../tests/helpers/auth";
  * or uses defaults from tests/helpers/auth.ts
  */
 
-const TEST_USER_EMAIL = process.env.TEST_USER_EMAIL;
-const TEST_USER_PASSWORD = process.env.TEST_USER_PASSWORD;
-const hasTestCredentials = TEST_USER_EMAIL && TEST_USER_PASSWORD;
+// Test credentials - uses defaults from tests/helpers/auth.ts if not set
+// Defaults: user@test.com / testpass123
 
 // =============================================================================
 // HELPER FUNCTIONS
@@ -139,7 +138,6 @@ async function getBandwidthKbps(page: Page): Promise<number> {
 // =============================================================================
 
 test.describe("ABR System - Detection and Initialization", () => {
-  test.skip(!hasTestCredentials, "Skipping: TEST_USER_EMAIL and TEST_USER_PASSWORD not set");
 
   test.beforeEach(async ({ page }) => {
     const signedIn = await signInAndNavigate(page);
@@ -222,7 +220,6 @@ test.describe("ABR System - Detection and Initialization", () => {
 // =============================================================================
 
 test.describe("ABR System - Quality Tier Detection", () => {
-  test.skip(!hasTestCredentials, "Skipping: TEST_USER_EMAIL and TEST_USER_PASSWORD not set");
 
   test.beforeEach(async ({ page }) => {
     const signedIn = await signInAndNavigate(page);
@@ -300,7 +297,6 @@ test.describe("ABR System - Quality Tier Detection", () => {
 // =============================================================================
 
 test.describe("ABR System - State Management", () => {
-  test.skip(!hasTestCredentials, "Skipping: TEST_USER_EMAIL and TEST_USER_PASSWORD not set");
 
   test.beforeEach(async ({ page }) => {
     const signedIn = await signInAndNavigate(page);
@@ -392,7 +388,6 @@ test.describe("ABR System - State Management", () => {
 // =============================================================================
 
 test.describe("ABR System - Diagnostics Panel Display", () => {
-  test.skip(!hasTestCredentials, "Skipping: TEST_USER_EMAIL and TEST_USER_PASSWORD not set");
 
   test.beforeEach(async ({ page }) => {
     const signedIn = await signInAndNavigate(page);
@@ -484,7 +479,6 @@ test.describe("ABR System - Diagnostics Panel Display", () => {
 // =============================================================================
 
 test.describe("ABR System - Network Throttling Response", () => {
-  test.skip(!hasTestCredentials, "Skipping: TEST_USER_EMAIL and TEST_USER_PASSWORD not set");
 
   test.beforeEach(async ({ page }) => {
     const signedIn = await signInAndNavigate(page);
@@ -567,7 +561,6 @@ test.describe("ABR System - Network Throttling Response", () => {
 // =============================================================================
 
 test.describe("ABR System - Level Switch History", () => {
-  test.skip(!hasTestCredentials, "Skipping: TEST_USER_EMAIL and TEST_USER_PASSWORD not set");
 
   test.beforeEach(async ({ page }) => {
     const signedIn = await signInAndNavigate(page);
@@ -646,7 +639,6 @@ test.describe("ABR System - Level Switch History", () => {
 // =============================================================================
 
 test.describe("ABR System - Fragment Loading", () => {
-  test.skip(!hasTestCredentials, "Skipping: TEST_USER_EMAIL and TEST_USER_PASSWORD not set");
 
   test.beforeEach(async ({ page }) => {
     const signedIn = await signInAndNavigate(page);
@@ -722,7 +714,6 @@ test.describe("ABR System - Fragment Loading", () => {
 // =============================================================================
 
 test.describe("ABR System - Buffer Health", () => {
-  test.skip(!hasTestCredentials, "Skipping: TEST_USER_EMAIL and TEST_USER_PASSWORD not set");
 
   test.beforeEach(async ({ page }) => {
     const signedIn = await signInAndNavigate(page);
@@ -796,7 +787,6 @@ test.describe("ABR System - Buffer Health", () => {
 // =============================================================================
 
 test.describe("ABR System - Debug Interface", () => {
-  test.skip(!hasTestCredentials, "Skipping: TEST_USER_EMAIL and TEST_USER_PASSWORD not set");
 
   test.beforeEach(async ({ page }) => {
     const signedIn = await signInAndNavigate(page);
