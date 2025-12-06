@@ -155,6 +155,51 @@ export interface HLSMetrics {
     failed: number;
     retried: number;
   };
+  /** ABR (Adaptive Bitrate) detailed metrics */
+  abr: ABRMetrics;
+}
+
+export interface ABRMetrics {
+  /** Auto level switching enabled */
+  autoLevelEnabled: boolean;
+  /** The level that ABR wants to use (-1 = auto) */
+  autoLevel: number;
+  /** Next auto level that will be loaded */
+  nextAutoLevel: number;
+  /** Manual level override (-1 = auto) */
+  manualLevel: number;
+  /** Load level - currently loading */
+  loadLevel: number;
+  /** Next load level - will load next */
+  nextLoadLevel: number;
+  /** Level switch history (last 10 switches) */
+  levelSwitchHistory: LevelSwitch[];
+  /** Timestamp of last level switch */
+  lastLevelSwitchTime: number;
+  /** Total number of level switches */
+  totalLevelSwitches: number;
+  /** ABR controller state */
+  abrState: string;
+  /** Effective bandwidth used for decisions (can differ from estimate) */
+  effectiveBandwidth: number;
+  /** Current quality tier name (low/medium/high/premium) */
+  currentQualityTier: string;
+  /** Recommended quality tier based on bandwidth */
+  recommendedQualityTier: string;
+  /** Whether currently upgrading quality */
+  isUpgrading: boolean;
+  /** Whether currently downgrading quality */
+  isDowngrading: boolean;
+  /** Time since last level switch */
+  timeSinceSwitch: number;
+}
+
+export interface LevelSwitch {
+  timestamp: number;
+  fromLevel: number;
+  toLevel: number;
+  reason: string;
+  bandwidth: number;
 }
 
 export interface HLSLevel {
@@ -163,6 +208,8 @@ export interface HLSLevel {
   width?: number;
   height?: number;
   codecSet?: string;
+  /** Quality tier name (low/medium/high/premium) */
+  tierName?: string;
 }
 
 // ============================================================================

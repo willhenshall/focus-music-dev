@@ -306,7 +306,43 @@ export class StreamingAudioEngine implements IAudioEngine {
         failed: 0,
         retried: 0,
       },
+      abr: {
+        autoLevelEnabled: true,
+        autoLevel: -1,
+        nextAutoLevel: -1,
+        manualLevel: -1,
+        loadLevel: -1,
+        nextLoadLevel: -1,
+        levelSwitchHistory: [],
+        lastLevelSwitchTime: 0,
+        totalLevelSwitches: 0,
+        abrState: 'idle',
+        effectiveBandwidth: 0,
+        currentQualityTier: 'unknown',
+        recommendedQualityTier: 'unknown',
+        isUpgrading: false,
+        isDowngrading: false,
+        timeSinceSwitch: 0,
+      },
     };
+  }
+
+  private getQualityTierName(level: number): string {
+    // Map level index to quality tier name based on our 4-bitrate ladder
+    const tierNames = ['low', 'medium', 'high', 'premium'];
+    if (level < 0) return 'auto';
+    if (level >= tierNames.length) return `L${level}`;
+    return tierNames[level];
+  }
+
+  private getRecommendedTier(bandwidthBps: number): string {
+    // Recommend quality tier based on available bandwidth
+    // Our ladder: 32k(48k overhead), 64k(96k), 96k(144k), 128k(192k)
+    const kbps = bandwidthBps / 1000;
+    if (kbps >= 250) return 'premium';  // 128k needs ~192kbps overhead
+    if (kbps >= 180) return 'high';      // 96k needs ~144kbps overhead
+    if (kbps >= 120) return 'medium';    // 64k needs ~96kbps overhead
+    return 'low';                         // 32k needs ~48kbps overhead
   }
 
   private createAudioElement(): HTMLAudioElement {
@@ -481,24 +517,63 @@ export class StreamingAudioEngine implements IAudioEngine {
         console.warn('[AUDIO][CELLBUG][HLS] ⚠️ Only 1 quality level available - ABR cannot help on slow networks. Consider encoding audio at multiple bitrates.');
       }
       
+      const tierNames = ['low', 'medium', 'high', 'premium'];
       this.hlsMetrics.levels = data.levels.map((level: any, index: number) => ({
         index,
         bitrate: level.bitrate,
         width: level.width,
         height: level.height,
         codecSet: level.codecSet,
+        tierName: tierNames[index] || `L${index}`,
       }));
       this.updateMetrics();
     });
     
     hls.on(Hls.Events.LEVEL_SWITCHED, (event, data) => {
-      const level = this.hlsMetrics.levels[data.level];
+      const previousLevel = this.hlsMetrics.currentLevel;
+      const newLevel = data.level;
+      const level = this.hlsMetrics.levels[newLevel];
+      const now = Date.now();
+      
+      // Determine if upgrading or downgrading
+      const isUpgrading = newLevel > previousLevel && previousLevel >= 0;
+      const isDowngrading = newLevel < previousLevel && previousLevel >= 0;
+      
       console.log('[AUDIO][CELLBUG][HLS] Level switched', {
-        newLevel: data.level,
+        previousLevel,
+        newLevel,
+        tierName: this.getQualityTierName(newLevel),
         bitrate: level?.bitrate,
         bitrateKbps: level?.bitrate ? Math.round(level.bitrate / 1000) : 'unknown',
+        isUpgrading,
+        isDowngrading,
+        bandwidth: this.hlsMetrics.bandwidthEstimate,
       });
-      this.hlsMetrics.currentLevel = data.level;
+      
+      // Record level switch in history
+      if (previousLevel >= 0) {
+        const switchRecord = {
+          timestamp: now,
+          fromLevel: previousLevel,
+          toLevel: newLevel,
+          reason: isDowngrading ? 'bandwidth_drop' : isUpgrading ? 'bandwidth_increase' : 'initial',
+          bandwidth: this.hlsMetrics.bandwidthEstimate,
+        };
+        this.hlsMetrics.abr.levelSwitchHistory.push(switchRecord);
+        // Keep only last 10 switches
+        if (this.hlsMetrics.abr.levelSwitchHistory.length > 10) {
+          this.hlsMetrics.abr.levelSwitchHistory.shift();
+        }
+        this.hlsMetrics.abr.totalLevelSwitches++;
+      }
+      
+      // Update ABR metrics
+      this.hlsMetrics.currentLevel = newLevel;
+      this.hlsMetrics.abr.lastLevelSwitchTime = now;
+      this.hlsMetrics.abr.isUpgrading = isUpgrading;
+      this.hlsMetrics.abr.isDowngrading = isDowngrading;
+      this.hlsMetrics.abr.currentQualityTier = this.getQualityTierName(newLevel);
+      
       this.updateMetrics();
     });
     
@@ -787,8 +862,44 @@ export class StreamingAudioEngine implements IAudioEngine {
     
     // HLS metrics
     if (this.currentHls && this.hlsMetrics.isHLSActive) {
-      this.hlsMetrics.bandwidthEstimate = this.currentHls.bandwidthEstimate || 0;
+      const hls = this.currentHls;
+      
+      // Bandwidth
+      this.hlsMetrics.bandwidthEstimate = hls.bandwidthEstimate || 0;
       this.metrics.estimatedBandwidth = Math.floor(this.hlsMetrics.bandwidthEstimate / 1000);
+      
+      // ABR state from hls.js
+      this.hlsMetrics.abr.autoLevelEnabled = hls.autoLevelEnabled;
+      this.hlsMetrics.abr.autoLevel = hls.autoLevelCapping >= 0 ? hls.autoLevelCapping : hls.currentLevel;
+      this.hlsMetrics.abr.nextAutoLevel = hls.nextAutoLevel;
+      this.hlsMetrics.abr.manualLevel = hls.manualLevel;
+      this.hlsMetrics.abr.loadLevel = hls.loadLevel;
+      this.hlsMetrics.abr.nextLoadLevel = hls.nextLoadLevel;
+      this.hlsMetrics.abr.effectiveBandwidth = hls.bandwidthEstimate || 0;
+      
+      // Quality tier recommendations
+      this.hlsMetrics.abr.currentQualityTier = this.getQualityTierName(hls.currentLevel);
+      this.hlsMetrics.abr.recommendedQualityTier = this.getRecommendedTier(hls.bandwidthEstimate || 0);
+      
+      // Time since last switch
+      if (this.hlsMetrics.abr.lastLevelSwitchTime > 0) {
+        this.hlsMetrics.abr.timeSinceSwitch = Date.now() - this.hlsMetrics.abr.lastLevelSwitchTime;
+      }
+      
+      // Determine ABR state
+      const currentLevel = hls.currentLevel;
+      const recommendedLevel = this.hlsMetrics.levels.findIndex(
+        l => l.tierName === this.hlsMetrics.abr.recommendedQualityTier
+      );
+      if (currentLevel < 0) {
+        this.hlsMetrics.abr.abrState = 'initializing';
+      } else if (currentLevel === recommendedLevel) {
+        this.hlsMetrics.abr.abrState = 'optimal';
+      } else if (currentLevel < recommendedLevel) {
+        this.hlsMetrics.abr.abrState = 'upgrading';
+      } else {
+        this.hlsMetrics.abr.abrState = 'downgraded';
+      }
     }
     
     // Include HLS metrics in main metrics
