@@ -56,6 +56,16 @@ const DEFAULT_RETRY_CONFIG: RetryConfig = {
   jitterFactor: 0.3,
 };
 
+// [CELLBUG FIX] Extended timeouts for cellular/throttled networks
+const CELLULAR_RETRY_CONFIG: RetryConfig = {
+  maxAttempts: 8,              // More retries on cell
+  baseDelay: 1000,             // Longer base delay
+  maxDelay: 15000,             // Longer max delay
+  timeoutPerAttempt: 45000,    // 45 seconds per attempt (vs 15s for WiFi)
+  overallTimeout: 120000,      // 2 minutes overall (vs 45s for WiFi)
+  jitterFactor: 0.3,
+};
+
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
@@ -160,6 +170,14 @@ export class StreamingAudioEngine implements IAudioEngine {
   
   // [CELLBUG FIX] Track cellular connection status for more lenient handling
   private isCellular: boolean = false;
+  
+  // [CELLBUG FIX] Stall recovery for streaming engine (similar to EnterpriseAudioEngine)
+  private stallRecoveryTimer: NodeJS.Timeout | null = null;
+  private stallRecoveryAttempts: number = 0;
+  private readonly CELL_STALL_TIMEOUT = 15000;  // 15s stall timeout for cell
+  private readonly WIFI_STALL_TIMEOUT = 8000;   // 8s for WiFi
+  private readonly CELL_MAX_STALL_RECOVERY = 6; // 6 attempts for cell
+  private readonly WIFI_MAX_STALL_RECOVERY = 3; // 3 for WiFi
 
   constructor(storageAdapter: StorageAdapter, hlsConfig?: Partial<HLSConfig>) {
     this.storageAdapter = storageAdapter;
@@ -317,12 +335,18 @@ export class StreamingAudioEngine implements IAudioEngine {
         readyState: audio.readyState,
         networkState: audio.networkState,
         isIOS: this.isIOS,
+        isCellular: this.isCellular,
         connectionQuality: this.metrics.connectionQuality,
       });
       
       this.metrics.isWaiting = true;
       this.metrics.playbackState = 'buffering';
       this.updateMetrics();
+      
+      // [CELLBUG FIX] Start stall recovery timer if playing
+      if (this.isPlayingState && audio === this.currentAudio) {
+        this.startStallRecovery(audio);
+      }
     });
     
     audio.addEventListener('playing', () => {
@@ -332,6 +356,7 @@ export class StreamingAudioEngine implements IAudioEngine {
         duration: audio.duration,
         wasStalled: this.metrics.isStalled,
         wasWaiting: this.metrics.isWaiting,
+        stallRecoveryAttempts: this.stallRecoveryAttempts,
       });
       
       this.metrics.isWaiting = false;
@@ -342,6 +367,8 @@ export class StreamingAudioEngine implements IAudioEngine {
         this.metrics.errorCategory = null;
         this.metrics.retryAttempt = 0;
         this.consecutiveStallFailures = 0;  // [CELLBUG FIX] Reset on successful play
+        this.stallRecoveryAttempts = 0;     // [CELLBUG FIX] Reset stall recovery counter
+        this.cancelStallRecovery();          // [CELLBUG FIX] Cancel pending recovery
       }
       this.updateMetrics();
     });
@@ -378,6 +405,20 @@ export class StreamingAudioEngine implements IAudioEngine {
   }
 
   private createHLSInstance(audio: HTMLAudioElement): Hls {
+    // [CELLBUG FIX] Use extended timeouts for cellular/throttled networks
+    const fragTimeout = this.isCellular ? 60000 : 20000;      // 60s for cell, 20s for WiFi
+    const fragRetries = this.isCellular ? 10 : 6;             // 10 retries for cell, 6 for WiFi
+    const levelTimeout = this.isCellular ? 30000 : 10000;     // 30s for cell, 10s for WiFi
+    const manifestTimeout = this.isCellular ? 30000 : 10000;  // 30s for cell, 10s for WiFi
+    
+    console.log('[AUDIO][CELLBUG][HLS] Creating HLS instance', {
+      fragTimeout,
+      fragRetries,
+      levelTimeout,
+      manifestTimeout,
+      isCellular: this.isCellular,
+    });
+    
     const hls = new Hls({
       maxBufferLength: this.hlsConfig.maxBufferLength,
       maxMaxBufferLength: this.hlsConfig.maxMaxBufferLength,
@@ -388,10 +429,11 @@ export class StreamingAudioEngine implements IAudioEngine {
       abrEwmaDefaultEstimate: this.hlsConfig.abrEwmaDefaultEstimate,
       // Additional optimizations for audio
       enableWorker: true,
-      fragLoadingTimeOut: 20000,
-      fragLoadingMaxRetry: 6,
-      levelLoadingTimeOut: 10000,
-      manifestLoadingTimeOut: 10000,
+      // [CELLBUG FIX] Extended timeouts for cellular networks
+      fragLoadingTimeOut: fragTimeout,
+      fragLoadingMaxRetry: fragRetries,
+      levelLoadingTimeOut: levelTimeout,
+      manifestLoadingTimeOut: manifestTimeout,
     });
     
     // Attach to audio element
@@ -894,10 +936,22 @@ export class StreamingAudioEngine implements IAudioEngine {
 
   private waitForCanPlay(audio: HTMLAudioElement): Promise<void> {
     return new Promise((resolve, reject) => {
+      // [CELLBUG FIX] Use extended timeout on cellular/throttled networks
+      const effectiveTimeout = this.isCellular 
+        ? CELLULAR_RETRY_CONFIG.timeoutPerAttempt  // 45 seconds
+        : this.retryConfig.timeoutPerAttempt;       // 15 seconds
+      
+      console.log('[AUDIO][CELLBUG][LOAD] Waiting for canPlay', {
+        timeout: effectiveTimeout,
+        isCellular: this.isCellular,
+        connectionQuality: this.metrics.connectionQuality,
+      });
+      
       const timeout = setTimeout(() => {
+        console.log('[AUDIO][CELLBUG][LOAD] Track load timeout after', effectiveTimeout, 'ms');
         cleanup();
         reject(new Error('Track load timeout'));
-      }, this.retryConfig.timeoutPerAttempt);
+      }, effectiveTimeout);
       
       const onCanPlay = () => {
         clearTimeout(timeout);
@@ -963,6 +1017,150 @@ export class StreamingAudioEngine implements IAudioEngine {
 
   // [CELLBUG FIX] Track consecutive recovery failures
   private consecutiveStallFailures: number = 0;
+  
+  // [CELLBUG FIX] Stall recovery for throttled networks
+  private startStallRecovery(audio: HTMLAudioElement): void {
+    this.cancelStallRecovery();
+    
+    const timeout = this.isCellular ? this.CELL_STALL_TIMEOUT : this.WIFI_STALL_TIMEOUT;
+    const maxAttempts = this.isCellular ? this.CELL_MAX_STALL_RECOVERY : this.WIFI_MAX_STALL_RECOVERY;
+    
+    console.log('[AUDIO][CELLBUG][STALL] Starting stall recovery timer', {
+      timeout,
+      maxAttempts,
+      currentAttempts: this.stallRecoveryAttempts,
+      isCellular: this.isCellular,
+      currentTime: audio.currentTime,
+    });
+    
+    this.stallRecoveryTimer = setTimeout(() => {
+      this.attemptStallRecovery(audio, maxAttempts);
+    }, timeout);
+  }
+  
+  private cancelStallRecovery(): void {
+    if (this.stallRecoveryTimer) {
+      clearTimeout(this.stallRecoveryTimer);
+      this.stallRecoveryTimer = null;
+    }
+  }
+  
+  private async attemptStallRecovery(audio: HTMLAudioElement, maxAttempts: number): Promise<void> {
+    if (!this.isPlayingState || !audio.paused === false) {
+      // Playback resumed on its own or user paused
+      console.log('[AUDIO][CELLBUG][STALL] Stall recovery cancelled - playback state changed');
+      return;
+    }
+    
+    this.stallRecoveryAttempts++;
+    
+    console.log('[AUDIO][CELLBUG][STALL] Attempting stall recovery', {
+      attempt: this.stallRecoveryAttempts,
+      maxAttempts,
+      currentTime: audio.currentTime,
+      duration: audio.duration,
+      readyState: audio.readyState,
+      networkState: audio.networkState,
+      isCellular: this.isCellular,
+    });
+    
+    // Strategy 1: Micro-seek to trigger rebuffer
+    if (this.stallRecoveryAttempts === 1) {
+      console.log('[AUDIO][CELLBUG][STALL] Strategy 1: Micro-seek');
+      const currentTime = audio.currentTime;
+      audio.currentTime = currentTime + 0.1;
+      try {
+        await audio.play();
+        console.log('[AUDIO][CELLBUG][STALL] Strategy 1 succeeded');
+        this.stallRecoveryAttempts = 0;
+        return;
+      } catch (e) {
+        console.log('[AUDIO][CELLBUG][STALL] Strategy 1 failed:', e);
+      }
+    }
+    
+    // Strategy 2: Reload and resume
+    if (this.stallRecoveryAttempts === 2) {
+      console.log('[AUDIO][CELLBUG][STALL] Strategy 2: Reload');
+      const currentTime = audio.currentTime;
+      audio.load();
+      try {
+        await audio.play();
+        audio.currentTime = currentTime;
+        console.log('[AUDIO][CELLBUG][STALL] Strategy 2 succeeded');
+        this.stallRecoveryAttempts = 0;
+        return;
+      } catch (e) {
+        console.log('[AUDIO][CELLBUG][STALL] Strategy 2 failed:', e);
+      }
+    }
+    
+    // Strategy 3 (cellular): HLS restart
+    if (this.isCellular && this.stallRecoveryAttempts === 3 && this.currentHls) {
+      console.log('[AUDIO][CELLBUG][STALL] Strategy 3: HLS startLoad');
+      this.currentHls.startLoad();
+      // Wait a bit and check if it recovered
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      if (!audio.paused) {
+        console.log('[AUDIO][CELLBUG][STALL] Strategy 3 succeeded');
+        this.stallRecoveryAttempts = 0;
+        return;
+      }
+      console.log('[AUDIO][CELLBUG][STALL] Strategy 3 failed');
+    }
+    
+    // Strategy 4 (cellular): Fresh source reload
+    if (this.isCellular && this.stallRecoveryAttempts === 4) {
+      console.log('[AUDIO][CELLBUG][STALL] Strategy 4: Fresh source reload');
+      const currentSrc = audio.src;
+      const currentTime = audio.currentTime;
+      
+      audio.src = '';
+      audio.load();
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      if (!this.isPlayingState) return;
+      
+      audio.src = currentSrc;
+      audio.load();
+      try {
+        await audio.play();
+        audio.currentTime = Math.max(0, currentTime - 1);
+        console.log('[AUDIO][CELLBUG][STALL] Strategy 4 succeeded');
+        this.stallRecoveryAttempts = 0;
+        return;
+      } catch (e) {
+        console.log('[AUDIO][CELLBUG][STALL] Strategy 4 failed:', e);
+      }
+    }
+    
+    // If we haven't exhausted attempts, schedule another recovery
+    if (this.stallRecoveryAttempts < maxAttempts) {
+      console.log('[AUDIO][CELLBUG][STALL] Scheduling next recovery attempt');
+      this.startStallRecovery(audio);
+    } else {
+      // Exhausted all attempts - but DON'T skip, just log and wait
+      // The track will continue to try to play naturally
+      console.log('[AUDIO][CELLBUG][STALL] Exhausted recovery attempts - waiting for natural recovery', {
+        attempts: this.stallRecoveryAttempts,
+        maxAttempts,
+      });
+      this.metrics.isStalled = true;
+      this.metrics.error = 'Playback stalled - waiting for network';
+      this.updateMetrics();
+      
+      // Reset attempts so we can try again if waiting continues
+      this.stallRecoveryAttempts = 0;
+      
+      // Schedule one more check after a longer delay
+      setTimeout(() => {
+        if (this.isPlayingState && audio.paused && audio === this.currentAudio) {
+          console.log('[AUDIO][CELLBUG][STALL] Still stalled after extended wait - retrying recovery');
+          this.startStallRecovery(audio);
+        }
+      }, this.isCellular ? 30000 : 15000);  // 30s for cell, 15s for WiFi
+    }
+  }
   
   private setupTrackEndHandler(): void {
     // [CELLBUG FIX] Guard against false "ended" events on iOS cellular
@@ -1210,6 +1408,7 @@ export class StreamingAudioEngine implements IAudioEngine {
     if (this.stallDetectionTimer) clearTimeout(this.stallDetectionTimer);
     if (this.circuitBreakerTimer) clearTimeout(this.circuitBreakerTimer);
     if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.cancelStallRecovery();  // [CELLBUG FIX] Clean up stall recovery timer
     
     // Abort any pending operations
     if (this.abortController) {
