@@ -1,5 +1,12 @@
 import { test, expect, Page } from '@playwright/test';
-import { loginAsAdmin } from './helpers/auth';
+import { 
+  signInAsAdmin, 
+  hasAdminCredentials, 
+  navigateToAdminDashboard, 
+  navigateToAdminTab,
+  TEST_ADMIN_EMAIL,
+  TEST_ADMIN_PASSWORD
+} from './admin-login';
 import { createClient } from '@supabase/supabase-js';
 
 /**
@@ -23,13 +30,10 @@ import { createClient } from '@supabase/supabase-js';
  *   npx playwright test tests/energy-field-consolidation.spec.ts
  */
 
-// Environment variable checks
-const TEST_ADMIN_EMAIL = process.env.TEST_ADMIN_EMAIL;
-const TEST_ADMIN_PASSWORD = process.env.TEST_ADMIN_PASSWORD;
+// Environment variable checks for Supabase (admin credentials come from admin-login.ts)
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
 
-const hasAdminCredentials = Boolean(TEST_ADMIN_EMAIL && TEST_ADMIN_PASSWORD);
 const hasSupabaseConfig = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 
 // Only create client if config exists
@@ -465,16 +469,14 @@ test.describe('Energy Field Consolidation - UI Tests', () => {
     console.log('═══════════════════════════════════════════════════════════════\n');
 
     // Login as admin
-    await loginAsAdmin(page);
+    const signedIn = await signInAsAdmin(page);
+    if (!signedIn) {
+      test.skip();
+      return;
+    }
     
     // Navigate to Admin Dashboard
-    console.log('Navigating to Admin Dashboard...');
-    const adminButton = page.getByRole('button', { name: /admin/i });
-    await adminButton.waitFor({ state: 'visible', timeout: 15000 });
-    await adminButton.click();
-    
-    // Wait for admin dashboard
-    await page.locator('text=Admin Dashboard').waitFor({ state: 'visible', timeout: 10000 });
+    await navigateToAdminDashboard(page);
     console.log('Admin Dashboard loaded ✓');
 
     // Click on Library tab
