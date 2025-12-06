@@ -157,6 +157,9 @@ export class StreamingAudioEngine implements IAudioEngine {
   private useNativeHLS: boolean;
   private useHLSJS: boolean;
   private isIOS: boolean;
+  
+  // [CELLBUG FIX] Track cellular connection status for more lenient handling
+  private isCellular: boolean = false;
 
   constructor(storageAdapter: StorageAdapter, hlsConfig?: Partial<HLSConfig>) {
     this.storageAdapter = storageAdapter;
@@ -306,12 +309,31 @@ export class StreamingAudioEngine implements IAudioEngine {
     });
     
     audio.addEventListener('waiting', () => {
+      // [CELLBUG FIX] Log waiting events for diagnostics
+      console.log('[AUDIO][CELLBUG][EVENT] Waiting event', {
+        currentTime: audio.currentTime,
+        duration: audio.duration,
+        buffered: audio.buffered.length > 0 ? audio.buffered.end(audio.buffered.length - 1) : 0,
+        readyState: audio.readyState,
+        networkState: audio.networkState,
+        isIOS: this.isIOS,
+        connectionQuality: this.metrics.connectionQuality,
+      });
+      
       this.metrics.isWaiting = true;
       this.metrics.playbackState = 'buffering';
       this.updateMetrics();
     });
     
     audio.addEventListener('playing', () => {
+      // [CELLBUG FIX] Log playing events to track recovery
+      console.log('[AUDIO][CELLBUG][EVENT] Playing event - playback resumed', {
+        currentTime: audio.currentTime,
+        duration: audio.duration,
+        wasStalled: this.metrics.isStalled,
+        wasWaiting: this.metrics.isWaiting,
+      });
+      
       this.metrics.isWaiting = false;
       this.metrics.isStalled = false;
       this.metrics.playbackState = 'playing';
@@ -319,11 +341,24 @@ export class StreamingAudioEngine implements IAudioEngine {
         this.metrics.error = null;
         this.metrics.errorCategory = null;
         this.metrics.retryAttempt = 0;
+        this.consecutiveStallFailures = 0;  // [CELLBUG FIX] Reset on successful play
       }
       this.updateMetrics();
     });
     
     audio.addEventListener('stalled', () => {
+      // [CELLBUG FIX] Log stalled events for diagnostics
+      console.log('[AUDIO][CELLBUG][EVENT] Stalled event', {
+        currentTime: audio.currentTime,
+        duration: audio.duration,
+        buffered: audio.buffered.length > 0 ? audio.buffered.end(audio.buffered.length - 1) : 0,
+        readyState: audio.readyState,
+        networkState: audio.networkState,
+        isIOS: this.isIOS,
+        connectionQuality: this.metrics.connectionQuality,
+        stallCount: this.metrics.stallCount + 1,
+      });
+      
       this.metrics.isStalled = true;
       this.metrics.stallCount++;
       this.updateMetrics();
@@ -395,20 +430,45 @@ export class StreamingAudioEngine implements IAudioEngine {
     });
     
     hls.on(Hls.Events.ERROR, (event, data) => {
-      console.error('[HLS] Error:', data.type, data.details);
+      // [CELLBUG FIX] Enhanced error logging for HLS issues
+      console.log('[AUDIO][CELLBUG][HLS] HLS Error event', {
+        type: data.type,
+        details: data.details,
+        fatal: data.fatal,
+        isIOS: this.isIOS,
+        connectionQuality: this.metrics.connectionQuality,
+        networkState: audio.networkState,
+        readyState: audio.readyState,
+        currentTime: audio.currentTime,
+        duration: audio.duration,
+      });
       
       if (data.fatal) {
         switch (data.type) {
           case Hls.ErrorTypes.NETWORK_ERROR:
-            console.log('[HLS] Fatal network error, trying to recover');
-            hls.startLoad();
+            // [CELLBUG FIX] On network errors, try to recover more aggressively
+            console.log('[AUDIO][CELLBUG][HLS] Fatal network error, attempting recovery with startLoad()');
+            this.consecutiveStallFailures++;
+            
+            // If too many consecutive failures, let the error propagate
+            if (this.consecutiveStallFailures >= 5) {
+              console.log('[AUDIO][CELLBUG][HLS] Too many network failures, propagating error');
+              this.metrics.error = `HLS Network Error: ${data.details}`;
+              this.metrics.errorCategory = 'network';
+              if (this.onError) {
+                this.onError(new Error(data.details), 'network', false);
+              }
+            } else {
+              // Try to recover
+              hls.startLoad();
+            }
             break;
           case Hls.ErrorTypes.MEDIA_ERROR:
-            console.log('[HLS] Fatal media error, trying to recover');
+            console.log('[AUDIO][CELLBUG][HLS] Fatal media error, attempting recovery with recoverMediaError()');
             hls.recoverMediaError();
             break;
           default:
-            console.error('[HLS] Unrecoverable error');
+            console.error('[AUDIO][CELLBUG][HLS] Unrecoverable error:', data.details);
             this.metrics.error = `HLS Error: ${data.details}`;
             this.metrics.errorCategory = 'hls';
             if (this.onError) {
@@ -416,6 +476,9 @@ export class StreamingAudioEngine implements IAudioEngine {
             }
             break;
         }
+      } else {
+        // Non-fatal errors - just log for diagnostics
+        console.log('[AUDIO][CELLBUG][HLS] Non-fatal error (will auto-recover):', data.details);
       }
     });
     
@@ -438,13 +501,17 @@ export class StreamingAudioEngine implements IAudioEngine {
 
   private setupNetworkMonitoring(): void {
     window.addEventListener('online', () => {
+      console.log('[AUDIO][CELLBUG][NETWORK] Online event - connection restored');
       this.metrics.isOnline = true;
       this.metrics.connectionQuality = 'good';
+      this.consecutiveStallFailures = 0;  // [CELLBUG FIX] Reset failures when back online
       this.resetCircuitBreaker();
+      this.updateConnectionQuality();  // [CELLBUG FIX] Also update cellular status
       this.updateMetrics();
     });
     
     window.addEventListener('offline', () => {
+      console.log('[AUDIO][CELLBUG][NETWORK] Offline event - connection lost');
       this.metrics.isOnline = false;
       this.metrics.connectionQuality = 'offline';
       this.updateMetrics();
@@ -455,16 +522,22 @@ export class StreamingAudioEngine implements IAudioEngine {
     
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden && this.isPlayingState && this.currentAudio.paused) {
-        console.log('[STREAMING ENGINE] Resuming after visibility change');
-        this.currentAudio.play().catch(console.warn);
+        console.log('[AUDIO][CELLBUG][VISIBILITY] Resuming after visibility change');
+        this.currentAudio.play().catch((err) => {
+          console.warn('[AUDIO][CELLBUG][VISIBILITY] Failed to resume:', err);
+        });
       }
     });
     
     if ('connection' in navigator) {
       const connection = (navigator as any).connection;
       connection?.addEventListener('change', () => {
+        console.log('[AUDIO][CELLBUG][NETWORK] Connection change event');
         this.updateConnectionQuality();
       });
+      
+      // [CELLBUG FIX] Initialize cellular detection immediately
+      this.updateConnectionQuality();
     }
   }
 
@@ -477,6 +550,19 @@ export class StreamingAudioEngine implements IAudioEngine {
     if ('connection' in navigator) {
       const connection = (navigator as any).connection;
       const effectiveType = connection?.effectiveType;
+      
+      // [CELLBUG FIX] Detect cellular connection for more lenient error handling
+      // connection.type can be: 'bluetooth', 'cellular', 'ethernet', 'none', 'wifi', 'wimax', 'other', 'unknown'
+      const connectionType = connection?.type;
+      this.isCellular = connectionType === 'cellular' || 
+                        (this.isIOS && connectionType !== 'wifi' && connectionType !== 'ethernet');
+      
+      console.log('[AUDIO][CELLBUG][NETWORK] Connection updated', {
+        effectiveType,
+        connectionType,
+        isCellular: this.isCellular,
+        isIOS: this.isIOS,
+      });
       
       switch (effectiveType) {
         case '4g':
@@ -875,9 +961,76 @@ export class StreamingAudioEngine implements IAudioEngine {
     });
   }
 
+  // [CELLBUG FIX] Track consecutive recovery failures
+  private consecutiveStallFailures: number = 0;
+  
   private setupTrackEndHandler(): void {
+    // [CELLBUG FIX] Guard against false "ended" events on iOS cellular
+    // iOS Safari can fire "ended" prematurely when buffer runs dry during network stalls
     this.nextAudio.onended = () => {
+      const audio = this.nextAudio;
+      const currentTime = audio.currentTime;
+      const duration = audio.duration;
+      
+      // [CELLBUG FIX] Verify the track actually ended
+      // Allow 2 second tolerance for rounding/timing issues
+      const trackActuallyEnded = duration > 0 && currentTime >= duration - 2;
+      
+      console.log('[AUDIO][CELLBUG][ENDED] Track ended event received', {
+        currentTime,
+        duration,
+        trackActuallyEnded,
+        isPlayingState: this.isPlayingState,
+        isIOS: this.isIOS,
+        readyState: audio.readyState,
+        networkState: audio.networkState,
+        connectionQuality: this.metrics.connectionQuality,
+      });
+      
+      if (!trackActuallyEnded && this.isIOS) {
+        // [CELLBUG FIX] This is likely a false "ended" event on iOS
+        // Don't skip - instead, try to recover by restarting playback
+        console.log('[AUDIO][CELLBUG][ENDED] Detected FALSE ended event - attempting recovery');
+        
+        this.consecutiveStallFailures++;
+        
+        // If we've had too many failures, let it skip (true fatal issue)
+        if (this.consecutiveStallFailures >= 5) {
+          console.log('[AUDIO][CELLBUG][ENDED] Too many consecutive failures, allowing skip');
+          this.consecutiveStallFailures = 0;
+          if (this.isPlayingState && this.onTrackEnd) {
+            this.onTrackEnd();
+          }
+          return;
+        }
+        
+        // Try to resume playback from where we were
+        audio.currentTime = currentTime;
+        audio.play().then(() => {
+          console.log('[AUDIO][CELLBUG][ENDED] Successfully recovered from false ended event');
+          this.consecutiveStallFailures = 0;  // Reset on success
+        }).catch((error) => {
+          console.log('[AUDIO][CELLBUG][ENDED] Recovery failed:', error);
+          // Try reloading the source
+          const src = audio.src;
+          if (src) {
+            audio.src = src;
+            audio.load();
+            audio.currentTime = currentTime;
+            audio.play().catch((e) => {
+              console.log('[AUDIO][CELLBUG][ENDED] Second recovery attempt failed:', e);
+              // At this point, let the natural flow continue
+              // The stall/waiting events will trigger other recovery mechanisms
+            });
+          }
+        });
+        
+        return;  // Don't call onTrackEnd for false ended events
+      }
+      
       if (this.isPlayingState && this.onTrackEnd) {
+        console.log('[AUDIO][CELLBUG][ENDED] Track genuinely ended, advancing to next');
+        this.consecutiveStallFailures = 0;  // Reset on successful track completion
         this.onTrackEnd();
       }
     };
