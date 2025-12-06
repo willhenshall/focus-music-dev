@@ -1,135 +1,100 @@
-# HLS Ladder Transcoder - EC2 Setup Instructions
+# HLS Ladder Transcoder - EC2 Setup (R2 → R2)
 
-Complete guide to running the multi-bitrate HLS ladder transcoder on your EC2 instance.
-
----
-
-## Overview
-
-This pipeline creates a 4-bitrate HLS ladder for each audio track:
-- **LOW**: 32 kbps AAC
-- **MEDIUM**: 64 kbps AAC
-- **HIGH**: 96 kbps AAC
-- **PREMIUM**: 128 kbps AAC
-
-Output structure in R2:
-```
-hls/<track-id>/
-├── master.m3u8
-├── low/
-│   ├── index.m3u8
-│   └── segment_000.ts, segment_001.ts, ...
-├── medium/
-│   ├── index.m3u8
-│   └── segment_000.ts, segment_001.ts, ...
-├── high/
-│   ├── index.m3u8
-│   └── segment_000.ts, segment_001.ts, ...
-└── premium/
-    ├── index.m3u8
-    └── segment_000.ts, segment_001.ts, ...
-```
+Server-to-server transcoding: Pull MP3s from R2, create 4-bitrate HLS ladder, upload back to R2.
 
 ---
 
-## Part 1: EC2 Server Setup
+## Quick Start (Copy-Paste Ready)
 
-### Step 1.1: Connect to Your EC2 Instance
+### Step 1: SSH into EC2
 
 ```bash
 ssh -i your-key.pem ec2-user@your-ec2-ip
 ```
 
-### Step 1.2: Install Required Software
+### Step 2: Install Dependencies (if needed)
 
 ```bash
-# Update packages
+# Amazon Linux 2
 sudo yum update -y
+sudo yum install -y ffmpeg awscli
 
-# Install ffmpeg
-sudo yum install -y ffmpeg
-
-# Verify ffmpeg installation
-ffmpeg -version
-
-# Install AWS CLI (if not already installed)
-sudo yum install -y awscli
-
-# Verify AWS CLI
-aws --version
+# Or Ubuntu
+sudo apt update && sudo apt install -y ffmpeg awscli
 ```
 
-### Step 1.3: Create Working Directory
+### Step 3: Set R2 Credentials
 
 ```bash
-mkdir -p ~/hls-ladder
+# Paste this block (replace nothing - these are Focus Music's R2 credentials)
+export R2_ENDPOINT="https://531f033f1f3eb591e89baff98f027cee.r2.cloudflarestorage.com"
+export R2_BUCKET="focus-music-audio"
+export AWS_ACCESS_KEY_ID="d6c3feb94bb923b619c9661f950019d2"
+export AWS_SECRET_ACCESS_KEY="bc5d2ea0d38fecb4ef8442b78621a6b398415b3373cc1c174b12564a111678f3"
+```
+
+### Step 4: Test R2 Connection
+
+```bash
+aws s3 ls "s3://$R2_BUCKET/audio/" --endpoint-url "$R2_ENDPOINT" | head -5
+```
+
+You should see MP3 files listed.
+
+### Step 5: Create Working Directory & Scripts
+
+```bash
+mkdir -p ~/hls-ladder/logs
 cd ~/hls-ladder
 ```
 
----
-
-## Part 2: Create the Scripts
-
-### Step 2.1: Create the Single-Track Transcoder
-
-Copy and paste this entire command to create the script:
+### Step 6: Create the Single-Track Script
 
 ```bash
 cat > ~/hls-ladder/transcode-single-track.sh << 'SCRIPT_EOF'
 #!/bin/bash
 set -euo pipefail
 
-WORK_DIR="${WORK_DIR:-/tmp/hls-transcode}"
-LOG_FILE="${LOG_FILE:-/tmp/hls-transcode.log}"
-HLS_TIME=6
-HLS_PLAYLIST_TYPE="vod"
-
-if [[ $# -lt 2 ]]; then
-    echo "ERROR: Missing arguments"
-    echo "Usage: $0 <TRACK_ID> <MP3_S3_URL>"
-    exit 1
-fi
-
 TRACK_ID="$1"
-MP3_S3_URL="$2"
+WORK_DIR="/tmp/hls-transcode/$TRACK_ID"
+OUTPUT_DIR="$WORK_DIR/output"
 
-log() {
-    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    echo "[$timestamp] $1" | tee -a "$LOG_FILE"
-}
-
-log "=========================================="
-log "Starting HLS transcode for: $TRACK_ID"
-log "Source: $MP3_S3_URL"
-log "=========================================="
-
-TRACK_WORK_DIR="$WORK_DIR/$TRACK_ID"
-OUTPUT_DIR="$TRACK_WORK_DIR/output"
-
-rm -rf "$TRACK_WORK_DIR" 2>/dev/null || true
+rm -rf "$WORK_DIR" 2>/dev/null || true
 mkdir -p "$OUTPUT_DIR/low" "$OUTPUT_DIR/medium" "$OUTPUT_DIR/high" "$OUTPUT_DIR/premium"
 
-log "Downloading MP3 from R2..."
-MP3_FILE="$TRACK_WORK_DIR/source.mp3"
-aws s3 cp "$MP3_S3_URL" "$MP3_FILE" --endpoint-url "$R2_ENDPOINT"
+echo "[$(date '+%H:%M:%S')] Processing: $TRACK_ID"
 
-log "Encoding LOW (32 kbps)..."
-ffmpeg -i "$MP3_FILE" -c:a aac -b:a 32k -ac 2 -ar 44100 -f hls -hls_time 6 -hls_playlist_type vod \
-    -hls_segment_filename "$OUTPUT_DIR/low/segment_%03d.ts" "$OUTPUT_DIR/low/index.m3u8" -y -loglevel warning
+# Download from R2
+echo "  Downloading..."
+aws s3 cp "s3://$R2_BUCKET/audio/$TRACK_ID.mp3" "$WORK_DIR/source.mp3" \
+    --endpoint-url "$R2_ENDPOINT" --quiet
 
-log "Encoding MEDIUM (64 kbps)..."
-ffmpeg -i "$MP3_FILE" -c:a aac -b:a 64k -ac 2 -ar 44100 -f hls -hls_time 6 -hls_playlist_type vod \
-    -hls_segment_filename "$OUTPUT_DIR/medium/segment_%03d.ts" "$OUTPUT_DIR/medium/index.m3u8" -y -loglevel warning
+# Transcode 4 bitrates
+echo "  Encoding LOW (32k)..."
+ffmpeg -i "$WORK_DIR/source.mp3" -c:a aac -b:a 32k -ac 2 -ar 44100 \
+    -f hls -hls_time 6 -hls_playlist_type vod \
+    -hls_segment_filename "$OUTPUT_DIR/low/segment_%03d.ts" \
+    "$OUTPUT_DIR/low/index.m3u8" -y -loglevel warning
 
-log "Encoding HIGH (96 kbps)..."
-ffmpeg -i "$MP3_FILE" -c:a aac -b:a 96k -ac 2 -ar 44100 -f hls -hls_time 6 -hls_playlist_type vod \
-    -hls_segment_filename "$OUTPUT_DIR/high/segment_%03d.ts" "$OUTPUT_DIR/high/index.m3u8" -y -loglevel warning
+echo "  Encoding MEDIUM (64k)..."
+ffmpeg -i "$WORK_DIR/source.mp3" -c:a aac -b:a 64k -ac 2 -ar 44100 \
+    -f hls -hls_time 6 -hls_playlist_type vod \
+    -hls_segment_filename "$OUTPUT_DIR/medium/segment_%03d.ts" \
+    "$OUTPUT_DIR/medium/index.m3u8" -y -loglevel warning
 
-log "Encoding PREMIUM (128 kbps)..."
-ffmpeg -i "$MP3_FILE" -c:a aac -b:a 128k -ac 2 -ar 44100 -f hls -hls_time 6 -hls_playlist_type vod \
-    -hls_segment_filename "$OUTPUT_DIR/premium/segment_%03d.ts" "$OUTPUT_DIR/premium/index.m3u8" -y -loglevel warning
+echo "  Encoding HIGH (96k)..."
+ffmpeg -i "$WORK_DIR/source.mp3" -c:a aac -b:a 96k -ac 2 -ar 44100 \
+    -f hls -hls_time 6 -hls_playlist_type vod \
+    -hls_segment_filename "$OUTPUT_DIR/high/segment_%03d.ts" \
+    "$OUTPUT_DIR/high/index.m3u8" -y -loglevel warning
 
-log "Creating master playlist..."
+echo "  Encoding PREMIUM (128k)..."
+ffmpeg -i "$WORK_DIR/source.mp3" -c:a aac -b:a 128k -ac 2 -ar 44100 \
+    -f hls -hls_time 6 -hls_playlist_type vod \
+    -hls_segment_filename "$OUTPUT_DIR/premium/segment_%03d.ts" \
+    "$OUTPUT_DIR/premium/index.m3u8" -y -loglevel warning
+
+# Create master playlist
 cat > "$OUTPUT_DIR/master.m3u8" << 'MASTER_EOF'
 #EXTM3U
 #EXT-X-VERSION:3
@@ -151,355 +116,248 @@ high/index.m3u8
 premium/index.m3u8
 MASTER_EOF
 
-log "Uploading to R2..."
-R2_DEST="s3://$R2_BUCKET/hls/$TRACK_ID/"
-aws s3 sync "$OUTPUT_DIR/" "$R2_DEST" --endpoint-url "$R2_ENDPOINT" --content-type "application/vnd.apple.mpegurl" --exclude "*" --include "*.m3u8"
-aws s3 sync "$OUTPUT_DIR/" "$R2_DEST" --endpoint-url "$R2_ENDPOINT" --content-type "video/MP2T" --exclude "*" --include "*.ts"
+# Upload to R2
+echo "  Uploading to R2..."
+aws s3 sync "$OUTPUT_DIR/" "s3://$R2_BUCKET/hls/$TRACK_ID/" \
+    --endpoint-url "$R2_ENDPOINT" --quiet
 
-log "Verifying upload..."
-aws s3 ls "$R2_DEST" --recursive --endpoint-url "$R2_ENDPOINT" | head -5
+# Cleanup
+rm -rf "$WORK_DIR"
 
-rm -rf "$TRACK_WORK_DIR"
-
-log "=========================================="
-log "SUCCESS: HLS ladder created for $TRACK_ID"
-log "=========================================="
+echo "  ✓ Complete: $TRACK_ID"
 SCRIPT_EOF
 
 chmod +x ~/hls-ladder/transcode-single-track.sh
-echo "✓ Single-track script created"
 ```
 
-### Step 2.2: Create the Batch Transcoder
-
-Copy and paste this entire command:
+### Step 7: Create the Batch Script (Parallel Workers)
 
 ```bash
 cat > ~/hls-ladder/batch-transcode.sh << 'SCRIPT_EOF'
 #!/bin/bash
 set -uo pipefail
 
+TRACKS_FILE="${1:-tracks.txt}"
+NUM_WORKERS="${2:-8}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SINGLE_TRACK_SCRIPT="$SCRIPT_DIR/transcode-single-track.sh"
-TRACKS_FILE="${1:-$SCRIPT_DIR/tracks.txt}"
-LOG_FILE="$SCRIPT_DIR/hls-batch.log"
-FAILED_LOG="$SCRIPT_DIR/failed-tracks.log"
-MAX_RETRIES=3
 
-TOTAL=0 SUCCEEDED=0 FAILED=0
+echo "============================================="
+echo "  HLS BATCH TRANSCODER ($NUM_WORKERS workers)"
+echo "============================================="
 
-log() {
-    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    echo "[$timestamp] $1" | tee -a "$LOG_FILE"
-}
+# Count tracks
+TOTAL=$(grep -v '^[[:space:]]*$' "$TRACKS_FILE" | grep -v '^#' | wc -l | tr -d ' ')
+echo "Tracks to process: $TOTAL"
+echo ""
+
+# Create temp files for tracking
+QUEUE_FILE=$(mktemp)
+DONE_FILE=$(mktemp)
+FAIL_FILE=$(mktemp)
+
+grep -v '^[[:space:]]*$' "$TRACKS_FILE" | grep -v '^#' > "$QUEUE_FILE"
 
 process_track() {
     local track_id="$1"
-    local mp3_url="$2"
-    local attempt=1
     
-    while [[ $attempt -le $MAX_RETRIES ]]; do
-        log "Processing $track_id (attempt $attempt/$MAX_RETRIES)..."
-        if "$SINGLE_TRACK_SCRIPT" "$track_id" "$mp3_url"; then
+    # Check if already exists
+    if aws s3 ls "s3://$R2_BUCKET/hls/$track_id/master.m3u8" \
+        --endpoint-url "$R2_ENDPOINT" &>/dev/null; then
+        echo "$track_id" >> "$DONE_FILE"
+        return 0
+    fi
+    
+    # Process with retries
+    for attempt in 1 2 3; do
+        if "$SCRIPT_DIR/transcode-single-track.sh" "$track_id" 2>/dev/null; then
+            echo "$track_id" >> "$DONE_FILE"
             return 0
         fi
-        ((attempt++))
-        sleep 5
+        sleep 2
     done
+    
+    echo "$track_id" >> "$FAIL_FILE"
     return 1
 }
 
-echo "=============================================" | tee "$LOG_FILE"
-log "HLS BATCH TRANSCODER STARTED"
-log "Tracks file: $TRACKS_FILE"
-echo "=============================================" | tee -a "$LOG_FILE"
+export -f process_track
+export SCRIPT_DIR R2_ENDPOINT R2_BUCKET DONE_FILE FAIL_FILE
 
-> "$FAILED_LOG"
+# Run with parallel workers
+cat "$QUEUE_FILE" | xargs -P "$NUM_WORKERS" -I {} bash -c 'process_track "$@"' _ {}
 
-while IFS= read -r line || [[ -n "$line" ]]; do
-    [[ -z "${line// }" ]] && continue
-    [[ "$line" =~ ^[[:space:]]*# ]] && continue
-    
-    read -r track_id mp3_url <<< "$line"
-    [[ -z "$track_id" || -z "$mp3_url" ]] && continue
-    
-    ((TOTAL++))
-    
-    if process_track "$track_id" "$mp3_url"; then
-        log "✓ Track $track_id completed"
-        ((SUCCEEDED++))
-    else
-        log "✗ Track $track_id FAILED"
-        ((FAILED++))
-        echo "$track_id $mp3_url" >> "$FAILED_LOG"
-    fi
-    
-    log "Progress: Success=$SUCCEEDED Failed=$FAILED Total=$TOTAL"
-    
-done < "$TRACKS_FILE"
+# Summary
+SUCCEEDED=$(wc -l < "$DONE_FILE" 2>/dev/null | tr -d ' ' || echo 0)
+FAILED=$(wc -l < "$FAIL_FILE" 2>/dev/null | tr -d ' ' || echo 0)
 
 echo ""
 echo "╔════════════════════════════════════════════╗"
-echo "║           FINAL SUMMARY REPORT             ║"
+echo "║              BATCH COMPLETE                ║"
 echo "╠════════════════════════════════════════════╣"
 printf "║  Total:     %-28s  ║\n" "$TOTAL"
 printf "║  Succeeded: %-28s  ║\n" "$SUCCEEDED"
 printf "║  Failed:    %-28s  ║\n" "$FAILED"
 echo "╚════════════════════════════════════════════╝"
 
-[[ $FAILED -gt 0 ]] && echo "Failed tracks saved to: $FAILED_LOG"
+if [[ -s "$FAIL_FILE" ]]; then
+    cp "$FAIL_FILE" failed-tracks.txt
+    echo ""
+    echo "Failed tracks saved to: failed-tracks.txt"
+    echo "Retry with: ./batch-transcode.sh failed-tracks.txt $NUM_WORKERS"
+fi
+
+rm -f "$QUEUE_FILE" "$DONE_FILE" "$FAIL_FILE"
 SCRIPT_EOF
 
 chmod +x ~/hls-ladder/batch-transcode.sh
-echo "✓ Batch script created"
 ```
 
----
-
-## Part 3: Configure R2 Credentials
-
-### Step 3.1: Set Environment Variables
-
-Replace the placeholder values with your actual R2 credentials:
+### Step 8: Generate Track List from R2
 
 ```bash
-# Set R2 credentials (replace with your values)
-export R2_ENDPOINT="https://YOUR_ACCOUNT_ID.r2.cloudflarestorage.com"
-export R2_BUCKET="focus-music-audio"
-export AWS_ACCESS_KEY_ID="your-r2-access-key"
-export AWS_SECRET_ACCESS_KEY="your-r2-secret-key"
-```
-
-### Step 3.2: Verify R2 Connection
-
-Test that you can access R2:
-
-```bash
-aws s3 ls "s3://$R2_BUCKET/" --endpoint-url "$R2_ENDPOINT" | head -5
-```
-
-You should see a list of files/folders in your bucket.
-
----
-
-## Part 4: Test with ONE Track
-
-### Step 4.1: Find a Test Track
-
-List your audio files to find a test track:
-
-```bash
-aws s3 ls "s3://$R2_BUCKET/audio/" --endpoint-url "$R2_ENDPOINT" | head -10
-```
-
-### Step 4.2: Run Single Track Test
-
-Replace `YOUR_TRACK_ID` and `YOUR_TRACK_FILENAME` with actual values:
-
-```bash
-cd ~/hls-ladder
-
-./transcode-single-track.sh "YOUR_TRACK_ID" "s3://$R2_BUCKET/audio/YOUR_TRACK_FILENAME.mp3"
-```
-
-### Step 4.3: Verify the Output
-
-Check that the HLS files were uploaded:
-
-```bash
-aws s3 ls "s3://$R2_BUCKET/hls/YOUR_TRACK_ID/" --recursive --endpoint-url "$R2_ENDPOINT"
-```
-
-You should see:
-- `master.m3u8`
-- `low/index.m3u8` + segment files
-- `medium/index.m3u8` + segment files
-- `high/index.m3u8` + segment files
-- `premium/index.m3u8` + segment files
-
-### Step 4.4: Test Playback (Optional)
-
-If your R2 bucket has public access or CDN configured, test the master playlist URL:
-```
-https://your-cdn-domain.com/hls/YOUR_TRACK_ID/master.m3u8
-```
-
----
-
-## Part 5: Run Full Library
-
-### Step 5.1: Create tracks.txt
-
-Create a file with all your tracks:
-
-```bash
-# Option A: Create manually
-nano ~/hls-ladder/tracks.txt
-
-# Add lines in format:
-# track-id s3://bucket/path/to/file.mp3
-```
-
-Or generate from your audio folder:
-
-```bash
-# Option B: Generate from R2 listing
+# List all MP3s in R2 and create tracks.txt
 aws s3 ls "s3://$R2_BUCKET/audio/" --endpoint-url "$R2_ENDPOINT" | \
-    awk '{print $4}' | \
-    grep '\.mp3$' | \
-    while read filename; do
-        track_id=$(basename "$filename" .mp3)
-        echo "$track_id s3://$R2_BUCKET/audio/$filename"
-    done > ~/hls-ladder/tracks.txt
+    awk '{print $4}' | grep '\.mp3$' | sed 's/\.mp3$//' > ~/hls-ladder/tracks.txt
 
-# Review the file
-head -20 ~/hls-ladder/tracks.txt
+# Check how many tracks
 wc -l ~/hls-ladder/tracks.txt
 ```
 
-### Step 5.2: Run Batch Processing
+---
+
+## Running the Transcoder
+
+### Test with ONE track first
 
 ```bash
 cd ~/hls-ladder
 
-# Start the batch process (can take hours for large libraries)
-./batch-transcode.sh tracks.txt
+# Pick the first track to test
+head -1 tracks.txt
+# Example output: abc123
+
+# Run single track test
+./transcode-single-track.sh abc123
+
+# Verify it worked
+aws s3 ls "s3://$R2_BUCKET/hls/abc123/" --endpoint-url "$R2_ENDPOINT"
 ```
 
-### Step 5.3: Monitor Progress
-
-In another terminal:
+### Run Full Batch (Recommended: 8-16 workers)
 
 ```bash
-# Watch the log file
-tail -f ~/hls-ladder/hls-batch.log
+cd ~/hls-ladder
+
+# Start batch with 8 workers (adjust based on EC2 instance size)
+./batch-transcode.sh tracks.txt 8
+
+# For larger instances (c5.xlarge+), use more workers:
+./batch-transcode.sh tracks.txt 16
 ```
 
-### Step 5.4: Handle Failures
-
-If any tracks fail, they're saved to `failed-tracks.log`. Retry them:
+### Check Progress
 
 ```bash
-./batch-transcode.sh failed-tracks.log
+# Count completed HLS folders
+aws s3 ls "s3://$R2_BUCKET/hls/" --endpoint-url "$R2_ENDPOINT" | grep -c 'PRE'
+
+# Count total MP3s
+aws s3 ls "s3://$R2_BUCKET/audio/" --endpoint-url "$R2_ENDPOINT" | grep -c '\.mp3$'
+```
+
+### Retry Failed Tracks
+
+```bash
+./batch-transcode.sh failed-tracks.txt 8
 ```
 
 ---
 
-## Part 6: Sync to Supabase (Optional)
+## Running in Background (Recommended for Large Batches)
 
-If you want to mirror HLS files to Supabase Storage:
-
-### Step 6.1: Set Supabase Credentials
+Use `screen` or `nohup` to keep the job running if you disconnect:
 
 ```bash
-export SUPABASE_S3_ENDPOINT="https://YOUR_PROJECT_REF.supabase.co/storage/v1/s3"
-export SUPABASE_S3_BUCKET="audio"
-export SUPABASE_ACCESS_KEY_ID="your-supabase-key"
-export SUPABASE_SECRET_ACCESS_KEY="your-supabase-secret"
+# Option 1: Using screen
+screen -S hls
+cd ~/hls-ladder
+./batch-transcode.sh tracks.txt 12
+# Press Ctrl+A then D to detach
+# Reconnect with: screen -r hls
+
+# Option 2: Using nohup
+cd ~/hls-ladder
+nohup ./batch-transcode.sh tracks.txt 12 > batch.log 2>&1 &
+tail -f batch.log
 ```
 
-### Step 6.2: Create Sync Script
+---
 
-```bash
-cat > ~/hls-ladder/sync-to-supabase.sh << 'SCRIPT_EOF'
-#!/bin/bash
-set -uo pipefail
+## Output Structure
 
-R2_KEY="$AWS_ACCESS_KEY_ID"
-R2_SECRET="$AWS_SECRET_ACCESS_KEY"
-TEMP_DIR="/tmp/hls-sync"
-mkdir -p "$TEMP_DIR"
+Each track creates this structure in R2:
 
-sync_track() {
-    local track_id="$1"
-    echo "Syncing $track_id..."
-    
-    mkdir -p "$TEMP_DIR/$track_id"
-    
-    export AWS_ACCESS_KEY_ID="$R2_KEY"
-    export AWS_SECRET_ACCESS_KEY="$R2_SECRET"
-    aws s3 sync "s3://$R2_BUCKET/hls/$track_id/" "$TEMP_DIR/$track_id/" --endpoint-url "$R2_ENDPOINT"
-    
-    export AWS_ACCESS_KEY_ID="$SUPABASE_ACCESS_KEY_ID"
-    export AWS_SECRET_ACCESS_KEY="$SUPABASE_SECRET_ACCESS_KEY"
-    aws s3 sync "$TEMP_DIR/$track_id/" "s3://$SUPABASE_S3_BUCKET/hls/$track_id/" --endpoint-url "$SUPABASE_S3_ENDPOINT"
-    
-    rm -rf "$TEMP_DIR/$track_id"
-    echo "✓ Synced $track_id"
-}
-
-# Reset to R2 credentials
-export AWS_ACCESS_KEY_ID="$R2_KEY"
-export AWS_SECRET_ACCESS_KEY="$R2_SECRET"
-
-# List and sync all tracks
-aws s3 ls "s3://$R2_BUCKET/hls/" --endpoint-url "$R2_ENDPOINT" | awk '{print $2}' | sed 's/\/$//' | while read track_id; do
-    sync_track "$track_id"
-done
-
-rm -rf "$TEMP_DIR"
-echo "Sync complete!"
-SCRIPT_EOF
-
-chmod +x ~/hls-ladder/sync-to-supabase.sh
+```
+hls/<track-id>/
+├── master.m3u8          # Main playlist (points to variants)
+├── low/
+│   ├── index.m3u8       # 32 kbps playlist
+│   └── segment_*.ts     # 32 kbps segments
+├── medium/
+│   ├── index.m3u8       # 64 kbps playlist
+│   └── segment_*.ts     # 64 kbps segments
+├── high/
+│   ├── index.m3u8       # 96 kbps playlist
+│   └── segment_*.ts     # 96 kbps segments
+└── premium/
+    ├── index.m3u8       # 128 kbps playlist
+    └── segment_*.ts     # 128 kbps segments
 ```
 
-### Step 6.3: Run Sync
-
-```bash
-./sync-to-supabase.sh
+CDN URL format:
 ```
+https://pub-16f9274cf01948468de2d5af8a6fdb23.r2.dev/hls/<track-id>/master.m3u8
+```
+
+---
+
+## Recommended EC2 Instance Sizes
+
+| Instance | vCPUs | Workers | Estimated Speed |
+|----------|-------|---------|-----------------|
+| t3.medium | 2 | 4 | ~2 tracks/min |
+| c5.large | 2 | 6 | ~3 tracks/min |
+| c5.xlarge | 4 | 12 | ~6 tracks/min |
+| c5.2xlarge | 8 | 24 | ~12 tracks/min |
+
+For 200+ tracks, a c5.xlarge or larger is recommended.
 
 ---
 
 ## Troubleshooting
 
-### "ffmpeg not found"
+### "command not found: ffmpeg"
 ```bash
-sudo yum install -y ffmpeg
-# or on Ubuntu:
-sudo apt-get install -y ffmpeg
+sudo yum install -y ffmpeg  # Amazon Linux
+sudo apt install -y ffmpeg  # Ubuntu
 ```
 
 ### "Access Denied" from R2
-- Verify your R2 API token has read/write permissions
-- Check the bucket name is correct
-- Ensure the endpoint URL matches your account
-
-### Transcode fails with memory error
-For very long audio files, you may need more memory:
+Check your credentials are set:
 ```bash
-# Use a larger EC2 instance (t3.medium or larger)
+echo $R2_ENDPOINT
+echo $R2_BUCKET
+echo $AWS_ACCESS_KEY_ID
 ```
 
 ### Track fails repeatedly
-Check the source MP3:
+Check if the MP3 exists:
 ```bash
-# Download and inspect
-aws s3 cp "s3://$R2_BUCKET/audio/problem-file.mp3" /tmp/test.mp3 --endpoint-url "$R2_ENDPOINT"
-ffprobe /tmp/test.mp3
+aws s3 ls "s3://$R2_BUCKET/audio/TRACK_ID.mp3" --endpoint-url "$R2_ENDPOINT"
 ```
 
----
-
-## Quick Reference
-
-| Command | Description |
-|---------|-------------|
-| `./transcode-single-track.sh <id> <url>` | Transcode one track |
-| `./batch-transcode.sh tracks.txt` | Process all tracks in file |
-| `./batch-transcode.sh failed-tracks.log` | Retry failed tracks |
-| `tail -f hls-batch.log` | Monitor progress |
-
----
-
-## Files Created
-
-| File | Purpose |
-|------|---------|
-| `transcode-single-track.sh` | Transcodes one MP3 to 4-bitrate HLS |
-| `batch-transcode.sh` | Processes multiple tracks from list |
-| `sync-to-supabase.sh` | Mirrors R2 HLS to Supabase Storage |
-| `tracks.txt` | Your list of tracks to process |
-| `hls-batch.log` | Batch processing log |
-| `failed-tracks.log` | Tracks that failed (for retry) |
+### Out of disk space
+Clean temp files:
+```bash
+rm -rf /tmp/hls-transcode/*
+```

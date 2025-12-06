@@ -1,13 +1,17 @@
 #!/bin/bash
 # =============================================================================
-# HLS LADDER TRANSCODER - SINGLE TRACK
+# HLS LADDER TRANSCODER - SINGLE TRACK (R2 to R2)
 # =============================================================================
 # Creates a 4-bitrate HLS ladder from an MP3 file stored in Cloudflare R2
+# Downloads from R2, transcodes locally, uploads back to R2.
 #
-# Usage: ./transcode-single-track.sh <TRACK_ID> <MP3_S3_URL>
+# Usage: ./transcode-single-track.sh <TRACK_ID>
 #
 # Example:
-#   ./transcode-single-track.sh abc123 "s3://focus-music-audio/audio/abc123.mp3"
+#   ./transcode-single-track.sh abc123
+#
+# The script will automatically find the MP3 in R2 at:
+#   s3://focus-music-audio/audio/<TRACK_ID>.mp3
 #
 # Requirements:
 #   - ffmpeg installed
@@ -43,20 +47,25 @@ BITRATE_PREMIUM=128
 AUDIO_CHANNELS=2
 AUDIO_SAMPLE_RATE=44100
 
+# R2 paths
+AUDIO_PATH="audio"
+HLS_PATH="hls"
+
 # -----------------------------------------------------------------------------
 # ARGUMENT VALIDATION
 # -----------------------------------------------------------------------------
-if [[ $# -lt 2 ]]; then
+if [[ $# -lt 1 ]]; then
     echo "ERROR: Missing arguments"
-    echo "Usage: $0 <TRACK_ID> <MP3_S3_URL>"
+    echo "Usage: $0 <TRACK_ID>"
     echo ""
     echo "Example:"
-    echo "  $0 abc123 \"s3://focus-music-audio/audio/abc123.mp3\""
+    echo "  $0 abc123"
+    echo ""
+    echo "The MP3 will be fetched from: s3://\$R2_BUCKET/audio/<TRACK_ID>.mp3"
     exit 1
 fi
 
 TRACK_ID="$1"
-MP3_S3_URL="$2"
 
 # Validate TRACK_ID (alphanumeric, dash, underscore only)
 if [[ ! "$TRACK_ID" =~ ^[a-zA-Z0-9_-]+$ ]]; then
@@ -89,6 +98,9 @@ if ! command -v aws &> /dev/null; then
     echo "ERROR: aws CLI is not installed"
     exit 1
 fi
+
+# Build the MP3 URL from R2
+MP3_S3_URL="s3://$R2_BUCKET/$AUDIO_PATH/$TRACK_ID.mp3"
 
 # -----------------------------------------------------------------------------
 # LOGGING FUNCTIONS
@@ -267,25 +279,13 @@ MASTER_EOF
     # ---------------------------------------------------------------------
     log "Uploading HLS files to R2..."
     
-    R2_DEST="s3://$R2_BUCKET/hls/$TRACK_ID/"
+    R2_DEST="s3://$R2_BUCKET/$HLS_PATH/$TRACK_ID/"
     
+    # Upload all files with aws s3 sync (handles all file types)
     if ! aws s3 sync "$OUTPUT_DIR/" "$R2_DEST" \
         --endpoint-url "$R2_ENDPOINT" \
-        --content-type "application/vnd.apple.mpegurl" \
-        --exclude "*" \
-        --include "*.m3u8" \
         2>&1 | tee -a "$LOG_FILE"; then
-        log_error "Failed to upload .m3u8 files"
-        exit 1
-    fi
-    
-    if ! aws s3 sync "$OUTPUT_DIR/" "$R2_DEST" \
-        --endpoint-url "$R2_ENDPOINT" \
-        --content-type "video/MP2T" \
-        --exclude "*" \
-        --include "*.ts" \
-        2>&1 | tee -a "$LOG_FILE"; then
-        log_error "Failed to upload .ts files"
+        log_error "Failed to upload HLS files"
         exit 1
     fi
 

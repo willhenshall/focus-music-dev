@@ -1,25 +1,29 @@
 #!/bin/bash
 # =============================================================================
-# HLS LADDER TRANSCODER - BATCH PROCESSOR
+# HLS LADDER TRANSCODER - PARALLEL BATCH PROCESSOR (R2 to R2)
 # =============================================================================
-# Processes multiple tracks from a tracks.txt file
+# Processes multiple tracks with parallel workers for maximum throughput.
 #
-# Usage: ./batch-transcode.sh [tracks-file]
+# Usage: ./batch-transcode.sh [tracks-file] [num-workers]
 #
-# If no tracks file is specified, defaults to ./tracks.txt
+# Defaults:
+#   tracks-file: ./tracks.txt
+#   num-workers: 4
 #
-# tracks.txt format (one track per line):
-#   <track-id> <s3-mp3-url>
+# tracks.txt format (one track ID per line):
+#   abc123
+#   def456
+#   ghi789
 #
-# Example tracks.txt:
-#   abc123 s3://focus-music-audio/audio/abc123.mp3
-#   def456 s3://focus-music-audio/audio/def456.mp3
+# The script finds MP3s in R2 at: audio/<track-id>.mp3
+# And uploads HLS to: hls/<track-id>/
 #
 # Features:
+#   - Parallel processing (configurable workers)
 #   - Retries failed tracks up to 3 times
-#   - Logs progress to hls-batch.log
-#   - Generates summary report at end
-#   - Skips blank lines and comments (lines starting with #)
+#   - Real-time progress display
+#   - Skips already-processed tracks (checks R2)
+#   - Comprehensive logging
 # =============================================================================
 
 set -uo pipefail
@@ -31,35 +35,54 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SINGLE_TRACK_SCRIPT="$SCRIPT_DIR/transcode-single-track.sh"
 
 TRACKS_FILE="${1:-$SCRIPT_DIR/tracks.txt}"
-LOG_FILE="${LOG_FILE:-$SCRIPT_DIR/hls-batch.log}"
-FAILED_LOG="$SCRIPT_DIR/failed-tracks.log"
+NUM_WORKERS="${2:-4}"
+
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+LOG_DIR="$SCRIPT_DIR/logs"
+mkdir -p "$LOG_DIR"
+
+LOG_FILE="$LOG_DIR/batch_${TIMESTAMP}.log"
+FAILED_LOG="$LOG_DIR/failed_${TIMESTAMP}.txt"
+SUCCESS_LOG="$LOG_DIR/success_${TIMESTAMP}.txt"
+PROGRESS_FILE="$LOG_DIR/progress_${TIMESTAMP}.txt"
 
 MAX_RETRIES=3
 RETRY_DELAY=5
 
-# Counters
-TOTAL_TRACKS=0
-SUCCEEDED=0
-FAILED=0
-SKIPPED=0
+# -----------------------------------------------------------------------------
+# VALIDATION
+# -----------------------------------------------------------------------------
+if [[ ! -f "$SINGLE_TRACK_SCRIPT" ]]; then
+    echo "ERROR: Single track script not found: $SINGLE_TRACK_SCRIPT"
+    exit 1
+fi
 
-# Arrays to track results
-declare -a FAILED_TRACKS=()
-declare -a SUCCESS_TRACKS=()
+if [[ ! -x "$SINGLE_TRACK_SCRIPT" ]]; then
+    chmod +x "$SINGLE_TRACK_SCRIPT"
+fi
+
+if [[ ! -f "$TRACKS_FILE" ]]; then
+    echo "ERROR: Tracks file not found: $TRACKS_FILE"
+    echo ""
+    echo "Create tracks.txt with one track ID per line, or generate it with:"
+    echo "  ./list-r2-tracks.sh > tracks.txt"
+    exit 1
+fi
+
+# Check required environment variables
+for var in R2_ENDPOINT R2_BUCKET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
+    if [[ -z "${!var:-}" ]]; then
+        echo "ERROR: Environment variable $var is not set"
+        exit 1
+    fi
+done
 
 # -----------------------------------------------------------------------------
-# LOGGING FUNCTIONS
+# LOGGING
 # -----------------------------------------------------------------------------
 log() {
-    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    echo "[$timestamp] $1" | tee -a "$LOG_FILE"
-}
-
-log_header() {
-    echo "" | tee -a "$LOG_FILE"
-    echo "=============================================" | tee -a "$LOG_FILE"
-    log "$1"
-    echo "=============================================" | tee -a "$LOG_FILE"
+    local msg="[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+    echo "$msg" | tee -a "$LOG_FILE"
 }
 
 log_success() {
@@ -67,57 +90,47 @@ log_success() {
 }
 
 log_error() {
-    log "✗ ERROR: $1"
-}
-
-log_warning() {
-    log "⚠ WARNING: $1"
+    log "✗ $1"
 }
 
 # -----------------------------------------------------------------------------
-# VALIDATION
+# PROGRESS TRACKING
 # -----------------------------------------------------------------------------
-if [[ ! -f "$SINGLE_TRACK_SCRIPT" ]]; then
-    log_error "Single track script not found: $SINGLE_TRACK_SCRIPT"
-    exit 1
-fi
+update_progress() {
+    local succeeded=$1
+    local failed=$2
+    local total=$3
+    local current=$((succeeded + failed))
+    local percent=$((current * 100 / total))
+    
+    echo "$succeeded $failed $total" > "$PROGRESS_FILE"
+    echo -ne "\r[${percent}%] Processed: $current/$total | Success: $succeeded | Failed: $failed    "
+}
 
-if [[ ! -x "$SINGLE_TRACK_SCRIPT" ]]; then
-    log_warning "Making single track script executable..."
-    chmod +x "$SINGLE_TRACK_SCRIPT"
-fi
-
-if [[ ! -f "$TRACKS_FILE" ]]; then
-    log_error "Tracks file not found: $TRACKS_FILE"
-    echo ""
-    echo "Create a tracks.txt file with format:"
-    echo "  <track-id> <s3-mp3-url>"
-    echo ""
-    echo "Example:"
-    echo "  abc123 s3://focus-music-audio/audio/abc123.mp3"
-    exit 1
-fi
+# -----------------------------------------------------------------------------
+# CHECK IF TRACK ALREADY PROCESSED
+# -----------------------------------------------------------------------------
+track_exists_in_r2() {
+    local track_id="$1"
+    aws s3 ls "s3://$R2_BUCKET/hls/$track_id/master.m3u8" \
+        --endpoint-url "$R2_ENDPOINT" &>/dev/null
+}
 
 # -----------------------------------------------------------------------------
 # PROCESS SINGLE TRACK WITH RETRIES
 # -----------------------------------------------------------------------------
 process_track() {
     local track_id="$1"
-    local mp3_url="$2"
     local attempt=1
     
     while [[ $attempt -le $MAX_RETRIES ]]; do
-        log "Processing $track_id (attempt $attempt/$MAX_RETRIES)..."
-        
-        if "$SINGLE_TRACK_SCRIPT" "$track_id" "$mp3_url"; then
+        if "$SINGLE_TRACK_SCRIPT" "$track_id" >> "$LOG_FILE" 2>&1; then
             return 0
         fi
         
         if [[ $attempt -lt $MAX_RETRIES ]]; then
-            log_warning "Attempt $attempt failed, retrying in ${RETRY_DELAY}s..."
             sleep $RETRY_DELAY
         fi
-        
         ((attempt++))
     done
     
@@ -125,118 +138,149 @@ process_track() {
 }
 
 # -----------------------------------------------------------------------------
-# MAIN BATCH PROCESSING
+# WORKER FUNCTION
 # -----------------------------------------------------------------------------
-main() {
-    log_header "HLS BATCH TRANSCODER STARTED"
-    log "Tracks file: $TRACKS_FILE"
-    log "Log file: $LOG_FILE"
-    log ""
+worker() {
+    local worker_id=$1
+    local track_id
     
-    # Clear failed log
-    > "$FAILED_LOG"
-    
-    # Count total valid lines first
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        # Skip empty lines
-        [[ -z "${line// }" ]] && continue
+    while true; do
+        # Get next track from queue (thread-safe with flock)
+        track_id=""
+        {
+            flock -x 200
+            if [[ -s "$QUEUE_FILE" ]]; then
+                track_id=$(head -1 "$QUEUE_FILE")
+                tail -n +2 "$QUEUE_FILE" > "$QUEUE_FILE.tmp" && mv "$QUEUE_FILE.tmp" "$QUEUE_FILE"
+            fi
+        } 200>"$LOCK_FILE"
         
-        # Skip comments
-        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        # Exit if queue is empty
+        [[ -z "$track_id" ]] && break
         
-        ((TOTAL_TRACKS++))
-    done < "$TRACKS_FILE"
-    
-    log "Found $TOTAL_TRACKS tracks to process"
-    log ""
-    
-    # Reset counter for actual processing
-    local current=0
-    
-    # Process each line
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        # Skip empty lines
-        if [[ -z "${line// }" ]]; then
+        # Skip if already exists in R2
+        if track_exists_in_r2 "$track_id"; then
+            {
+                flock -x 200
+                echo "$track_id" >> "$SUCCESS_LOG"
+                local s=$(cat "$COUNT_DIR/succeeded")
+                echo $((s + 1)) > "$COUNT_DIR/succeeded"
+            } 200>"$LOCK_FILE"
             continue
         fi
         
-        # Skip comments
-        if [[ "$line" =~ ^[[:space:]]*# ]]; then
-            continue
-        fi
-        
-        # Parse line
-        read -r track_id mp3_url <<< "$line"
-        
-        # Validate parsed values
-        if [[ -z "$track_id" ]] || [[ -z "$mp3_url" ]]; then
-            log_warning "Skipping malformed line: $line"
-            ((SKIPPED++))
-            continue
-        fi
-        
-        ((current++))
-        
-        log_header "TRACK $current/$TOTAL_TRACKS: $track_id"
-        
-        if process_track "$track_id" "$mp3_url"; then
-            log_success "Track $track_id completed successfully"
-            ((SUCCEEDED++))
-            SUCCESS_TRACKS+=("$track_id")
+        # Process the track
+        if process_track "$track_id"; then
+            {
+                flock -x 200
+                echo "$track_id" >> "$SUCCESS_LOG"
+                local s=$(cat "$COUNT_DIR/succeeded")
+                echo $((s + 1)) > "$COUNT_DIR/succeeded"
+            } 200>"$LOCK_FILE"
         else
-            log_error "Track $track_id failed after $MAX_RETRIES attempts"
-            ((FAILED++))
-            FAILED_TRACKS+=("$track_id")
-            echo "$track_id $mp3_url" >> "$FAILED_LOG"
+            {
+                flock -x 200
+                echo "$track_id" >> "$FAILED_LOG"
+                local f=$(cat "$COUNT_DIR/failed")
+                echo $((f + 1)) > "$COUNT_DIR/failed"
+            } 200>"$LOCK_FILE"
         fi
         
-        # Progress update
-        log ""
-        log "Progress: $current/$TOTAL_TRACKS | Success: $SUCCEEDED | Failed: $FAILED"
-        log ""
-        
-    done < "$TRACKS_FILE"
-    
-    # ---------------------------------------------------------------------
-    # FINAL REPORT
-    # ---------------------------------------------------------------------
-    log_header "BATCH PROCESSING COMPLETE"
-    
-    echo "" | tee -a "$LOG_FILE"
-    echo "╔════════════════════════════════════════════╗" | tee -a "$LOG_FILE"
-    echo "║           FINAL SUMMARY REPORT             ║" | tee -a "$LOG_FILE"
-    echo "╠════════════════════════════════════════════╣" | tee -a "$LOG_FILE"
-    printf "║  Total tracks processed:  %-15s  ║\n" "$TOTAL_TRACKS" | tee -a "$LOG_FILE"
-    printf "║  Succeeded:               %-15s  ║\n" "$SUCCEEDED" | tee -a "$LOG_FILE"
-    printf "║  Failed:                  %-15s  ║\n" "$FAILED" | tee -a "$LOG_FILE"
-    printf "║  Skipped (malformed):     %-15s  ║\n" "$SKIPPED" | tee -a "$LOG_FILE"
-    echo "╚════════════════════════════════════════════╝" | tee -a "$LOG_FILE"
-    echo "" | tee -a "$LOG_FILE"
-    
-    if [[ $FAILED -gt 0 ]]; then
-        echo "FAILED TRACKS:" | tee -a "$LOG_FILE"
-        for track in "${FAILED_TRACKS[@]}"; do
-            echo "  - $track" | tee -a "$LOG_FILE"
-        done
-        echo "" | tee -a "$LOG_FILE"
-        echo "Failed tracks saved to: $FAILED_LOG" | tee -a "$LOG_FILE"
-        echo "To retry failed tracks, run:" | tee -a "$LOG_FILE"
-        echo "  ./batch-transcode.sh $FAILED_LOG" | tee -a "$LOG_FILE"
-    fi
-    
-    if [[ $SUCCEEDED -eq $TOTAL_TRACKS ]] && [[ $TOTAL_TRACKS -gt 0 ]]; then
-        echo "" | tee -a "$LOG_FILE"
-        echo "🎉 ALL TRACKS PROCESSED SUCCESSFULLY! 🎉" | tee -a "$LOG_FILE"
-    fi
-    
-    echo "" | tee -a "$LOG_FILE"
-    log "Batch log saved to: $LOG_FILE"
-    
-    # Exit with error code if any failed
-    if [[ $FAILED -gt 0 ]]; then
-        exit 1
-    fi
+        # Update progress display
+        {
+            flock -x 200
+            local s=$(cat "$COUNT_DIR/succeeded")
+            local f=$(cat "$COUNT_DIR/failed")
+            local t=$(cat "$COUNT_DIR/total")
+            update_progress "$s" "$f" "$t"
+        } 200>"$LOCK_FILE"
+    done
 }
 
-# Run main function
+# -----------------------------------------------------------------------------
+# MAIN
+# -----------------------------------------------------------------------------
+main() {
+    echo "============================================="
+    echo "  HLS LADDER BATCH TRANSCODER (R2 → R2)"
+    echo "============================================="
+    echo ""
+    log "Starting batch transcoding..."
+    log "Tracks file: $TRACKS_FILE"
+    log "Workers: $NUM_WORKERS"
+    log "Log file: $LOG_FILE"
+    echo ""
+    
+    # Create temp directory for counters
+    COUNT_DIR=$(mktemp -d)
+    QUEUE_FILE="$COUNT_DIR/queue"
+    LOCK_FILE="$COUNT_DIR/lock"
+    
+    echo "0" > "$COUNT_DIR/succeeded"
+    echo "0" > "$COUNT_DIR/failed"
+    
+    # Build queue from tracks file (skip blanks and comments)
+    grep -v '^[[:space:]]*$' "$TRACKS_FILE" | grep -v '^[[:space:]]*#' > "$QUEUE_FILE"
+    
+    # Count total tracks
+    TOTAL_TRACKS=$(wc -l < "$QUEUE_FILE" | tr -d ' ')
+    echo "$TOTAL_TRACKS" > "$COUNT_DIR/total"
+    
+    log "Found $TOTAL_TRACKS tracks to process"
+    echo ""
+    
+    if [[ $TOTAL_TRACKS -eq 0 ]]; then
+        log "No tracks to process"
+        exit 0
+    fi
+    
+    # Initialize output files
+    > "$FAILED_LOG"
+    > "$SUCCESS_LOG"
+    
+    # Start workers in background
+    log "Starting $NUM_WORKERS workers..."
+    echo ""
+    
+    for ((i=1; i<=NUM_WORKERS; i++)); do
+        worker "$i" &
+    done
+    
+    # Wait for all workers to complete
+    wait
+    
+    echo ""
+    echo ""
+    
+    # Read final counts
+    SUCCEEDED=$(cat "$COUNT_DIR/succeeded")
+    FAILED=$(cat "$COUNT_DIR/failed")
+    
+    # Cleanup temp directory
+    rm -rf "$COUNT_DIR"
+    
+    # Final report
+    echo "╔════════════════════════════════════════════╗"
+    echo "║           BATCH COMPLETE                   ║"
+    echo "╠════════════════════════════════════════════╣"
+    printf "║  Total tracks:    %-22s  ║\n" "$TOTAL_TRACKS"
+    printf "║  Succeeded:       %-22s  ║\n" "$SUCCEEDED"
+    printf "║  Failed:          %-22s  ║\n" "$FAILED"
+    echo "╚════════════════════════════════════════════╝"
+    echo ""
+    
+    log "Batch complete: $SUCCEEDED succeeded, $FAILED failed"
+    
+    if [[ $FAILED -gt 0 ]]; then
+        echo "Failed tracks saved to: $FAILED_LOG"
+        echo "To retry failed tracks:"
+        echo "  ./batch-transcode.sh $FAILED_LOG $NUM_WORKERS"
+        echo ""
+    fi
+    
+    echo "Full log: $LOG_FILE"
+    echo "Success list: $SUCCESS_LOG"
+}
+
+# Run main
 main
