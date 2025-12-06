@@ -570,9 +570,25 @@ export function AudioEngineDiagnostics({ metrics, onClose, engineType: _engineTy
                   <Gauge className="w-4 h-4 text-indigo-600" />
                   <span className="text-[11px] font-bold text-slate-600 uppercase">HLS Quality</span>
                 </div>
-                <StatRow label="Level" value={hlsMetrics.currentLevel >= 0 ? `L${hlsMetrics.currentLevel}` : 'Auto'} valueClass="text-indigo-600" />
+                <StatRow 
+                  label="Tier" 
+                  value={hlsMetrics.abr?.currentQualityTier?.toUpperCase() || 'Auto'} 
+                  valueClass={
+                    hlsMetrics.abr?.currentQualityTier === 'premium' ? 'text-purple-600' :
+                    hlsMetrics.abr?.currentQualityTier === 'high' ? 'text-blue-600' :
+                    hlsMetrics.abr?.currentQualityTier === 'medium' ? 'text-green-600' :
+                    hlsMetrics.abr?.currentQualityTier === 'low' ? 'text-orange-600' :
+                    'text-indigo-600'
+                  } 
+                />
                 <StatRow label="Bandwidth" value={formatBitrate(hlsMetrics.bandwidthEstimate)} />
                 <StatRow label="Levels" value={hlsMetrics.levels.length || '-'} />
+                <StatRow 
+                  label="Bitrate" 
+                  value={hlsMetrics.levels[hlsMetrics.currentLevel]?.bitrate 
+                    ? `${Math.round(hlsMetrics.levels[hlsMetrics.currentLevel].bitrate / 1000)}k` 
+                    : 'Auto'} 
+                />
               </div>
             ) : (
               <div className="bg-slate-50 rounded-lg p-2.5 border border-slate-200 opacity-50">
@@ -643,6 +659,186 @@ export function AudioEngineDiagnostics({ metrics, onClose, engineType: _engineTy
               </div>
             )}
           </div>
+
+          {/* ABR (Adaptive Bitrate) Detailed Section */}
+          {hlsMetrics?.isHLSActive && hlsMetrics.abr && (
+            <div className="mt-3 pt-2.5 border-t border-slate-200">
+              <div className="flex items-center gap-2 mb-2">
+                <TrendingUp className="w-5 h-5 text-purple-600" />
+                <span className="text-sm font-bold text-slate-900">Adaptive Bitrate (ABR) Analysis</span>
+                <span className={`px-2 py-1 text-[11px] font-bold rounded ${
+                  hlsMetrics.abr.abrState === 'optimal' ? 'bg-green-100 text-green-700' :
+                  hlsMetrics.abr.abrState === 'upgrading' ? 'bg-blue-100 text-blue-700' :
+                  hlsMetrics.abr.abrState === 'downgraded' ? 'bg-orange-100 text-orange-700' :
+                  'bg-slate-100 text-slate-700'
+                }`}>
+                  {hlsMetrics.abr.abrState.toUpperCase()}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-4 gap-2">
+                {/* Current Quality */}
+                <div className="bg-purple-50 rounded-lg p-2.5 border border-purple-200">
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Zap className="w-4 h-4 text-purple-600" />
+                    <span className="text-[11px] font-bold text-slate-600 uppercase">Current Quality</span>
+                  </div>
+                  <div className="text-center mb-2">
+                    <span className={`text-lg font-bold ${
+                      hlsMetrics.abr.currentQualityTier === 'premium' ? 'text-purple-600' :
+                      hlsMetrics.abr.currentQualityTier === 'high' ? 'text-blue-600' :
+                      hlsMetrics.abr.currentQualityTier === 'medium' ? 'text-green-600' :
+                      'text-orange-600'
+                    }`}>
+                      {hlsMetrics.abr.currentQualityTier?.toUpperCase() || 'AUTO'}
+                    </span>
+                  </div>
+                  <StatRow 
+                    label="Bitrate" 
+                    value={hlsMetrics.levels[hlsMetrics.currentLevel]?.bitrate 
+                      ? `${Math.round(hlsMetrics.levels[hlsMetrics.currentLevel].bitrate / 1000)}k` 
+                      : '-'} 
+                    valueClass="text-purple-600"
+                  />
+                  <StatRow label="Level" value={hlsMetrics.currentLevel >= 0 ? `${hlsMetrics.currentLevel}/${hlsMetrics.levels.length - 1}` : 'Auto'} />
+                </div>
+
+                {/* Bandwidth Analysis */}
+                <div className="bg-purple-50 rounded-lg p-2.5 border border-purple-200">
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Activity className="w-4 h-4 text-purple-600" />
+                    <span className="text-[11px] font-bold text-slate-600 uppercase">Bandwidth</span>
+                  </div>
+                  <StatRow 
+                    label="Measured" 
+                    value={`${Math.round(hlsMetrics.bandwidthEstimate / 1000)} kbps`} 
+                    valueClass="text-purple-600"
+                  />
+                  <StatRow 
+                    label="Recommended" 
+                    value={hlsMetrics.abr.recommendedQualityTier?.toUpperCase() || '-'} 
+                    valueClass={
+                      hlsMetrics.abr.recommendedQualityTier === hlsMetrics.abr.currentQualityTier 
+                        ? 'text-green-600' 
+                        : 'text-orange-600'
+                    }
+                  />
+                  <StatRow 
+                    label="Match" 
+                    value={hlsMetrics.abr.recommendedQualityTier === hlsMetrics.abr.currentQualityTier ? '✓ Yes' : '⚠ No'} 
+                    valueClass={hlsMetrics.abr.recommendedQualityTier === hlsMetrics.abr.currentQualityTier ? 'text-green-600' : 'text-orange-600'}
+                  />
+                </div>
+
+                {/* Level Switching */}
+                <div className="bg-purple-50 rounded-lg p-2.5 border border-purple-200">
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Layers className="w-4 h-4 text-purple-600" />
+                    <span className="text-[11px] font-bold text-slate-600 uppercase">Switching</span>
+                  </div>
+                  <StatRow label="Total Switches" value={hlsMetrics.abr.totalLevelSwitches} />
+                  <StatRow 
+                    label="Direction" 
+                    value={
+                      hlsMetrics.abr.isUpgrading ? '↑ Upgrading' :
+                      hlsMetrics.abr.isDowngrading ? '↓ Downgrading' :
+                      '→ Stable'
+                    } 
+                    valueClass={
+                      hlsMetrics.abr.isUpgrading ? 'text-green-600' :
+                      hlsMetrics.abr.isDowngrading ? 'text-orange-600' :
+                      'text-blue-600'
+                    }
+                  />
+                  <StatRow 
+                    label="Last Switch" 
+                    value={hlsMetrics.abr.timeSinceSwitch > 0 
+                      ? `${Math.round(hlsMetrics.abr.timeSinceSwitch / 1000)}s ago` 
+                      : '-'} 
+                  />
+                </div>
+
+                {/* ABR Controller */}
+                <div className="bg-purple-50 rounded-lg p-2.5 border border-purple-200">
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Radio className="w-4 h-4 text-purple-600" />
+                    <span className="text-[11px] font-bold text-slate-600 uppercase">Controller</span>
+                  </div>
+                  <StatRow 
+                    label="Auto Mode" 
+                    value={hlsMetrics.abr.autoLevelEnabled ? 'Enabled' : 'Manual'} 
+                    valueClass={hlsMetrics.abr.autoLevelEnabled ? 'text-green-600' : 'text-orange-600'}
+                  />
+                  <StatRow label="Next Level" value={hlsMetrics.abr.nextAutoLevel >= 0 ? `L${hlsMetrics.abr.nextAutoLevel}` : 'Auto'} />
+                  <StatRow label="Load Level" value={hlsMetrics.abr.loadLevel >= 0 ? `L${hlsMetrics.abr.loadLevel}` : '-'} />
+                </div>
+              </div>
+
+              {/* Quality Ladder Visualization */}
+              <div className="mt-3 bg-slate-50 rounded-lg p-2.5 border border-slate-200">
+                <div className="flex items-center gap-1.5 mb-2">
+                  <Gauge className="w-4 h-4 text-slate-600" />
+                  <span className="text-[11px] font-bold text-slate-600 uppercase">Quality Ladder</span>
+                </div>
+                <div className="flex gap-1.5">
+                  {hlsMetrics.levels.map((level, idx) => {
+                    const isActive = idx === hlsMetrics.currentLevel;
+                    const isRecommended = level.tierName === hlsMetrics.abr.recommendedQualityTier;
+                    return (
+                      <div
+                        key={idx}
+                        className={`flex-1 p-2 rounded-lg text-center transition-all ${
+                          isActive 
+                            ? 'bg-purple-600 text-white ring-2 ring-purple-400' 
+                            : isRecommended 
+                              ? 'bg-purple-100 text-purple-700 ring-1 ring-purple-300' 
+                              : 'bg-slate-100 text-slate-600'
+                        }`}
+                      >
+                        <div className="text-[10px] font-bold uppercase">
+                          {level.tierName || `L${idx}`}
+                        </div>
+                        <div className={`text-[11px] ${isActive ? 'text-purple-200' : 'text-slate-500'}`}>
+                          {Math.round(level.bitrate / 1000)}k
+                        </div>
+                        {isActive && (
+                          <div className="text-[9px] mt-0.5 text-purple-200">● ACTIVE</div>
+                        )}
+                        {!isActive && isRecommended && (
+                          <div className="text-[9px] mt-0.5 text-purple-500">◎ REC</div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Level Switch History */}
+              {hlsMetrics.abr.levelSwitchHistory && hlsMetrics.abr.levelSwitchHistory.length > 0 && (
+                <div className="mt-2 bg-slate-50 rounded-lg p-2.5 border border-slate-200">
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Clock className="w-4 h-4 text-slate-600" />
+                    <span className="text-[11px] font-bold text-slate-600 uppercase">Recent Level Switches</span>
+                  </div>
+                  <div className="space-y-1 max-h-20 overflow-y-auto">
+                    {[...hlsMetrics.abr.levelSwitchHistory].reverse().slice(0, 5).map((sw, idx) => (
+                      <div key={idx} className="flex items-center gap-2 text-[10px]">
+                        <span className="text-slate-400 w-12">
+                          {new Date(sw.timestamp).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                        </span>
+                        <span className={`font-medium ${sw.toLevel > sw.fromLevel ? 'text-green-600' : 'text-orange-600'}`}>
+                          L{sw.fromLevel} → L{sw.toLevel}
+                        </span>
+                        <span className="text-slate-500">
+                          ({Math.round(sw.bandwidth / 1000)} kbps)
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
