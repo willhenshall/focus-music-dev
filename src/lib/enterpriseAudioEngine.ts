@@ -212,6 +212,16 @@ export class EnterpriseAudioEngine {
   // iOS WebKit info (for clamp decisions)
   private iosWebkitInfo: IosWebkitInfo;
   private iosClampPrefetchDisabled: boolean = false;
+  
+  // [CELLBUG FIX] Mobile/cellular playback guard configuration
+  // These values are more lenient to prevent false-positive skips on variable cell networks
+  private readonly CELL_STALL_DETECTION_DELAY = 12000;  // 12s for cell (vs 5s for Wi-Fi)
+  private readonly CELL_MAX_RECOVERY_ATTEMPTS = 5;       // 5 attempts for cell (vs 3 for Wi-Fi)
+  private readonly WIFI_MAX_RECOVERY_ATTEMPTS = 3;       // Original value for Wi-Fi
+  
+  // [CELLBUG FIX] Track consecutive stall failures to avoid premature skips
+  private consecutiveStallFailures: number = 0;
+  private lastStallTime: number = 0;
 
   constructor(storageAdapter: StorageAdapter) {
     this.storageAdapter = storageAdapter;
@@ -439,14 +449,39 @@ export class EnterpriseAudioEngine {
 
   private startStallDetection(): void {
     this.resetStallDetection();
+    
+    // [CELLBUG FIX] Use longer stall detection delay on cellular networks
+    // Cell networks have variable latency (can spike 3-10+ seconds) - Wi-Fi is more stable
+    const effectiveDelay = this.iosWebkitInfo.isCellular 
+      ? this.CELL_STALL_DETECTION_DELAY 
+      : this.stallDetectionDelay;
+    
+    console.log('[AUDIO][CELLBUG][STALL] Starting stall detection', {
+      delay: effectiveDelay,
+      isCellular: this.iosWebkitInfo.isCellular,
+      isIOSWebKit: this.iosWebkitInfo.isIOSWebKit,
+      currentTime: this.currentAudio.currentTime,
+      duration: this.currentAudio.duration,
+      buffered: this.currentAudio.buffered.length > 0 
+        ? this.currentAudio.buffered.end(this.currentAudio.buffered.length - 1) 
+        : 0,
+    });
+    
     this.stallDetectionTimer = setTimeout(() => {
       if (this.isPlayingState && this.currentAudio.paused) {
         this.metrics.isStalled = true;
         this.metrics.stallCount++;
         this.updateMetrics();
+        
+        console.log('[AUDIO][CELLBUG][STALL] Stall detected - attempting recovery', {
+          recoveryAttempts: this.metrics.recoveryAttempts,
+          consecutiveStallFailures: this.consecutiveStallFailures,
+          isCellular: this.iosWebkitInfo.isCellular,
+        });
+        
         this.attemptStallRecovery();
       }
-    }, this.stallDetectionDelay);
+    }, effectiveDelay);
   }
 
   private resetStallDetection(): void {
@@ -460,23 +495,49 @@ export class EnterpriseAudioEngine {
     if (!this.isPlayingState) return;
 
     this.metrics.recoveryAttempts++;
+    this.consecutiveStallFailures++;
+    this.lastStallTime = Date.now();
     this.updateMetrics();
+    
+    // [CELLBUG FIX] Use more recovery attempts on cellular networks
+    // Cell networks need more patience due to variable latency
+    const maxRecoveryAttempts = this.iosWebkitInfo.isCellular 
+      ? this.CELL_MAX_RECOVERY_ATTEMPTS 
+      : this.WIFI_MAX_RECOVERY_ATTEMPTS;
+    
+    console.log('[AUDIO][CELLBUG][RECOVERY] Attempting stall recovery', {
+      attempt: this.metrics.recoveryAttempts,
+      maxAttempts: maxRecoveryAttempts,
+      consecutiveFailures: this.consecutiveStallFailures,
+      isCellular: this.iosWebkitInfo.isCellular,
+      currentTime: this.currentAudio.currentTime,
+      duration: this.currentAudio.duration,
+      readyState: this.currentAudio.readyState,
+      networkState: this.currentAudio.networkState,
+    });
 
+    // Strategy 1: Micro-seek to trigger buffer reload
     if (this.metrics.recoveryAttempts === 1) {
+      console.log('[AUDIO][CELLBUG][RECOVERY] Strategy 1: Micro-seek');
       const currentTime = this.currentAudio.currentTime;
       this.currentAudio.currentTime = currentTime + 0.1;
 
       try {
         await this.currentAudio.play();
         this.metrics.isStalled = false;
+        this.consecutiveStallFailures = 0;  // [CELLBUG FIX] Reset on success
+        console.log('[AUDIO][CELLBUG][RECOVERY] Strategy 1 succeeded');
         this.updateMetrics();
         return;
       } catch (error) {
+        console.log('[AUDIO][CELLBUG][RECOVERY] Strategy 1 failed:', error);
         // Continue to next recovery strategy
       }
     }
 
+    // Strategy 2: Reload audio element
     if (this.metrics.recoveryAttempts === 2) {
+      console.log('[AUDIO][CELLBUG][RECOVERY] Strategy 2: Reload audio element');
       this.currentAudio.load();
       const currentTime = this.currentAudio.currentTime;
 
@@ -484,14 +545,86 @@ export class EnterpriseAudioEngine {
         await this.currentAudio.play();
         this.currentAudio.currentTime = currentTime;
         this.metrics.isStalled = false;
+        this.consecutiveStallFailures = 0;  // [CELLBUG FIX] Reset on success
+        console.log('[AUDIO][CELLBUG][RECOVERY] Strategy 2 succeeded');
         this.updateMetrics();
         return;
       } catch (error) {
+        console.log('[AUDIO][CELLBUG][RECOVERY] Strategy 2 failed:', error);
         // Continue to next recovery strategy
       }
     }
+    
+    // [CELLBUG FIX] Strategy 3 (for cell): Wait and retry with micro-seek
+    // On cellular, add an extra "wait and retry" strategy before giving up
+    if (this.iosWebkitInfo.isCellular && this.metrics.recoveryAttempts === 3) {
+      console.log('[AUDIO][CELLBUG][RECOVERY] Strategy 3 (cell): Wait 2s then micro-seek');
+      
+      // Wait 2 seconds for network to potentially recover
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      if (!this.isPlayingState) return;  // Check if user paused during wait
+      
+      const currentTime = this.currentAudio.currentTime;
+      this.currentAudio.currentTime = currentTime + 0.05;  // Smaller seek
+      
+      try {
+        await this.currentAudio.play();
+        this.metrics.isStalled = false;
+        this.consecutiveStallFailures = 0;
+        console.log('[AUDIO][CELLBUG][RECOVERY] Strategy 3 succeeded');
+        this.updateMetrics();
+        return;
+      } catch (error) {
+        console.log('[AUDIO][CELLBUG][RECOVERY] Strategy 3 failed:', error);
+      }
+    }
+    
+    // [CELLBUG FIX] Strategy 4 (for cell): Reload with fresh URL
+    if (this.iosWebkitInfo.isCellular && this.metrics.recoveryAttempts === 4) {
+      console.log('[AUDIO][CELLBUG][RECOVERY] Strategy 4 (cell): Reload with fresh source');
+      
+      const currentSrc = this.currentAudio.src;
+      const currentTime = this.currentAudio.currentTime;
+      
+      // Force reload by clearing and re-setting src
+      this.currentAudio.src = '';
+      this.currentAudio.load();
+      
+      // Small delay to let the browser reset
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      if (!this.isPlayingState) return;
+      
+      this.currentAudio.src = currentSrc;
+      this.currentAudio.load();
+      
+      try {
+        await this.currentAudio.play();
+        this.currentAudio.currentTime = Math.max(0, currentTime - 1);  // Seek back slightly
+        this.metrics.isStalled = false;
+        this.consecutiveStallFailures = 0;
+        console.log('[AUDIO][CELLBUG][RECOVERY] Strategy 4 succeeded');
+        this.updateMetrics();
+        return;
+      } catch (error) {
+        console.log('[AUDIO][CELLBUG][RECOVERY] Strategy 4 failed:', error);
+      }
+    }
 
-    if (this.metrics.recoveryAttempts >= 3) {
+    // [CELLBUG FIX] Only skip after exhausting all recovery attempts
+    // For Wi-Fi: skip after 3 attempts
+    // For Cell: skip after 5 attempts
+    if (this.metrics.recoveryAttempts >= maxRecoveryAttempts) {
+      console.log('[AUDIO][CELLBUG][SKIP] Exhausted all recovery attempts - skipping', {
+        attempts: this.metrics.recoveryAttempts,
+        maxAttempts: maxRecoveryAttempts,
+        consecutiveFailures: this.consecutiveStallFailures,
+        isCellular: this.iosWebkitInfo.isCellular,
+        currentTime: this.currentAudio.currentTime,
+        duration: this.currentAudio.duration,
+      });
+      
       this.metrics.error = 'Playback stalled - skipping to next track';
       this.metrics.errorCategory = 'network';
       this.updateMetrics();
@@ -499,6 +632,11 @@ export class EnterpriseAudioEngine {
       if (this.onTrackEnd) {
         this.onTrackEnd();
       }
+    } else {
+      // [CELLBUG FIX] Schedule another stall check if we haven't exhausted attempts
+      // This creates a retry loop that's more patient on cell networks
+      console.log('[AUDIO][CELLBUG][RECOVERY] Scheduling next recovery attempt');
+      this.startStallDetection();
     }
   }
 
@@ -978,8 +1116,50 @@ export class EnterpriseAudioEngine {
       this.nextAudio.addEventListener('canplaythrough', onCanPlay, { once: true });
       this.nextAudio.addEventListener('error', onError, { once: true });
 
+      // [CELLBUG FIX] Guard against false "ended" events on iOS cellular
+      // iOS Safari can fire "ended" prematurely when buffer runs dry during network stalls
       this.nextAudio.onended = () => {
+        const audio = this.nextAudio;
+        const currentTime = audio.currentTime;
+        const duration = audio.duration;
+        
+        // [CELLBUG FIX] Verify the track actually ended
+        // Allow 2 second tolerance for rounding/timing issues
+        const trackActuallyEnded = duration > 0 && currentTime >= duration - 2;
+        
+        console.log('[AUDIO][CELLBUG][ENDED] Track ended event received', {
+          currentTime,
+          duration,
+          trackActuallyEnded,
+          isPlayingState: this.isPlayingState,
+          isCellular: this.iosWebkitInfo.isCellular,
+          isIOSWebKit: this.iosWebkitInfo.isIOSWebKit,
+          readyState: audio.readyState,
+          networkState: audio.networkState,
+        });
+        
+        if (!trackActuallyEnded && this.iosWebkitInfo.isIOSWebKit) {
+          // [CELLBUG FIX] This is likely a false "ended" event on iOS
+          // Don't skip - instead, try to recover by restarting playback
+          console.log('[AUDIO][CELLBUG][ENDED] Detected FALSE ended event - attempting recovery');
+          
+          // Try to resume playback from where we were
+          audio.currentTime = currentTime;
+          audio.play().then(() => {
+            console.log('[AUDIO][CELLBUG][ENDED] Successfully recovered from false ended event');
+          }).catch((error) => {
+            console.log('[AUDIO][CELLBUG][ENDED] Recovery failed, triggering stall recovery', error);
+            // Let the stall recovery system handle it
+            this.metrics.isStalled = true;
+            this.attemptStallRecovery();
+          });
+          
+          return;  // Don't call onTrackEnd
+        }
+        
         if (this.isPlayingState && this.onTrackEnd) {
+          console.log('[AUDIO][CELLBUG][ENDED] Track genuinely ended, advancing to next');
+          this.consecutiveStallFailures = 0;  // Reset on successful track completion
           this.onTrackEnd();
         }
       };
