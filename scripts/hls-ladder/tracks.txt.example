@@ -1,0 +1,23 @@
+# =============================================================================
+# TRACKS.TXT - Track list for batch HLS transcoding
+# =============================================================================
+# Format: <track-id> <s3-mp3-url>
+#
+# One track per line. Lines starting with # are comments.
+# Blank lines are ignored.
+#
+# The track-id will be used as the folder name in R2:
+#   hls/<track-id>/master.m3u8
+#   hls/<track-id>/low/index.m3u8
+#   hls/<track-id>/medium/index.m3u8
+#   hls/<track-id>/high/index.m3u8
+#   hls/<track-id>/premium/index.m3u8
+#
+# IMPORTANT: Use the track ID from your database, NOT the filename.
+# The s3 URL should point to the ORIGINAL MP3 file.
+# =============================================================================
+
+# Example entries (replace with your actual tracks):
+# abc123-def456-789 s3://focus-music-audio/audio/abc123-def456-789.mp3
+# track-001 s3://focus-music-audio/audio/track-001.mp3
+# my-focus-track s3://focus-music-audio/audio/my-focus-track.mp3

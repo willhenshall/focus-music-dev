@@ -386,20 +386,52 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
           await audioEngine.play();
         }
       } catch (error) {
-
-        // If track fails to load and we're not in admin mode, skip to next track
+        console.log('[AUDIO][CELLBUG][CONTEXT] Track load failed:', error);
+        
+        // [CELLBUG FIX] Don't immediately skip on load failure - may be transient network issue
+        // Instead, retry the same track a few times before giving up
         if (!isAdminMode && playlist.length > 0) {
-          // Clear the failed track from lastLoadedTrackId so we can try the next one
-          lastLoadedTrackId.current = null;
+          // Track consecutive load failures for this track
+          const failureKey = `loadFailures_${trackId}`;
+          const currentFailures = (window as any)[failureKey] || 0;
+          const maxFailures = 3;  // Allow 3 attempts before skipping
+          
+          console.log('[AUDIO][CELLBUG][CONTEXT] Load failure', {
+            trackId,
+            attempt: currentFailures + 1,
+            maxAttempts: maxFailures,
+          });
+          
+          if (currentFailures < maxFailures - 1) {
+            // Retry the same track after a delay
+            (window as any)[failureKey] = currentFailures + 1;
+            lastLoadedTrackId.current = null;  // Allow reload
+            
+            const retryDelay = (currentFailures + 1) * 3000;  // 3s, 6s, 9s...
+            console.log('[AUDIO][CELLBUG][CONTEXT] Retrying same track in', retryDelay, 'ms');
+            
+            setTimeout(() => {
+              // Re-trigger load by updating a dummy state or just letting the effect re-run
+              // Force re-render by toggling a ref won't work, so we clear and let effect re-run
+              lastLoadedTrackId.current = null;
+              isLoadingTrack.current = false;
+              // The useEffect will re-run because isLoadingTrack is now false
+            }, retryDelay);
+          } else {
+            // Exhausted retries - skip to next track
+            console.log('[AUDIO][CELLBUG][CONTEXT] Exhausted retries, skipping to next track');
+            (window as any)[failureKey] = 0;  // Reset for next track
+            lastLoadedTrackId.current = null;
 
-          // Move to next track after a brief delay
-          setTimeout(() => {
-            if (currentTrackIndex < playlist.length - 1) {
-              setCurrentTrackIndex(prev => prev + 1);
-            } else {
-              setCurrentTrackIndex(0);
-            }
-          }, 1000);
+            // Move to next track after a brief delay
+            setTimeout(() => {
+              if (currentTrackIndex < playlist.length - 1) {
+                setCurrentTrackIndex(prev => prev + 1);
+              } else {
+                setCurrentTrackIndex(0);
+              }
+            }, 1000);
+          }
         }
       } finally {
         isLoadingTrack.current = false;
