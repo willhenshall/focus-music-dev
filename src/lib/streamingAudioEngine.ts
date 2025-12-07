@@ -1074,10 +1074,22 @@ export class StreamingAudioEngine implements IAudioEngine {
     if (this.metrics.circuitBreakerState === 'open') {
       throw new Error('Circuit breaker is open - too many recent failures');
     }
+
+    // [PREFETCH FIX] Clean up prefetch listeners BEFORE loading new track
+    // The nextAudio element might have prefetch listeners that interfere with loading
+    this.cleanupPrefetchListeners();
     
+    // Reset prefetch state since we're loading a new track
+    this.prefetchedNextTrack = false;
+    this.nextTrackId = null;
+    this.metrics.prefetchedTrackId = null;
+    this.metrics.prefetchedTrackUrl = null;
+    this.metrics.prefetchProgress = 0;
+    this.metrics.prefetchReadyState = 0;
+
     // [FAST START] Reset startup timestamps for new track load
     this.resetStartupTimestamps();
-    
+
     this.metrics.loadStartTime = performance.now();
     this.metrics.playbackState = 'loading';
     this.metrics.error = null;
@@ -1085,16 +1097,24 @@ export class StreamingAudioEngine implements IAudioEngine {
     this.metrics.retryAttempt = 0;
     this.metrics.recoveryAttempts = 0;
     this.currentTrackId = trackId;
-    
+
     // [FAST START] Mark source set time
     this.startupTimestamps.sourceSet = performance.now();
-    
+
     console.log('[AUDIO][STARTUP][LOAD] Loading track', { trackId, filePath });
-    
+
     if (this.abortController) {
       this.abortController.abort();
     }
     this.abortController = new AbortController();
+    
+    // [FIX] Clear the nextAudio source to prevent stale state
+    // This ensures we start fresh when loading a new track
+    if (this.nextAudio.src) {
+      this.nextAudio.pause();
+      this.nextAudio.removeAttribute('src');
+      this.nextAudio.load(); // Reset the element
+    }
     
     try {
       // Check if HLS is available for this track
@@ -1135,11 +1155,22 @@ export class StreamingAudioEngine implements IAudioEngine {
       this.hlsMetrics.isNativeHLS = true;
       this.nextAudio.src = hlsUrl;
       await this.waitForCanPlay(this.nextAudio);
-    } else if (this.currentHls) {
-      // hls.js
-      this.hlsMetrics.isNativeHLS = false;
-      this.currentHls.loadSource(hlsUrl);
-      await this.waitForHLSReady();
+    } else {
+      // hls.js - use the HLS instance attached to nextAudio
+      // [FIX] Previously used this.currentHls which may be attached to currentAudio
+      const hlsForNextAudio = this.nextAudio === this.primaryAudio 
+        ? this.primaryHls 
+        : this.secondaryHls;
+      
+      if (hlsForNextAudio) {
+        this.hlsMetrics.isNativeHLS = false;
+        hlsForNextAudio.loadSource(hlsUrl);
+        await this.waitForHLSReady(hlsForNextAudio);
+      } else {
+        // Fallback: just set src directly
+        this.nextAudio.src = hlsUrl;
+        await this.waitForCanPlay(this.nextAudio);
+      }
     }
     
     if (metadata) {
@@ -1240,9 +1271,11 @@ export class StreamingAudioEngine implements IAudioEngine {
     });
   }
 
-  private waitForHLSReady(): Promise<void> {
+  private waitForHLSReady(hls?: Hls | null): Promise<void> {
     return new Promise((resolve, reject) => {
-      if (!this.currentHls) {
+      // [FIX] Use provided HLS instance or fall back to currentHls
+      const hlsInstance = hls || this.currentHls;
+      if (!hlsInstance) {
         reject(new Error('HLS not initialized'));
         return;
       }
@@ -1270,12 +1303,12 @@ export class StreamingAudioEngine implements IAudioEngine {
       };
       
       const cleanup = () => {
-        this.currentHls?.off(Hls.Events.MANIFEST_PARSED, onManifestParsed);
-        this.currentHls?.off(Hls.Events.ERROR, onError);
+        hlsInstance?.off(Hls.Events.MANIFEST_PARSED, onManifestParsed);
+        hlsInstance?.off(Hls.Events.ERROR, onError);
       };
       
-      this.currentHls.on(Hls.Events.MANIFEST_PARSED, onManifestParsed);
-      this.currentHls.on(Hls.Events.ERROR, onError);
+      hlsInstance.on(Hls.Events.MANIFEST_PARSED, onManifestParsed);
+      hlsInstance.on(Hls.Events.ERROR, onError);
     });
   }
 
@@ -1546,11 +1579,15 @@ export class StreamingAudioEngine implements IAudioEngine {
   }
 
   private async crossfadeToNext(): Promise<void> {
+    // [PREFETCH FIX] Clean up prefetch listeners before switching audio elements
+    // The newAudio element might have prefetch listeners that would interfere
+    this.cleanupPrefetchListeners();
+    
     const oldAudio = this.currentAudio;
     const newAudio = this.nextAudio;
     const oldHls = this.currentHls;
     const newHls = oldAudio === this.primaryAudio ? this.secondaryHls : this.primaryHls;
-    
+
     const hasOldTrack = oldAudio.src && oldAudio.duration > 0;
     
     if (!hasOldTrack || !this.enableCrossfade) {
