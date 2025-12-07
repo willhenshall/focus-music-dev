@@ -44,6 +44,14 @@ export type CircuitBreakerState =
   | 'open' 
   | 'half-open';
 
+/**
+ * Crossfade mode for track transitions.
+ * - 'overlap': Radio-style - next track starts early, both play simultaneously during fade
+ * - 'sequential': Current track fades out completely, then next track fades in
+ * - 'none': No fading, immediate cut between tracks
+ */
+export type CrossfadeMode = 'overlap' | 'sequential' | 'none';
+
 // ============================================================================
 // METRICS
 // ============================================================================
@@ -325,6 +333,24 @@ export interface IAudioEngine {
   setCallbacks(callbacks: AudioEngineCallbacks): void;
   setCrossfadeEnabled(enabled: boolean): void;
   setStorageAdapter(adapter: StorageAdapter): void;
+  
+  // Crossfade configuration
+  /**
+   * Set crossfade mode: 'overlap' (radio-style), 'sequential', or 'none'
+   */
+  setCrossfadeMode(mode: CrossfadeMode): void;
+  /**
+   * Set crossfade duration in milliseconds (default: 500ms)
+   */
+  setCrossfadeDuration(durationMs: number): void;
+  /**
+   * Get current crossfade mode
+   */
+  getCrossfadeMode(): CrossfadeMode;
+  /**
+   * Get current crossfade duration in milliseconds
+   */
+  getCrossfadeDuration(): number;
   
   // Prefetch
   prefetchNextTrack(trackId: string, filePath: string): void;
