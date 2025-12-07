@@ -7,8 +7,8 @@
  * expose ABR internals.
  */
 
-import { X, Wifi, WifiOff, Activity, Clock, TrendingUp, TrendingDown, Minus, AlertTriangle, CheckCircle, Radio, Gauge, Layers, History, RefreshCw, Music, ListMusic, SkipForward, Loader2, CheckCircle2, Play, Zap } from 'lucide-react';
-import { useState, useEffect, useCallback } from 'react';
+import { X, Wifi, WifiOff, Activity, Clock, TrendingUp, TrendingDown, Minus, AlertTriangle, CheckCircle, Radio, Gauge, Layers, History, RefreshCw, Music, ListMusic, SkipForward, Loader2, CheckCircle2, Play, Zap, Move } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { NativeHLSMonitor, getNativeHLSMonitor } from '../lib/nativeHLSMonitor';
 import type { NativeHLSMetrics, QualityTier, TierSwitch, SegmentRequest } from '../lib/types/nativeHLSMetrics';
 import { TIER_BANDWIDTHS } from '../lib/types/nativeHLSMetrics';
@@ -58,8 +58,49 @@ export function MobileHLSDiagnostics({ onClose, audioElement }: MobileHLSDiagnos
   const [monitor, setMonitor] = useState<NativeHLSMonitor | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'playlist' | 'history' | 'segments'>('overview');
   
+  // Draggable popup state
+  const [position, setPosition] = useState({ x: 20, y: 60 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const dragRef = useRef<HTMLDivElement>(null);
+  
   // Get playlist and track info from music player context
   const { playlist, currentTrackIndex, currentTrack, audioMetrics, isPlaying, audioEngine } = useMusicPlayer();
+  
+  // Drag handlers
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      setPosition({
+        x: e.clientX - dragOffset.x,
+        y: e.clientY - dragOffset.y,
+      });
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging, dragOffset]);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (dragRef.current) {
+      const rect = dragRef.current.getBoundingClientRect();
+      setDragOffset({
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
+      });
+      setIsDragging(true);
+    }
+  };
   
   // Initialize monitor when component mounts
   useEffect(() => {
@@ -757,44 +798,55 @@ export function MobileHLSDiagnostics({ onClose, audioElement }: MobileHLSDiagnos
   };
   
   return (
-    <div className="fixed inset-0 bg-slate-100 z-50 flex flex-col safe-area-inset">
-      {/* Header */}
-      <div className="bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between">
+    <div 
+      ref={dragRef}
+      style={{ left: `${position.x}px`, top: `${position.y}px` }}
+      className="fixed bg-white border border-purple-300 rounded-xl shadow-2xl w-[420px] max-h-[85vh] z-50 flex flex-col select-none"
+    >
+      {/* Header - Draggable */}
+      <div className="bg-gradient-to-r from-purple-600 to-purple-700 text-white px-4 py-3 flex items-center justify-between rounded-t-xl">
         <div className="flex items-center gap-3">
-          <Radio className="w-5 h-5 text-blue-600" />
+          <div
+            className="cursor-move hover:bg-purple-500/30 rounded p-1"
+            onMouseDown={handleMouseDown}
+            title="Drag to move"
+          >
+            <Move className="w-4 h-4" />
+          </div>
+          <Radio className="w-5 h-5" />
           <div>
-            <h1 className="text-lg font-bold text-slate-800">HLS Monitor</h1>
-            <p className="text-xs text-slate-500">Native playback diagnostics</p>
+            <h1 className="text-base font-bold">HLS Monitor</h1>
+            <p className="text-xs text-purple-200">Native playback diagnostics</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={handleRestart}
-            className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+            className="p-2 hover:bg-purple-500/30 rounded-lg transition-colors"
             title="Restart monitoring"
           >
-            <RefreshCw className="w-5 h-5 text-slate-500" />
+            <RefreshCw className="w-4 h-4" />
           </button>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+            className="p-2 hover:bg-purple-500/30 rounded-lg transition-colors"
           >
-            <X className="w-5 h-5 text-slate-600" />
+            <X className="w-4 h-4" />
           </button>
         </div>
       </div>
       
       {/* Tabs */}
-      <div className="bg-white border-b border-slate-200 px-4">
+      <div className="bg-purple-50 border-b border-purple-200 px-3">
         <div className="flex gap-1 overflow-x-auto">
           {(['overview', 'playlist', 'history', 'segments'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`px-3 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+              className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors whitespace-nowrap ${
                 activeTab === tab
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-slate-500 hover:text-slate-700'
+                  ? 'border-purple-600 text-purple-700'
+                  : 'border-transparent text-slate-500 hover:text-purple-600'
               }`}
             >
               {tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -804,7 +856,7 @@ export function MobileHLSDiagnostics({ onClose, audioElement }: MobileHLSDiagnos
       </div>
       
       {/* Content */}
-      <div className="flex-1 overflow-auto p-4">
+      <div className="flex-1 overflow-auto p-3 bg-slate-50 max-h-[60vh]">
         {activeTab === 'overview' && renderOverview()}
         {activeTab === 'playlist' && renderPlaylist()}
         {activeTab === 'history' && renderHistory()}
@@ -812,8 +864,8 @@ export function MobileHLSDiagnostics({ onClose, audioElement }: MobileHLSDiagnos
       </div>
       
       {/* Footer */}
-      <div className="bg-white border-t border-slate-200 px-4 py-2 text-center">
-        <p className="text-xs text-slate-400">
+      <div className="bg-purple-50 border-t border-purple-200 px-3 py-2 text-center rounded-b-xl">
+        <p className="text-[10px] text-purple-400">
           Data inferred from network activity • Native HLS mode
         </p>
       </div>
