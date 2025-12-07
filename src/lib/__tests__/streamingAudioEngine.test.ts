@@ -259,22 +259,6 @@ describe('StreamingAudioEngine Integration', () => {
       expect(totalLatency).toBe(210);
     });
     
-    it('should detect prefetched tracks correctly', () => {
-      // Test prefetch state tracking
-      let prefetchedSource: { trackId: string; isReady: boolean } | null = null;
-      
-      const isPrepared = (trackId: string) => 
-        prefetchedSource?.trackId === trackId && prefetchedSource.isReady;
-      
-      // Not prepared initially
-      expect(isPrepared('track-123')).toBe(false);
-      
-      // After prefetch
-      prefetchedSource = { trackId: 'track-123', isReady: true };
-      expect(isPrepared('track-123')).toBe(true);
-      expect(isPrepared('track-456')).toBe(false);
-    });
-    
     it('should use fast-start canplay event instead of canplaythrough', () => {
       // Test that fast-start mode uses canplay (faster) vs canplaythrough (slower)
       const fastStartEvents = ['canplay'];
@@ -286,30 +270,6 @@ describe('StreamingAudioEngine Integration', () => {
       
       // Slow start uses canplaythrough
       expect(slowStartEvents).toContain('canplaythrough');
-    });
-    
-    it('should skip heavy load when track is prefetched', () => {
-      // Simulate load behavior with prefetch
-      const prefetchedTrackId = 'track-123';
-      let loadDuration = 0;
-      
-      const loadTrack = (trackId: string, isPrefetched: boolean) => {
-        if (isPrefetched && trackId === prefetchedTrackId) {
-          // Fast path - use prefetched source
-          loadDuration = 0;
-          return;
-        }
-        // Slow path - full load
-        loadDuration = 500; // Simulate 500ms load
-      };
-      
-      // Load with prefetch
-      loadTrack('track-123', true);
-      expect(loadDuration).toBe(0);
-      
-      // Load without prefetch
-      loadTrack('track-456', false);
-      expect(loadDuration).toBe(500);
     });
     
     it('should have correct buffer threshold for fast start', () => {
@@ -345,27 +305,6 @@ describe('StreamingAudioEngine Integration', () => {
       expect(breakdown.bufferingMs).toBe(450);
       expect(breakdown.playStartMs).toBe(20);
       expect(breakdown.firstAudioMs).toBe(30);
-    });
-    
-    it('should measure prefetched vs non-prefetched startup difference', () => {
-      // When prefetched, source resolution and buffering are already done
-      const nonPrefetchedLatency = {
-        sourceResolution: 50,
-        buffering: 450,
-        playStart: 20,
-        total: 520,
-      };
-      
-      const prefetchedLatency = {
-        sourceResolution: 0,  // Already done
-        buffering: 0,          // Already done
-        playStart: 20,
-        total: 20,
-      };
-      
-      // Prefetch should be >90% faster
-      const improvement = (nonPrefetchedLatency.total - prefetchedLatency.total) / nonPrefetchedLatency.total;
-      expect(improvement).toBeGreaterThan(0.9);
     });
   });
 

@@ -192,15 +192,6 @@ export class StreamingAudioEngine implements IAudioEngine {
   };
   private isFirstTimeupdate: boolean = true;
   
-  // [FAST START] Prefetch state
-  private prefetchedSource: {
-    trackId: string;
-    url: string;
-    isReady: boolean;
-    audio: HTMLAudioElement;
-    hls: Hls | null;
-  } | null = null;
-  
   // Feature detection
   private useNativeHLS: boolean;
   private useHLSJS: boolean;
@@ -1063,37 +1054,6 @@ export class StreamingAudioEngine implements IAudioEngine {
       throw new Error('Circuit breaker is open - too many recent failures');
     }
     
-    // [FAST START] Check if this track was already prefetched
-    if (this.prefetchedSource?.trackId === trackId && this.prefetchedSource.isReady) {
-      console.log('[AUDIO][STARTUP][LOAD] Using prefetched source for instant load', {
-        trackId,
-        timeToLoadMs: 0,
-      });
-      
-      // Track is already prepared, just update metrics and state
-      this.metrics.loadStartTime = performance.now();
-      this.metrics.loadEndTime = performance.now();
-      this.metrics.loadDuration = 0;
-      this.metrics.playbackState = 'ready';
-      this.metrics.currentTrackId = trackId;
-      this.metrics.currentTrackUrl = this.prefetchedSource.url;
-      this.currentTrackId = trackId;
-      
-      // The audio element is already set up from prefetch
-      this.setupTrackEndHandler();
-      
-      if (metadata) {
-        this.updateMediaSessionMetadata(metadata);
-      }
-      
-      if (this.onTrackLoad) {
-        this.onTrackLoad(trackId, this.nextAudio.duration);
-      }
-      
-      this.recordSuccess();
-      return;
-    }
-    
     // [FAST START] Reset startup timestamps for new track load
     this.resetStartupTimestamps();
     
@@ -1107,6 +1067,8 @@ export class StreamingAudioEngine implements IAudioEngine {
     
     // [FAST START] Mark source set time
     this.startupTimestamps.sourceSet = performance.now();
+    
+    console.log('[AUDIO][STARTUP][LOAD] Loading track', { trackId, filePath });
     
     if (this.abortController) {
       this.abortController.abort();
@@ -1520,10 +1482,9 @@ export class StreamingAudioEngine implements IAudioEngine {
     if (this.startupTimestamps.playRequested === 0) {
       this.startupTimestamps.playRequested = performance.now();
       console.log('[AUDIO][STARTUP][PLAY] Play requested', {
-        hasPrefetchedSource: !!this.prefetchedSource?.isReady,
-        prefetchedTrackId: this.prefetchedSource?.trackId,
         nextAudioHasSrc: !!this.nextAudio.src,
         currentAudioHasSrc: !!this.currentAudio.src,
+        currentTrackId: this.currentTrackId,
       });
     }
     
@@ -1586,7 +1547,6 @@ export class StreamingAudioEngine implements IAudioEngine {
         const playLatency = Math.round(this.startupTimestamps.playbackStarted - this.startupTimestamps.playRequested);
         console.log('[AUDIO][STARTUP][CROSSFADE] Direct start playback began', {
           playLatencyMs: playLatency,
-          wasFromPrefetch: this.prefetchedSource?.isReady || false,
         });
       }
       
@@ -1595,9 +1555,6 @@ export class StreamingAudioEngine implements IAudioEngine {
       this.currentHls = newHls;
       this.isPlayingState = true;
       this.metrics.playbackState = 'playing';
-      
-      // [FAST START] Clear prefetch state after use
-      this.clearPrefetchedSource();
       
       this.updateMetrics();
       return;
@@ -1686,147 +1643,6 @@ export class StreamingAudioEngine implements IAudioEngine {
     return { ...this.metrics };
   }
 
-  /**
-   * [FAST START] Prepare a track source before playback.
-   * 
-   * Call this when a playlist/channel is selected to pre-warm the engine.
-   * The track will be ready to play instantly when play() is called.
-   * Does NOT call play() to respect autoplay policies.
-   * 
-   * @param trackId - The track ID to prepare
-   * @param filePath - The file path for fallback MP3
-   * @param metadata - Optional track metadata for MediaSession
-   * @returns Promise that resolves when track is ready to play
-   */
-  async prepareSource(
-    trackId: string,
-    filePath: string,
-    metadata?: TrackMetadata
-  ): Promise<void> {
-    console.log('[AUDIO][STARTUP][PREFETCH] Preparing source for first track', {
-      trackId,
-      hasExistingPrefetch: !!this.prefetchedSource,
-      existingPrefetchTrackId: this.prefetchedSource?.trackId,
-    });
-    
-    // Skip if already prepared for this track
-    if (this.prefetchedSource?.trackId === trackId && this.prefetchedSource.isReady) {
-      console.log('[AUDIO][STARTUP][PREFETCH] Track already prepared, skipping');
-      return;
-    }
-    
-    // Clear any existing prefetch
-    this.clearPrefetchedSource();
-    
-    // Reset startup timestamps for fresh measurement
-    this.resetStartupTimestamps();
-    this.startupTimestamps.sourceSet = performance.now();
-    
-    try {
-      const hlsAdapter = this.storageAdapter as HLSStorageAdapter;
-      const hasHLS = hlsAdapter.hasHLSSupport 
-        ? await hlsAdapter.hasHLSSupport(trackId)
-        : false;
-      
-      const prefetchAudio = this.nextAudio;
-      let prefetchHls: Hls | null = null;
-      
-      if (hasHLS && (this.useNativeHLS || this.useHLSJS)) {
-        const hlsUrl = await hlsAdapter.getHLSUrl(trackId, `${trackId}/master.m3u8`);
-        
-        console.log('[AUDIO][STARTUP][PREFETCH] Loading HLS source', { trackId, hlsUrl });
-        
-        if (this.useNativeHLS) {
-          prefetchAudio.src = hlsUrl;
-          prefetchAudio.load();
-        } else if (this.useHLSJS) {
-          // Use the secondary HLS instance for prefetch
-          prefetchHls = this.nextAudio === this.primaryAudio ? this.primaryHls : this.secondaryHls;
-          if (prefetchHls) {
-            prefetchHls.loadSource(hlsUrl);
-          }
-        }
-        
-        this.prefetchedSource = {
-          trackId,
-          url: hlsUrl,
-          isReady: false,
-          audio: prefetchAudio,
-          hls: prefetchHls,
-        };
-        
-        // Wait for ready state with fast-start threshold
-        await this.waitForCanPlay(prefetchAudio, true);
-        
-        this.prefetchedSource.isReady = true;
-        this.metrics.prefetchedTrackId = trackId;
-        this.metrics.prefetchedTrackUrl = hlsUrl;
-        
-        console.log('[AUDIO][STARTUP][PREFETCH] Track ready for instant playback', {
-          trackId,
-          timeToReadyMs: Math.round(performance.now() - this.startupTimestamps.sourceSet),
-          readyState: prefetchAudio.readyState,
-          duration: prefetchAudio.duration,
-        });
-      } else {
-        // Direct MP3 fallback
-        const url = await this.storageAdapter.getAudioUrl(filePath);
-        
-        console.log('[AUDIO][STARTUP][PREFETCH] Loading MP3 source', { trackId, url });
-        
-        prefetchAudio.src = url;
-        prefetchAudio.load();
-        
-        this.prefetchedSource = {
-          trackId,
-          url,
-          isReady: false,
-          audio: prefetchAudio,
-          hls: null,
-        };
-        
-        await this.waitForCanPlay(prefetchAudio, true);
-        
-        this.prefetchedSource.isReady = true;
-        this.metrics.prefetchedTrackId = trackId;
-        this.metrics.prefetchedTrackUrl = url;
-        
-        console.log('[AUDIO][STARTUP][PREFETCH] MP3 track ready', {
-          trackId,
-          timeToReadyMs: Math.round(performance.now() - this.startupTimestamps.sourceSet),
-        });
-      }
-      
-      // Update MediaSession if metadata provided
-      if (metadata) {
-        this.updateMediaSessionMetadata(metadata);
-      }
-      
-      this.updateMetrics();
-    } catch (error) {
-      console.warn('[AUDIO][STARTUP][PREFETCH] Prefetch failed:', error);
-      this.clearPrefetchedSource();
-      throw error;
-    }
-  }
-  
-  /**
-   * [FAST START] Check if a track is prepared and ready for instant playback
-   */
-  isPrepared(trackId: string): boolean {
-    return this.prefetchedSource?.trackId === trackId && this.prefetchedSource.isReady;
-  }
-  
-  /**
-   * [FAST START] Clear any prefetched source
-   */
-  private clearPrefetchedSource(): void {
-    if (this.prefetchedSource) {
-      // Don't clear the audio source - let the element reuse it
-      this.prefetchedSource = null;
-    }
-  }
-  
   /**
    * [FAST START] Reset startup timestamps for a new playback cycle
    */
