@@ -843,6 +843,20 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
                   className="w-8 h-8 rounded-full object-cover border border-slate-200"
                 />
               )}
+              {/* Mobile HLS Monitor button for admins */}
+              {profile?.is_admin && onToggleMobileHLSDiagnostics && (
+                <button
+                  onClick={onToggleMobileHLSDiagnostics}
+                  className={`p-2 rounded-lg transition-colors ${
+                    showMobileHLSDiagnostics
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-purple-600 text-white'
+                  }`}
+                  title="Mobile HLS Monitor"
+                >
+                  <Radio size={20} />
+                </button>
+              )}
               <button
                 onClick={() => setShowMobileMenu(!showMobileMenu)}
                 className="p-2 text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
