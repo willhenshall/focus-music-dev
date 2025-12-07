@@ -127,6 +127,11 @@ export class EnterpriseAudioEngine {
   private enableCrossfade: boolean = true;
   private prefetchedNextTrack: boolean = false;
   private storageAdapter: StorageAdapter;
+  
+  // Track fade-in/fade-out for smooth transitions (eliminates clicks)
+  private readonly TRACK_FADE_DURATION = 500; // 500ms fade in/out
+  private isFadingOut: boolean = false;
+  private fadeOutTimer: NodeJS.Timeout | null = null;
 
   private onTrackLoad: TrackLoadCallback | null = null;
   private onTrackEnd: TrackEndCallback | null = null;
@@ -302,6 +307,11 @@ export class EnterpriseAudioEngine {
     audio.addEventListener('timeupdate', () => {
       this.updateMetrics();
       this.resetStallDetection();
+      
+      // Check if we should start fade-out near end of track
+      if (audio === this.currentAudio && this.isPlayingState) {
+        this.checkEndOfTrackFade(audio);
+      }
     });
 
     audio.addEventListener('waiting', () => {
@@ -950,6 +960,9 @@ export class EnterpriseAudioEngine {
     this.metrics.recoveryAttempts = 0;
     this.currentTrackId = trackId;
     
+    // Reset fade state for new track
+    this.isFadingOut = false;
+    
     // Reset iOS buffer clamp state for new track
     this.iosClampPrefetchDisabled = false;
     this.metrics.iosClamp.prefetchDisabled = false;
@@ -1229,6 +1242,80 @@ export class EnterpriseAudioEngine {
     });
   }
 
+  /**
+   * Fade in audio from 0 to target volume over TRACK_FADE_DURATION.
+   * Used to eliminate clicks when tracks start.
+   */
+  private fadeIn(audio: HTMLAudioElement): void {
+    const fadeInterval = 50;
+    const steps = this.TRACK_FADE_DURATION / fadeInterval;
+    let step = 0;
+    
+    audio.volume = 0;
+    
+    const fade = setInterval(() => {
+      step++;
+      const progress = Math.min(step / steps, 1);
+      // Linear fade for short duration
+      audio.volume = this.volume * progress;
+      
+      if (progress >= 1) {
+        clearInterval(fade);
+      }
+    }, fadeInterval);
+  }
+
+  /**
+   * Fade out audio from current volume to 0 over TRACK_FADE_DURATION.
+   * Used to eliminate clicks when tracks end.
+   * Returns a promise that resolves when fade is complete.
+   */
+  private fadeOut(audio: HTMLAudioElement): Promise<void> {
+    return new Promise((resolve) => {
+      const fadeInterval = 50;
+      const steps = this.TRACK_FADE_DURATION / fadeInterval;
+      const startVolume = audio.volume;
+      let step = 0;
+      
+      const fade = setInterval(() => {
+        step++;
+        const progress = Math.min(step / steps, 1);
+        audio.volume = startVolume * (1 - progress);
+        
+        if (progress >= 1) {
+          clearInterval(fade);
+          resolve();
+        }
+      }, fadeInterval);
+    });
+  }
+
+  /**
+   * Check if we're approaching the end of the track and start fade-out.
+   * Called from timeupdate handler.
+   */
+  private checkEndOfTrackFade(audio: HTMLAudioElement): void {
+    if (this.isFadingOut) return;
+    if (!audio.duration || audio.duration === 0) return;
+    
+    const timeRemaining = audio.duration - audio.currentTime;
+    const fadeThreshold = this.TRACK_FADE_DURATION / 1000; // Convert ms to seconds
+    
+    if (timeRemaining <= fadeThreshold && timeRemaining > 0) {
+      this.isFadingOut = true;
+      console.log('[AUDIO] Starting end-of-track fade-out', {
+        currentTime: audio.currentTime,
+        duration: audio.duration,
+        timeRemaining,
+      });
+      
+      this.fadeOut(audio).then(() => {
+        // Fade complete - track will end naturally
+        console.log('[AUDIO] End-of-track fade-out complete');
+      });
+    }
+  }
+
   async play(): Promise<void> {
     console.log('[DIAGNOSTIC] play() called:', {
       currentSrc: this.currentAudio.src,
@@ -1270,6 +1357,9 @@ export class EnterpriseAudioEngine {
     const newAudio = this.nextAudio;
 
     const hasOldTrack = oldAudio.src && oldAudio.duration > 0;
+    
+    // Reset fade-out state for the new track
+    this.isFadingOut = false;
 
     if (!hasOldTrack || !this.enableCrossfade) {
       if (hasOldTrack) {
@@ -1277,7 +1367,8 @@ export class EnterpriseAudioEngine {
         oldAudio.currentTime = 0;
       }
 
-      newAudio.volume = this.volume;
+      // Always start at volume 0 and fade in to eliminate clicks
+      newAudio.volume = 0;
       try {
         await newAudio.play();
         this.currentAudio = newAudio;
@@ -1285,6 +1376,9 @@ export class EnterpriseAudioEngine {
         this.isPlayingState = true;
         this.metrics.playbackState = 'playing';
         this.updateMetrics();
+        
+        // Fade in the new track
+        this.fadeIn(newAudio);
       } catch (error) {
         throw error;
       }
@@ -1434,6 +1528,10 @@ export class EnterpriseAudioEngine {
 
     if (this.retryTimer) {
       clearTimeout(this.retryTimer);
+    }
+
+    if (this.fadeOutTimer) {
+      clearTimeout(this.fadeOutTimer);
     }
 
     if (this.abortController) {
