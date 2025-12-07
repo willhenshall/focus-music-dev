@@ -329,6 +329,10 @@ export interface IAudioEngine {
   // Prefetch
   prefetchNextTrack(trackId: string, filePath: string): void;
   
+  // [FAST START] First-track prefetch - prepare source before play for instant start
+  prepareSource?(trackId: string, filePath: string, metadata?: TrackMetadata): Promise<void>;
+  isPrepared?(trackId: string): boolean;
+  
   // Cleanup
   destroy(): void;
 }

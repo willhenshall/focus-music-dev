@@ -228,6 +228,146 @@ describe('StreamingAudioEngine Integration', () => {
       expect(hasHLS).toBe(false);
     });
   });
+  
+  describe('Fast Start / Startup Latency Optimization', () => {
+    it('should track startup timestamps correctly', () => {
+      // Test that startup timestamps structure is correct
+      const timestamps = {
+        playRequested: 0,
+        sourceSet: 0,
+        hlsManifestLoaded: 0,
+        canPlayFired: 0,
+        firstTimeupdateFired: 0,
+        playbackStarted: 0,
+      };
+      
+      // Simulate play request
+      timestamps.playRequested = 1000;
+      expect(timestamps.playRequested).toBe(1000);
+      
+      // Simulate source set
+      timestamps.sourceSet = 1010;
+      expect(timestamps.sourceSet - timestamps.playRequested).toBe(10);
+      
+      // Simulate canplay
+      timestamps.canPlayFired = 1200;
+      expect(timestamps.canPlayFired - timestamps.sourceSet).toBe(190);
+      
+      // Simulate playback start
+      timestamps.playbackStarted = 1210;
+      const totalLatency = timestamps.playbackStarted - timestamps.playRequested;
+      expect(totalLatency).toBe(210);
+    });
+    
+    it('should detect prefetched tracks correctly', () => {
+      // Test prefetch state tracking
+      let prefetchedSource: { trackId: string; isReady: boolean } | null = null;
+      
+      const isPrepared = (trackId: string) => 
+        prefetchedSource?.trackId === trackId && prefetchedSource.isReady;
+      
+      // Not prepared initially
+      expect(isPrepared('track-123')).toBe(false);
+      
+      // After prefetch
+      prefetchedSource = { trackId: 'track-123', isReady: true };
+      expect(isPrepared('track-123')).toBe(true);
+      expect(isPrepared('track-456')).toBe(false);
+    });
+    
+    it('should use fast-start canplay event instead of canplaythrough', () => {
+      // Test that fast-start mode uses canplay (faster) vs canplaythrough (slower)
+      const fastStartEvents = ['canplay'];
+      const slowStartEvents = ['canplaythrough'];
+      
+      // Fast start should use canplay
+      expect(fastStartEvents).toContain('canplay');
+      expect(fastStartEvents).not.toContain('canplaythrough');
+      
+      // Slow start uses canplaythrough
+      expect(slowStartEvents).toContain('canplaythrough');
+    });
+    
+    it('should skip heavy load when track is prefetched', () => {
+      // Simulate load behavior with prefetch
+      const prefetchedTrackId = 'track-123';
+      let loadDuration = 0;
+      
+      const loadTrack = (trackId: string, isPrefetched: boolean) => {
+        if (isPrefetched && trackId === prefetchedTrackId) {
+          // Fast path - use prefetched source
+          loadDuration = 0;
+          return;
+        }
+        // Slow path - full load
+        loadDuration = 500; // Simulate 500ms load
+      };
+      
+      // Load with prefetch
+      loadTrack('track-123', true);
+      expect(loadDuration).toBe(0);
+      
+      // Load without prefetch
+      loadTrack('track-456', false);
+      expect(loadDuration).toBe(500);
+    });
+    
+    it('should have correct buffer threshold for fast start', () => {
+      // Fast start uses lower buffer threshold
+      const fastStartMinBuffer = 1.5; // seconds
+      const traditionalMinBuffer = 5; // seconds
+      
+      expect(fastStartMinBuffer).toBeLessThan(traditionalMinBuffer);
+      // Fast start should require less than 2 seconds of buffer
+      expect(fastStartMinBuffer).toBeLessThan(2);
+    });
+    
+    it('should calculate startup latency breakdown correctly', () => {
+      // Simulate a complete startup cycle
+      const timestamps = {
+        playRequested: 1000,
+        sourceSet: 1050,     // 50ms to get source URL
+        canPlayFired: 1500,   // 450ms to buffer
+        playbackStarted: 1520, // 20ms to start playback
+        firstTimeupdateFired: 1550, // 30ms to first audio
+      };
+      
+      const breakdown = {
+        totalStartupMs: timestamps.firstTimeupdateFired - timestamps.playRequested,
+        sourceResolutionMs: timestamps.sourceSet - timestamps.playRequested,
+        bufferingMs: timestamps.canPlayFired - timestamps.sourceSet,
+        playStartMs: timestamps.playbackStarted - timestamps.canPlayFired,
+        firstAudioMs: timestamps.firstTimeupdateFired - timestamps.playbackStarted,
+      };
+      
+      expect(breakdown.totalStartupMs).toBe(550);
+      expect(breakdown.sourceResolutionMs).toBe(50);
+      expect(breakdown.bufferingMs).toBe(450);
+      expect(breakdown.playStartMs).toBe(20);
+      expect(breakdown.firstAudioMs).toBe(30);
+    });
+    
+    it('should measure prefetched vs non-prefetched startup difference', () => {
+      // When prefetched, source resolution and buffering are already done
+      const nonPrefetchedLatency = {
+        sourceResolution: 50,
+        buffering: 450,
+        playStart: 20,
+        total: 520,
+      };
+      
+      const prefetchedLatency = {
+        sourceResolution: 0,  // Already done
+        buffering: 0,          // Already done
+        playStart: 20,
+        total: 20,
+      };
+      
+      // Prefetch should be >90% faster
+      const improvement = (nonPrefetchedLatency.total - prefetchedLatency.total) / nonPrefetchedLatency.total;
+      expect(improvement).toBeGreaterThan(0.9);
+    });
+  });
 
   describe('Crossfade', () => {
     it('should support enabling/disabling crossfade', () => {

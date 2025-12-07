@@ -174,6 +174,33 @@ export class StreamingAudioEngine implements IAudioEngine {
   private retryTimer: NodeJS.Timeout | null = null;
   private abortController: AbortController | null = null;
   
+  // [FAST START] Startup latency instrumentation
+  private startupTimestamps: {
+    playRequested: number;
+    sourceSet: number;
+    hlsManifestLoaded: number;
+    canPlayFired: number;
+    firstTimeupdateFired: number;
+    playbackStarted: number;
+  } = {
+    playRequested: 0,
+    sourceSet: 0,
+    hlsManifestLoaded: 0,
+    canPlayFired: 0,
+    firstTimeupdateFired: 0,
+    playbackStarted: 0,
+  };
+  private isFirstTimeupdate: boolean = true;
+  
+  // [FAST START] Prefetch state
+  private prefetchedSource: {
+    trackId: string;
+    url: string;
+    isReady: boolean;
+    audio: HTMLAudioElement;
+    hls: Hls | null;
+  } | null = null;
+  
   // Feature detection
   private useNativeHLS: boolean;
   private useHLSJS: boolean;
@@ -360,6 +387,21 @@ export class StreamingAudioEngine implements IAudioEngine {
       this.updateMetrics();
     });
     
+    // [FAST START] Track canplay for startup latency
+    audio.addEventListener('canplay', () => {
+      if (this.startupTimestamps.canPlayFired === 0 && this.startupTimestamps.sourceSet > 0) {
+        this.startupTimestamps.canPlayFired = performance.now();
+        const timeFromSource = this.startupTimestamps.canPlayFired - this.startupTimestamps.sourceSet;
+        console.log('[AUDIO][STARTUP][CANPLAY] Can play fired', {
+          timeFromSourceMs: Math.round(timeFromSource),
+          timeFromPlayRequestMs: this.startupTimestamps.playRequested > 0 
+            ? Math.round(this.startupTimestamps.canPlayFired - this.startupTimestamps.playRequested)
+            : 'N/A (prefetched)',
+          readyState: audio.readyState,
+        });
+      }
+    });
+    
     audio.addEventListener('loadedmetadata', () => {
       this.updateMetrics();
     });
@@ -370,6 +412,30 @@ export class StreamingAudioEngine implements IAudioEngine {
     });
     
     audio.addEventListener('timeupdate', () => {
+      // [FAST START] Track first timeupdate as actual playback start
+      if (this.isFirstTimeupdate && audio.currentTime > 0 && audio === this.currentAudio) {
+        this.isFirstTimeupdate = false;
+        this.startupTimestamps.firstTimeupdateFired = performance.now();
+        
+        // Log complete startup latency breakdown
+        const breakdown = {
+          totalStartupMs: this.startupTimestamps.playRequested > 0
+            ? Math.round(this.startupTimestamps.firstTimeupdateFired - this.startupTimestamps.playRequested)
+            : 'N/A',
+          sourceToCanPlayMs: this.startupTimestamps.canPlayFired > 0 && this.startupTimestamps.sourceSet > 0
+            ? Math.round(this.startupTimestamps.canPlayFired - this.startupTimestamps.sourceSet)
+            : 'N/A',
+          canPlayToPlayingMs: this.startupTimestamps.playbackStarted > 0 && this.startupTimestamps.canPlayFired > 0
+            ? Math.round(this.startupTimestamps.playbackStarted - this.startupTimestamps.canPlayFired)
+            : 'N/A',
+          playingToFirstAudioMs: this.startupTimestamps.playbackStarted > 0
+            ? Math.round(this.startupTimestamps.firstTimeupdateFired - this.startupTimestamps.playbackStarted)
+            : 'N/A',
+          wasPrefetched: this.startupTimestamps.playRequested === 0 || 
+            this.startupTimestamps.sourceSet < this.startupTimestamps.playRequested,
+        };
+        console.log('[AUDIO][STARTUP][COMPLETE] First audio output', breakdown);
+      }
       this.updateMetrics();
     });
     
@@ -997,6 +1063,40 @@ export class StreamingAudioEngine implements IAudioEngine {
       throw new Error('Circuit breaker is open - too many recent failures');
     }
     
+    // [FAST START] Check if this track was already prefetched
+    if (this.prefetchedSource?.trackId === trackId && this.prefetchedSource.isReady) {
+      console.log('[AUDIO][STARTUP][LOAD] Using prefetched source for instant load', {
+        trackId,
+        timeToLoadMs: 0,
+      });
+      
+      // Track is already prepared, just update metrics and state
+      this.metrics.loadStartTime = performance.now();
+      this.metrics.loadEndTime = performance.now();
+      this.metrics.loadDuration = 0;
+      this.metrics.playbackState = 'ready';
+      this.metrics.currentTrackId = trackId;
+      this.metrics.currentTrackUrl = this.prefetchedSource.url;
+      this.currentTrackId = trackId;
+      
+      // The audio element is already set up from prefetch
+      this.setupTrackEndHandler();
+      
+      if (metadata) {
+        this.updateMediaSessionMetadata(metadata);
+      }
+      
+      if (this.onTrackLoad) {
+        this.onTrackLoad(trackId, this.nextAudio.duration);
+      }
+      
+      this.recordSuccess();
+      return;
+    }
+    
+    // [FAST START] Reset startup timestamps for new track load
+    this.resetStartupTimestamps();
+    
     this.metrics.loadStartTime = performance.now();
     this.metrics.playbackState = 'loading';
     this.metrics.error = null;
@@ -1004,6 +1104,9 @@ export class StreamingAudioEngine implements IAudioEngine {
     this.metrics.retryAttempt = 0;
     this.metrics.recoveryAttempts = 0;
     this.currentTrackId = trackId;
+    
+    // [FAST START] Mark source set time
+    this.startupTimestamps.sourceSet = performance.now();
     
     if (this.abortController) {
       this.abortController.abort();
@@ -1102,17 +1205,18 @@ export class StreamingAudioEngine implements IAudioEngine {
     }
   }
 
-  private waitForCanPlay(audio: HTMLAudioElement): Promise<void> {
+  private waitForCanPlay(audio: HTMLAudioElement, fastStart: boolean = true): Promise<void> {
     return new Promise((resolve, reject) => {
       // [CELLBUG FIX] Use extended timeout on cellular/throttled networks
       const effectiveTimeout = this.isCellular 
         ? CELLULAR_RETRY_CONFIG.timeoutPerAttempt  // 45 seconds
         : this.retryConfig.timeoutPerAttempt;       // 15 seconds
       
-      console.log('[AUDIO][CELLBUG][LOAD] Waiting for canPlay', {
+      console.log('[AUDIO][STARTUP][LOAD] Waiting for canPlay', {
         timeout: effectiveTimeout,
         isCellular: this.isCellular,
         connectionQuality: this.metrics.connectionQuality,
+        fastStart, // [FAST START] Use canplay instead of canplaythrough for faster start
       });
       
       const timeout = setTimeout(() => {
@@ -1134,11 +1238,20 @@ export class StreamingAudioEngine implements IAudioEngine {
       };
       
       const cleanup = () => {
+        // [FAST START] Remove both event listeners regardless of which was used
+        audio.removeEventListener('canplay', onCanPlay);
         audio.removeEventListener('canplaythrough', onCanPlay);
         audio.removeEventListener('error', onError);
       };
       
-      audio.addEventListener('canplaythrough', onCanPlay, { once: true });
+      // [FAST START] Use 'canplay' for faster start (1-3 seconds of buffer)
+      // instead of 'canplaythrough' (full buffer). The HLS ladder will handle
+      // quality adaptation if needed. This matches Spotify/YouTube behavior.
+      if (fastStart) {
+        audio.addEventListener('canplay', onCanPlay, { once: true });
+      } else {
+        audio.addEventListener('canplaythrough', onCanPlay, { once: true });
+      }
       audio.addEventListener('error', onError, { once: true });
       audio.load();
     });
@@ -1403,7 +1516,19 @@ export class StreamingAudioEngine implements IAudioEngine {
   }
 
   async play(): Promise<void> {
+    // [FAST START] Track when play was requested
+    if (this.startupTimestamps.playRequested === 0) {
+      this.startupTimestamps.playRequested = performance.now();
+      console.log('[AUDIO][STARTUP][PLAY] Play requested', {
+        hasPrefetchedSource: !!this.prefetchedSource?.isReady,
+        prefetchedTrackId: this.prefetchedSource?.trackId,
+        nextAudioHasSrc: !!this.nextAudio.src,
+        currentAudioHasSrc: !!this.currentAudio.src,
+      });
+    }
+    
     if (!this.nextAudio.src && !this.currentAudio.src) {
+      console.log('[AUDIO][STARTUP][PLAY] No source available, cannot play');
       return;
     }
     
@@ -1414,10 +1539,27 @@ export class StreamingAudioEngine implements IAudioEngine {
     if (hasNewTrack) {
       await this.crossfadeToNext();
     } else {
-      await this.currentAudio.play();
-      this.isPlayingState = true;
-      this.metrics.playbackState = 'playing';
-      this.updateMetrics();
+      try {
+        await this.currentAudio.play();
+        this.startupTimestamps.playbackStarted = performance.now();
+        this.isPlayingState = true;
+        this.metrics.playbackState = 'playing';
+        
+        // [FAST START] Log play latency
+        const playLatency = this.startupTimestamps.playRequested > 0
+          ? Math.round(this.startupTimestamps.playbackStarted - this.startupTimestamps.playRequested)
+          : 0;
+        console.log('[AUDIO][STARTUP][PLAYING] Playback started', {
+          playLatencyMs: playLatency,
+          readyState: this.currentAudio.readyState,
+          currentTime: this.currentAudio.currentTime,
+        });
+        
+        this.updateMetrics();
+      } catch (error) {
+        console.warn('[AUDIO][STARTUP][PLAY] Play failed:', error);
+        throw error;
+      }
     }
   }
 
@@ -1437,11 +1579,26 @@ export class StreamingAudioEngine implements IAudioEngine {
       
       newAudio.volume = this.volume;
       await newAudio.play();
+      
+      // [FAST START] Track playback start
+      this.startupTimestamps.playbackStarted = performance.now();
+      if (this.startupTimestamps.playRequested > 0) {
+        const playLatency = Math.round(this.startupTimestamps.playbackStarted - this.startupTimestamps.playRequested);
+        console.log('[AUDIO][STARTUP][CROSSFADE] Direct start playback began', {
+          playLatencyMs: playLatency,
+          wasFromPrefetch: this.prefetchedSource?.isReady || false,
+        });
+      }
+      
       this.currentAudio = newAudio;
       this.nextAudio = oldAudio;
       this.currentHls = newHls;
       this.isPlayingState = true;
       this.metrics.playbackState = 'playing';
+      
+      // [FAST START] Clear prefetch state after use
+      this.clearPrefetchedSource();
+      
       this.updateMetrics();
       return;
     }
@@ -1529,10 +1686,168 @@ export class StreamingAudioEngine implements IAudioEngine {
     return { ...this.metrics };
   }
 
+  /**
+   * [FAST START] Prepare a track source before playback.
+   * 
+   * Call this when a playlist/channel is selected to pre-warm the engine.
+   * The track will be ready to play instantly when play() is called.
+   * Does NOT call play() to respect autoplay policies.
+   * 
+   * @param trackId - The track ID to prepare
+   * @param filePath - The file path for fallback MP3
+   * @param metadata - Optional track metadata for MediaSession
+   * @returns Promise that resolves when track is ready to play
+   */
+  async prepareSource(
+    trackId: string,
+    filePath: string,
+    metadata?: TrackMetadata
+  ): Promise<void> {
+    console.log('[AUDIO][STARTUP][PREFETCH] Preparing source for first track', {
+      trackId,
+      hasExistingPrefetch: !!this.prefetchedSource,
+      existingPrefetchTrackId: this.prefetchedSource?.trackId,
+    });
+    
+    // Skip if already prepared for this track
+    if (this.prefetchedSource?.trackId === trackId && this.prefetchedSource.isReady) {
+      console.log('[AUDIO][STARTUP][PREFETCH] Track already prepared, skipping');
+      return;
+    }
+    
+    // Clear any existing prefetch
+    this.clearPrefetchedSource();
+    
+    // Reset startup timestamps for fresh measurement
+    this.resetStartupTimestamps();
+    this.startupTimestamps.sourceSet = performance.now();
+    
+    try {
+      const hlsAdapter = this.storageAdapter as HLSStorageAdapter;
+      const hasHLS = hlsAdapter.hasHLSSupport 
+        ? await hlsAdapter.hasHLSSupport(trackId)
+        : false;
+      
+      const prefetchAudio = this.nextAudio;
+      let prefetchHls: Hls | null = null;
+      
+      if (hasHLS && (this.useNativeHLS || this.useHLSJS)) {
+        const hlsUrl = await hlsAdapter.getHLSUrl(trackId, `${trackId}/master.m3u8`);
+        
+        console.log('[AUDIO][STARTUP][PREFETCH] Loading HLS source', { trackId, hlsUrl });
+        
+        if (this.useNativeHLS) {
+          prefetchAudio.src = hlsUrl;
+          prefetchAudio.load();
+        } else if (this.useHLSJS) {
+          // Use the secondary HLS instance for prefetch
+          prefetchHls = this.nextAudio === this.primaryAudio ? this.primaryHls : this.secondaryHls;
+          if (prefetchHls) {
+            prefetchHls.loadSource(hlsUrl);
+          }
+        }
+        
+        this.prefetchedSource = {
+          trackId,
+          url: hlsUrl,
+          isReady: false,
+          audio: prefetchAudio,
+          hls: prefetchHls,
+        };
+        
+        // Wait for ready state with fast-start threshold
+        await this.waitForCanPlay(prefetchAudio, true);
+        
+        this.prefetchedSource.isReady = true;
+        this.metrics.prefetchedTrackId = trackId;
+        this.metrics.prefetchedTrackUrl = hlsUrl;
+        
+        console.log('[AUDIO][STARTUP][PREFETCH] Track ready for instant playback', {
+          trackId,
+          timeToReadyMs: Math.round(performance.now() - this.startupTimestamps.sourceSet),
+          readyState: prefetchAudio.readyState,
+          duration: prefetchAudio.duration,
+        });
+      } else {
+        // Direct MP3 fallback
+        const url = await this.storageAdapter.getAudioUrl(filePath);
+        
+        console.log('[AUDIO][STARTUP][PREFETCH] Loading MP3 source', { trackId, url });
+        
+        prefetchAudio.src = url;
+        prefetchAudio.load();
+        
+        this.prefetchedSource = {
+          trackId,
+          url,
+          isReady: false,
+          audio: prefetchAudio,
+          hls: null,
+        };
+        
+        await this.waitForCanPlay(prefetchAudio, true);
+        
+        this.prefetchedSource.isReady = true;
+        this.metrics.prefetchedTrackId = trackId;
+        this.metrics.prefetchedTrackUrl = url;
+        
+        console.log('[AUDIO][STARTUP][PREFETCH] MP3 track ready', {
+          trackId,
+          timeToReadyMs: Math.round(performance.now() - this.startupTimestamps.sourceSet),
+        });
+      }
+      
+      // Update MediaSession if metadata provided
+      if (metadata) {
+        this.updateMediaSessionMetadata(metadata);
+      }
+      
+      this.updateMetrics();
+    } catch (error) {
+      console.warn('[AUDIO][STARTUP][PREFETCH] Prefetch failed:', error);
+      this.clearPrefetchedSource();
+      throw error;
+    }
+  }
+  
+  /**
+   * [FAST START] Check if a track is prepared and ready for instant playback
+   */
+  isPrepared(trackId: string): boolean {
+    return this.prefetchedSource?.trackId === trackId && this.prefetchedSource.isReady;
+  }
+  
+  /**
+   * [FAST START] Clear any prefetched source
+   */
+  private clearPrefetchedSource(): void {
+    if (this.prefetchedSource) {
+      // Don't clear the audio source - let the element reuse it
+      this.prefetchedSource = null;
+    }
+  }
+  
+  /**
+   * [FAST START] Reset startup timestamps for a new playback cycle
+   */
+  private resetStartupTimestamps(): void {
+    this.startupTimestamps = {
+      playRequested: 0,
+      sourceSet: 0,
+      hlsManifestLoaded: 0,
+      canPlayFired: 0,
+      firstTimeupdateFired: 0,
+      playbackStarted: 0,
+    };
+    this.isFirstTimeupdate = true;
+  }
+
   prefetchNextTrack(trackId: string, filePath: string): void {
     if (this.nextTrackId === trackId) {
       return;
     }
+    
+    console.log('[AUDIO][STARTUP][NEXT] Prefetching next track', { trackId });
     
     this.nextTrackId = trackId;
     const prefetchAudio = this.currentAudio === this.primaryAudio 
@@ -1563,6 +1878,11 @@ export class StreamingAudioEngine implements IAudioEngine {
       this.metrics.prefetchedTrackId = trackId;
       this.metrics.prefetchedTrackUrl = url;
       this.updateMetrics();
+      
+      console.log('[AUDIO][STARTUP][NEXT] Next track prefetch initiated', { 
+        trackId, 
+        url: url.substring(0, 100) + '...' 
+      });
     }).catch(console.warn);
   }
 

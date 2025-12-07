@@ -315,6 +315,14 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       if (lastLoadedTrackId.current === trackId) {
         return;
       }
+      
+      // [FAST START] Log whether track was prefetched
+      const isPrepared = audioEngine?.isPrepared?.(trackId) || false;
+      console.log('[FAST START] loadAndPlay called', {
+        trackId,
+        isPrepared,
+        willUseFastPath: isPrepared,
+      });
 
       // Check if we need to load more tracks (buffer check for slot-based playlists)
       if (!isAdminMode && activeChannel && playlist.length > 0) {
@@ -851,6 +859,22 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
       // Force track reload by clearing lastLoadedTrackId
       lastLoadedTrackId.current = null;
+      
+      // [FAST START] Prefetch the first track immediately for instant playback
+      // This prepares the HLS/audio source BEFORE the user presses Play
+      if (generatedTracks.length > 0 && audioEngine?.prepareSource) {
+        const firstTrack = generatedTracks[0];
+        const trackId = firstTrack.metadata?.track_id || firstTrack.track_id;
+        if (trackId && firstTrack.file_path) {
+          console.log('[FAST START] Prefetching first track', { trackId });
+          audioEngine.prepareSource(trackId, firstTrack.file_path, {
+            trackName: firstTrack.track_name,
+            artistName: firstTrack.artist_name,
+          }).catch(err => {
+            console.warn('[FAST START] First track prefetch failed (will load on play):', err);
+          });
+        }
+      }
 
       // Save/update playback state
       if (generatedTracks.length > 0) {
@@ -942,6 +966,21 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
     setPlaylist(orderedTracks);
     setCurrentTrackIndex(0);
+    
+    // [FAST START] Prefetch the first track immediately for instant playback
+    if (orderedTracks.length > 0 && audioEngine?.prepareSource) {
+      const firstTrack = orderedTracks[0];
+      const trackId = firstTrack.metadata?.track_id || firstTrack.track_id;
+      if (trackId && firstTrack.file_path) {
+        console.log('[FAST START] Prefetching first track (weighted playlist)', { trackId });
+        audioEngine.prepareSource(trackId, firstTrack.file_path, {
+          trackName: firstTrack.track_name,
+          artistName: firstTrack.artist_name,
+        }).catch(err => {
+          console.warn('[FAST START] First track prefetch failed (will load on play):', err);
+        });
+      }
+    }
 
     await supabase.from('playlists').insert({
       user_id: user.id,
