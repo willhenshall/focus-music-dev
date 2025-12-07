@@ -1,5 +1,5 @@
 import { test, expect, Page } from "@playwright/test";
-import { loginAsUser } from "../../tests/helpers/auth";
+import { loginAsAdmin } from "../../tests/helpers/auth";
 
 /**
  * E2E Tests for ABR (Adaptive Bitrate) System
@@ -11,31 +11,31 @@ import { loginAsUser } from "../../tests/helpers/auth";
  * - Quality ladder visualization
  * - Switch history tracking
  * 
- * Our HLS ladder:
- * - LOW:     32 kbps
- * - MEDIUM:  64 kbps
- * - HIGH:    96 kbps
- * - PREMIUM: 128 kbps
+ * Our HLS ladder (BANDWIDTH values in manifest):
+ * - LOW:     48k  (32 kbps audio)
+ * - MEDIUM:  96k  (64 kbps audio)
+ * - HIGH:    144k (96 kbps audio)
+ * - PREMIUM: 192k (128 kbps audio)
  * 
- * Uses the same test user account as other E2E tests.
- * Set TEST_USER_EMAIL and TEST_USER_PASSWORD environment variables,
- * or uses defaults from tests/helpers/auth.ts
+ * Uses admin credentials from .env.test (TEST_ADMIN_EMAIL/PASSWORD)
  */
 
-// Test credentials - uses defaults from tests/helpers/auth.ts if not set
-// Defaults: user@test.com / testpass123
+// Configure longer timeout for HLS streaming tests
+test.use({ 
+  actionTimeout: 15000,
+});
 
 // =============================================================================
 // HELPER FUNCTIONS
 // =============================================================================
 
 /**
- * Signs in as test user using shared auth helper.
- * Uses loginAsUser which has fallback defaults if env vars not set.
+ * Signs in as admin using shared auth helper.
+ * Uses loginAsAdmin which uses TEST_ADMIN_EMAIL/PASSWORD from .env.test
  */
 async function signInAndNavigate(page: Page): Promise<boolean> {
   try {
-    await loginAsUser(page);
+    await loginAsAdmin(page);
     await page.locator('[data-channel-id]').first().waitFor({ state: "visible", timeout: 15000 });
     return true;
   } catch (error) {
@@ -45,14 +45,16 @@ async function signInAndNavigate(page: Page): Promise<boolean> {
 }
 
 /**
- * Opens the Audio Diagnostics panel using keyboard shortcut
+ * Opens the Audio Diagnostics panel by clicking the diagnostics button
  */
 async function openDiagnosticsPanel(page: Page): Promise<void> {
-  await page.keyboard.press("Shift+KeyD");
+  // Click the diagnostics button in the admin header (has Activity icon with title="Audio Engine Diagnostics")
+  const diagButton = page.locator('button[title="Audio Engine Diagnostics"]');
+  await diagButton.click();
   await page.waitForTimeout(500);
   
-  // Verify panel opened
-  const panel = page.locator('text=Audio Engine Diagnostics');
+  // Verify panel opened - look for the panel header text
+  const panel = page.locator('h3:has-text("Audio Engine Diagnostics")');
   await expect(panel).toBeVisible({ timeout: 5000 });
 }
 
@@ -60,7 +62,13 @@ async function openDiagnosticsPanel(page: Page): Promise<void> {
  * Closes the diagnostics panel if open
  */
 async function closeDiagnosticsPanel(page: Page): Promise<void> {
-  await page.keyboard.press("Shift+KeyD");
+  // Click the close button (X) in the diagnostics panel
+  const closeButton = page.locator('h3:has-text("Audio Engine Diagnostics")').locator('..').locator('button').first();
+  try {
+    await closeButton.click({ timeout: 2000 });
+  } catch {
+    // Panel might already be closed, ignore
+  }
   await page.waitForTimeout(300);
 }
 
@@ -138,6 +146,8 @@ async function getBandwidthKbps(page: Page): Promise<number> {
 // =============================================================================
 
 test.describe("ABR System - Detection and Initialization", () => {
+  // Set longer timeout for HLS streaming tests (45 seconds instead of 30)
+  test.setTimeout(45000);
 
   test.beforeEach(async ({ page }) => {
     const signedIn = await signInAndNavigate(page);
@@ -220,6 +230,7 @@ test.describe("ABR System - Detection and Initialization", () => {
 // =============================================================================
 
 test.describe("ABR System - Quality Tier Detection", () => {
+  test.setTimeout(45000);
 
   test.beforeEach(async ({ page }) => {
     const signedIn = await signInAndNavigate(page);
@@ -263,11 +274,12 @@ test.describe("ABR System - Quality Tier Detection", () => {
       // Sort by bitrate to verify order
       const sortedLevels = [...metrics.levels].sort((a: any, b: any) => a.bitrate - b.bitrate);
       
-      // Verify bitrates are in expected ranges (with some tolerance)
-      expect(sortedLevels[0].bitrate).toBeLessThan(50000);  // LOW ~32k
-      expect(sortedLevels[1].bitrate).toBeLessThan(80000);  // MEDIUM ~64k
-      expect(sortedLevels[2].bitrate).toBeLessThan(110000); // HIGH ~96k
-      expect(sortedLevels[3].bitrate).toBeLessThan(150000); // PREMIUM ~128k
+      // Verify bitrates match the BANDWIDTH values from manifest (includes container overhead)
+      // LOW: 48000, MEDIUM: 96000, HIGH: 144000, PREMIUM: 192000
+      expect(sortedLevels[0].bitrate).toBeLessThan(60000);   // LOW ~48k
+      expect(sortedLevels[1].bitrate).toBeLessThan(110000);  // MEDIUM ~96k
+      expect(sortedLevels[2].bitrate).toBeLessThan(160000);  // HIGH ~144k
+      expect(sortedLevels[3].bitrate).toBeLessThan(210000);  // PREMIUM ~192k
       
       console.log("[ABR] Verified 4-tier ladder bitrates");
     }
@@ -297,6 +309,7 @@ test.describe("ABR System - Quality Tier Detection", () => {
 // =============================================================================
 
 test.describe("ABR System - State Management", () => {
+  test.setTimeout(45000);
 
   test.beforeEach(async ({ page }) => {
     const signedIn = await signInAndNavigate(page);
@@ -388,6 +401,7 @@ test.describe("ABR System - State Management", () => {
 // =============================================================================
 
 test.describe("ABR System - Diagnostics Panel Display", () => {
+  test.setTimeout(45000);
 
   test.beforeEach(async ({ page }) => {
     const signedIn = await signInAndNavigate(page);
@@ -479,6 +493,7 @@ test.describe("ABR System - Diagnostics Panel Display", () => {
 // =============================================================================
 
 test.describe("ABR System - Network Throttling Response", () => {
+  test.setTimeout(60000); // Network tests need more time
 
   test.beforeEach(async ({ page }) => {
     const signedIn = await signInAndNavigate(page);
@@ -561,6 +576,7 @@ test.describe("ABR System - Network Throttling Response", () => {
 // =============================================================================
 
 test.describe("ABR System - Level Switch History", () => {
+  test.setTimeout(45000);
 
   test.beforeEach(async ({ page }) => {
     const signedIn = await signInAndNavigate(page);
@@ -639,6 +655,7 @@ test.describe("ABR System - Level Switch History", () => {
 // =============================================================================
 
 test.describe("ABR System - Fragment Loading", () => {
+  test.setTimeout(45000);
 
   test.beforeEach(async ({ page }) => {
     const signedIn = await signInAndNavigate(page);
@@ -714,6 +731,7 @@ test.describe("ABR System - Fragment Loading", () => {
 // =============================================================================
 
 test.describe("ABR System - Buffer Health", () => {
+  test.setTimeout(60000); // Buffer tests need extended wait for HLS loading
 
   test.beforeEach(async ({ page }) => {
     const signedIn = await signInAndNavigate(page);
@@ -787,6 +805,7 @@ test.describe("ABR System - Buffer Health", () => {
 // =============================================================================
 
 test.describe("ABR System - Debug Interface", () => {
+  test.setTimeout(45000);
 
   test.beforeEach(async ({ page }) => {
     const signedIn = await signInAndNavigate(page);

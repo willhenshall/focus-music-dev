@@ -58,9 +58,11 @@ type AdminDashboardProps = {
   onSwitchToUser?: () => void;
   showAudioDiagnostics?: boolean;
   onToggleAudioDiagnostics?: () => void;
+  showMobileHLSDiagnostics?: boolean;
+  onToggleMobileHLSDiagnostics?: () => void;
 };
 
-export function AdminDashboard({ onSwitchToUser, showAudioDiagnostics, onToggleAudioDiagnostics }: AdminDashboardProps = {}) {
+export function AdminDashboard({ onSwitchToUser, showAudioDiagnostics, onToggleAudioDiagnostics, showMobileHLSDiagnostics, onToggleMobileHLSDiagnostics }: AdminDashboardProps = {}) {
   const { signOut, user } = useAuth();
   const [activeTab, setActiveTab] = useState<'analytics' | 'channels' | 'library' | 'users' | 'images' | 'quiz' | 'settings' | 'testing' | 'tests'>('analytics');
   const [tabs, setTabs] = useState<TabConfig[]>(DEFAULT_TABS);
@@ -324,6 +326,19 @@ export function AdminDashboard({ onSwitchToUser, showAudioDiagnostics, onToggleA
             </span>
           </div>
           <div className="flex items-center gap-3">
+            {onToggleMobileHLSDiagnostics && (
+              <button
+                onClick={onToggleMobileHLSDiagnostics}
+                className={`flex items-center justify-center w-10 h-10 rounded-lg font-bold transition-all ${
+                  showMobileHLSDiagnostics
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-purple-600 text-white hover:bg-purple-700'
+                }`}
+                title="Mobile HLS Monitor (Native Playback)"
+              >
+                <Radio className="w-5 h-5" />
+              </button>
+            )}
             {onToggleAudioDiagnostics && (
               <button
                 onClick={onToggleAudioDiagnostics}

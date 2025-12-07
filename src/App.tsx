@@ -12,6 +12,7 @@ import { UserDashboard } from './components/UserDashboard';
 import { AdminDashboard } from './components/AdminDashboard';
 import { SlotStrategyEditor } from './components/SlotStrategyEditor';
 import { AudioEngineDiagnostics } from './components/AudioEngineDiagnostics';
+import { MobileHLSDiagnostics } from './components/MobileHLSDiagnostics';
 import { supabase } from './lib/supabase';
 import { BrainType } from './lib/brainTypeCalculator';
 import { useMusicPlayer } from './contexts/MusicPlayerContext';
@@ -32,6 +33,7 @@ function AppContent() {
   const [quizCognitiveProfile, setQuizCognitiveProfile] = useState<{ adhdIndicator: number; asdScore: number; stimulantLevel: string } | null>(null);
   const [quizResponses, setQuizResponses] = useState<Record<string, number | string> | null>(null);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [showMobileHLSDiagnostics, setShowMobileHLSDiagnostics] = useState(false);
   const [showQueue, setShowQueue] = useState(true);
   const [isRetakingQuiz, setIsRetakingQuiz] = useState(false);
   const [showSlideshow, setShowSlideshow] = useState(false);
@@ -295,6 +297,7 @@ function AppContent() {
           <NowPlayingFooter onOpenSlideshow={() => setShowSlideshow(true)} />
           {showSlideshow && <SlideshowOverlay onClose={() => setShowSlideshow(false)} />}
           {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} engineType={engineType} isStreamingEngine={isStreamingEngine} currentTrackInfo={{ trackName: currentTrack?.track_name, artistName: currentTrack?.artist_name }} prefetchTrackInfo={{ trackName: playlist[currentTrackIndex + 1]?.track_name, artistName: playlist[currentTrackIndex + 1]?.artist_name }} />}
+          {showMobileHLSDiagnostics && <MobileHLSDiagnostics onClose={() => setShowMobileHLSDiagnostics(false)} />}
         </>
       );
     }
@@ -310,10 +313,13 @@ function AppContent() {
               setShowDiagnostics(newValue);
               sessionStorage.setItem('showDiagnostics', String(newValue));
             }}
+            showMobileHLSDiagnostics={showMobileHLSDiagnostics}
+            onToggleMobileHLSDiagnostics={() => setShowMobileHLSDiagnostics(!showMobileHLSDiagnostics)}
           />
           <NowPlayingFooter onOpenSlideshow={() => setShowSlideshow(true)} />
           {showSlideshow && <SlideshowOverlay onClose={() => setShowSlideshow(false)} />}
           {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} engineType={engineType} isStreamingEngine={isStreamingEngine} currentTrackInfo={{ trackName: currentTrack?.track_name, artistName: currentTrack?.artist_name }} prefetchTrackInfo={{ trackName: playlist[currentTrackIndex + 1]?.track_name, artistName: playlist[currentTrackIndex + 1]?.artist_name }} />}
+          {showMobileHLSDiagnostics && <MobileHLSDiagnostics onClose={() => setShowMobileHLSDiagnostics(false)} />}
         </>
       );
     }
@@ -329,10 +335,13 @@ function AppContent() {
             setShowDiagnostics(newValue);
             sessionStorage.setItem('showDiagnostics', String(newValue));
           }}
+          showMobileHLSDiagnostics={showMobileHLSDiagnostics}
+          onToggleMobileHLSDiagnostics={() => setShowMobileHLSDiagnostics(!showMobileHLSDiagnostics)}
         />
         <NowPlayingFooter onOpenSlideshow={() => setShowSlideshow(true)} />
         {showSlideshow && <SlideshowOverlay onClose={() => setShowSlideshow(false)} />}
         {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} engineType={engineType} isStreamingEngine={isStreamingEngine} currentTrackInfo={{ trackName: currentTrack?.track_name, artistName: currentTrack?.artist_name }} prefetchTrackInfo={{ trackName: playlist[currentTrackIndex + 1]?.track_name, artistName: playlist[currentTrackIndex + 1]?.artist_name }} />}
+        {showMobileHLSDiagnostics && <MobileHLSDiagnostics onClose={() => setShowMobileHLSDiagnostics(false)} />}
       </>
     );
   }

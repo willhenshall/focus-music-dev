@@ -20,6 +20,8 @@ type UserDashboardProps = {
   initialTab?: 'channels' | 'focus-profile' | 'slideshow' | 'settings';
   showAudioDiagnostics?: boolean;
   onToggleAudioDiagnostics?: () => void;
+  showMobileHLSDiagnostics?: boolean;
+  onToggleMobileHLSDiagnostics?: () => void;
 };
 
 type ActiveTab = 'channels' | 'focus-profile' | 'slideshow' | 'settings';
