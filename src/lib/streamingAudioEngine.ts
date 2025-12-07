@@ -1534,8 +1534,11 @@ export class StreamingAudioEngine implements IAudioEngine {
     
     if (!hasOldTrack || !this.enableCrossfade) {
       if (hasOldTrack) {
+        // [CLICK FIX] Quick micro-fade before stopping old audio
+        await this.microFadeOut(oldAudio);
         oldAudio.pause();
         oldAudio.currentTime = 0;
+        oldAudio.volume = this.volume; // Restore for reuse
       }
       
       newAudio.volume = this.volume;
@@ -1596,18 +1599,60 @@ export class StreamingAudioEngine implements IAudioEngine {
   }
 
   pause(): void {
-    this.currentAudio.pause();
+    // [CLICK FIX] Quick micro-fade to prevent click/pop sound
+    // The click happens when audio is cut mid-waveform
+    this.microFadeOut(this.currentAudio).then(() => {
+      this.currentAudio.pause();
+      // Restore volume for next play
+      this.currentAudio.volume = this.volume;
+    });
     this.isPlayingState = false;
     this.metrics.playbackState = 'paused';
     this.updateMetrics();
   }
 
   stop(): void {
-    this.currentAudio.pause();
-    this.currentAudio.currentTime = 0;
+    // [CLICK FIX] Quick micro-fade to prevent click/pop sound
+    this.microFadeOut(this.currentAudio).then(() => {
+      this.currentAudio.pause();
+      this.currentAudio.currentTime = 0;
+      // Restore volume for next play
+      this.currentAudio.volume = this.volume;
+    });
     this.isPlayingState = false;
     this.metrics.playbackState = 'stopped';
     this.updateMetrics();
+  }
+  
+  /**
+   * [CLICK FIX] Quick micro-fade to prevent audio click/pop when stopping
+   * Fades volume to 0 over ~10ms before actually stopping
+   */
+  private microFadeOut(audio: HTMLAudioElement): Promise<void> {
+    return new Promise((resolve) => {
+      const startVolume = audio.volume;
+      if (startVolume === 0 || audio.paused) {
+        resolve();
+        return;
+      }
+      
+      const fadeTime = 15; // 15ms micro-fade
+      const steps = 3;     // 3 steps = 5ms each
+      const stepTime = fadeTime / steps;
+      const volumeStep = startVolume / steps;
+      let currentStep = 0;
+      
+      const fadeInterval = setInterval(() => {
+        currentStep++;
+        audio.volume = Math.max(0, startVolume - (volumeStep * currentStep));
+        
+        if (currentStep >= steps) {
+          clearInterval(fadeInterval);
+          audio.volume = 0;
+          resolve();
+        }
+      }, stepTime);
+    });
   }
 
   seek(time: number): void {
