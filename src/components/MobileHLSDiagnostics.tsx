@@ -7,7 +7,7 @@
  * expose ABR internals.
  */
 
-import { X, Wifi, WifiOff, Activity, Clock, TrendingUp, TrendingDown, Minus, AlertTriangle, CheckCircle, Radio, Gauge, Layers, History, RefreshCw, Music, ListMusic, SkipForward, Loader2, CheckCircle2, Play } from 'lucide-react';
+import { X, Wifi, WifiOff, Activity, Clock, TrendingUp, TrendingDown, Minus, AlertTriangle, CheckCircle, Radio, Gauge, Layers, History, RefreshCw, Music, ListMusic, SkipForward, Loader2, CheckCircle2, Play, Zap } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { NativeHLSMonitor, getNativeHLSMonitor } from '../lib/nativeHLSMonitor';
 import type { NativeHLSMetrics, QualityTier, TierSwitch, SegmentRequest } from '../lib/types/nativeHLSMetrics';
@@ -504,6 +504,67 @@ export function MobileHLSDiagnostics({ onClose, audioElement }: MobileHLSDiagnos
           )}
         </div>
         
+        {/* Startup Latency Card */}
+        {audioMetrics?.startupLatency && (
+          <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl border border-purple-200 p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Zap className="w-4 h-4 text-purple-600" />
+              <span className="text-sm font-semibold text-purple-800">Startup Latency</span>
+              {audioMetrics.startupLatency.wasPrefetched && (
+                <span className="px-2 py-0.5 text-[10px] font-bold bg-green-100 text-green-700 rounded-full">
+                  PREFETCHED
+                </span>
+              )}
+            </div>
+            
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="p-2 bg-white/60 rounded-lg">
+                <div className="text-purple-500 text-xs">Total Latency</div>
+                <div className="font-bold text-purple-800">
+                  {audioMetrics.startupLatency.totalLatencyMs > 0 
+                    ? `${audioMetrics.startupLatency.totalLatencyMs}ms` 
+                    : 'Measuring...'}
+                </div>
+              </div>
+              <div className="p-2 bg-white/60 rounded-lg">
+                <div className="text-purple-500 text-xs">Buffering Time</div>
+                <div className="font-bold text-purple-800">
+                  {audioMetrics.startupLatency.bufferingLatencyMs > 0 
+                    ? `${audioMetrics.startupLatency.bufferingLatencyMs}ms` 
+                    : '-'}
+                </div>
+              </div>
+            </div>
+            
+            {/* Latency breakdown bar */}
+            {audioMetrics.startupLatency.totalLatencyMs > 0 && (
+              <div className="mt-3">
+                <div className="flex items-center justify-between text-[10px] text-purple-600 mb-1">
+                  <span>Play Request</span>
+                  <span>First Audio</span>
+                </div>
+                <div className="h-2 bg-purple-200 rounded-full overflow-hidden flex">
+                  <div 
+                    className="bg-purple-400 h-full" 
+                    style={{ 
+                      width: `${Math.min((audioMetrics.startupLatency.bufferingLatencyMs / audioMetrics.startupLatency.totalLatencyMs) * 100, 100)}%` 
+                    }}
+                    title="Buffering"
+                  />
+                  <div 
+                    className="bg-purple-600 h-full flex-1" 
+                    title="Play to first audio"
+                  />
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-purple-500 mt-1">
+                  <span>Buffering</span>
+                  <span>Play→Audio</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Next Track / Prefetch Card */}
         <div className="bg-white rounded-xl border border-slate-200 p-4">
           <div className="flex items-center gap-2 mb-3">
@@ -535,15 +596,15 @@ export function MobileHLSDiagnostics({ onClose, audioElement }: MobileHLSDiagnos
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-slate-500">Prefetch Progress</span>
                   <span className={`font-semibold ${prefetchReady ? 'text-green-600' : 'text-slate-600'}`}>
-                    {prefetchReady ? 'Ready' : `${Math.round(prefetchProgress * 100)}%`}
+                    {prefetchReady ? 'Ready' : `${Math.round(prefetchProgress * 100)}%`} · State: {audioMetrics?.prefetchReadyState ?? 0}
                   </span>
                 </div>
                 <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
                   <div 
                     className={`h-full rounded-full transition-all duration-300 ${
-                      prefetchReady ? 'bg-green-500' : 'bg-blue-500'
+                      prefetchReady ? 'bg-green-500' : prefetchProgress > 0 ? 'bg-blue-500' : 'bg-slate-300'
                     }`}
-                    style={{ width: `${Math.min(prefetchProgress * 100, 100)}%` }}
+                    style={{ width: `${Math.max(Math.min(prefetchProgress * 100, 100), prefetchProgress > 0 ? 5 : 0)}%` }}
                   />
                 </div>
                 
@@ -557,7 +618,12 @@ export function MobileHLSDiagnostics({ onClose, audioElement }: MobileHLSDiagnos
                   ) : prefetchProgress > 0 ? (
                     <>
                       <Loader2 className="w-3 h-3 text-blue-500 animate-spin" />
-                      <span className="text-blue-600">Loading next track...</span>
+                      <span className="text-blue-600">Loading next track... ({Math.round(prefetchProgress * 100)}%)</span>
+                    </>
+                  ) : prefetchTrackId ? (
+                    <>
+                      <Loader2 className="w-3 h-3 text-slate-400 animate-spin" />
+                      <span className="text-slate-500">Resolving URL for {prefetchTrackId}...</span>
                     </>
                   ) : (
                     <>

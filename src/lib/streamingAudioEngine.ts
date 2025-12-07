@@ -962,6 +962,27 @@ export class StreamingAudioEngine implements IAudioEngine {
     // Include HLS metrics in main metrics
     this.metrics.hls = { ...this.hlsMetrics };
     
+    // [FAST START] Include startup latency metrics
+    if (this.startupTimestamps.playRequested > 0 || this.startupTimestamps.sourceSet > 0) {
+      const totalLatency = this.startupTimestamps.firstTimeupdateFired > 0 && this.startupTimestamps.playRequested > 0
+        ? this.startupTimestamps.firstTimeupdateFired - this.startupTimestamps.playRequested
+        : 0;
+      const bufferingLatency = this.startupTimestamps.canPlayFired > 0 && this.startupTimestamps.sourceSet > 0
+        ? this.startupTimestamps.canPlayFired - this.startupTimestamps.sourceSet
+        : 0;
+      
+      this.metrics.startupLatency = {
+        playRequestedAt: this.startupTimestamps.playRequested,
+        sourceSetAt: this.startupTimestamps.sourceSet,
+        canPlayAt: this.startupTimestamps.canPlayFired,
+        playbackStartedAt: this.startupTimestamps.playbackStarted,
+        firstAudioAt: this.startupTimestamps.firstTimeupdateFired,
+        totalLatencyMs: Math.round(totalLatency),
+        bufferingLatencyMs: Math.round(bufferingLatency),
+        wasPrefetched: this.startupTimestamps.sourceSet < this.startupTimestamps.playRequested,
+      };
+    }
+    
     if (this.onDiagnosticsUpdate) {
       this.onDiagnosticsUpdate({ ...this.metrics });
     }
@@ -1710,10 +1731,19 @@ export class StreamingAudioEngine implements IAudioEngine {
     
     console.log('[AUDIO][STARTUP][NEXT] Prefetching next track', { trackId });
     
+    // [PREFETCH FIX] Clear previous prefetch listeners
+    this.cleanupPrefetchListeners();
+    
     this.nextTrackId = trackId;
     const prefetchAudio = this.currentAudio === this.primaryAudio 
       ? this.secondaryAudio 
       : this.primaryAudio;
+    
+    // [PREFETCH FIX] Reset prefetch metrics
+    this.metrics.prefetchProgress = 0;
+    this.metrics.prefetchReadyState = 0;
+    this.metrics.prefetchedTrackId = trackId;
+    this.updateMetrics();
     
     // Check if HLS is available and use HLS URL if supported
     const hlsAdapter = this.storageAdapter as HLSStorageAdapter;
@@ -1731,12 +1761,14 @@ export class StreamingAudioEngine implements IAudioEngine {
     };
     
     getPrefetchUrl().then(url => {
+      // [PREFETCH FIX] Set up progress tracking listeners
+      this.setupPrefetchListeners(prefetchAudio, trackId);
+      
       prefetchAudio.src = url;
       prefetchAudio.preload = 'auto';
       prefetchAudio.load();
       
       this.prefetchedNextTrack = true;
-      this.metrics.prefetchedTrackId = trackId;
       this.metrics.prefetchedTrackUrl = url;
       this.updateMetrics();
       
@@ -1744,7 +1776,84 @@ export class StreamingAudioEngine implements IAudioEngine {
         trackId, 
         url: url.substring(0, 100) + '...' 
       });
-    }).catch(console.warn);
+    }).catch(err => {
+      console.warn('[AUDIO][STARTUP][NEXT] Prefetch URL fetch failed:', err);
+      this.metrics.prefetchedTrackId = null;
+      this.metrics.prefetchedTrackUrl = null;
+      this.updateMetrics();
+    });
+  }
+  
+  // [PREFETCH FIX] Listeners for tracking prefetch progress
+  private prefetchProgressHandler: (() => void) | null = null;
+  private prefetchCanPlayHandler: (() => void) | null = null;
+  private prefetchErrorHandler: (() => void) | null = null;
+  private prefetchAudioElement: HTMLAudioElement | null = null;
+  
+  private setupPrefetchListeners(audio: HTMLAudioElement, trackId: string): void {
+    this.prefetchAudioElement = audio;
+    
+    // Progress handler - updates as data is buffered
+    this.prefetchProgressHandler = () => {
+      if (audio.buffered.length > 0 && audio.duration > 0) {
+        const bufferedEnd = audio.buffered.end(audio.buffered.length - 1);
+        this.metrics.prefetchProgress = bufferedEnd / audio.duration;
+      }
+      this.metrics.prefetchReadyState = audio.readyState;
+      this.updateMetrics();
+    };
+    
+    // Can play handler - track is ready for playback
+    this.prefetchCanPlayHandler = () => {
+      console.log('[AUDIO][STARTUP][NEXT] Prefetch ready for playback', { 
+        trackId, 
+        readyState: audio.readyState,
+        duration: audio.duration,
+      });
+      this.metrics.prefetchReadyState = audio.readyState;
+      // Set progress to 100% when canplay fires (enough buffered to start)
+      if (audio.duration > 0 && audio.buffered.length > 0) {
+        const bufferedEnd = audio.buffered.end(audio.buffered.length - 1);
+        this.metrics.prefetchProgress = bufferedEnd / audio.duration;
+      } else {
+        this.metrics.prefetchProgress = 1; // Assume ready
+      }
+      this.updateMetrics();
+    };
+    
+    // Error handler
+    this.prefetchErrorHandler = () => {
+      console.warn('[AUDIO][STARTUP][NEXT] Prefetch failed', { trackId });
+      this.metrics.prefetchProgress = 0;
+      this.metrics.prefetchReadyState = 0;
+      this.updateMetrics();
+    };
+    
+    audio.addEventListener('progress', this.prefetchProgressHandler);
+    audio.addEventListener('canplay', this.prefetchCanPlayHandler);
+    audio.addEventListener('canplaythrough', this.prefetchCanPlayHandler);
+    audio.addEventListener('loadedmetadata', this.prefetchProgressHandler);
+    audio.addEventListener('error', this.prefetchErrorHandler);
+  }
+  
+  private cleanupPrefetchListeners(): void {
+    if (this.prefetchAudioElement) {
+      if (this.prefetchProgressHandler) {
+        this.prefetchAudioElement.removeEventListener('progress', this.prefetchProgressHandler);
+        this.prefetchAudioElement.removeEventListener('loadedmetadata', this.prefetchProgressHandler);
+      }
+      if (this.prefetchCanPlayHandler) {
+        this.prefetchAudioElement.removeEventListener('canplay', this.prefetchCanPlayHandler);
+        this.prefetchAudioElement.removeEventListener('canplaythrough', this.prefetchCanPlayHandler);
+      }
+      if (this.prefetchErrorHandler) {
+        this.prefetchAudioElement.removeEventListener('error', this.prefetchErrorHandler);
+      }
+    }
+    this.prefetchProgressHandler = null;
+    this.prefetchCanPlayHandler = null;
+    this.prefetchErrorHandler = null;
+    this.prefetchAudioElement = null;
   }
 
   destroy(): void {
@@ -1752,18 +1861,21 @@ export class StreamingAudioEngine implements IAudioEngine {
     if (this.metricsUpdateFrame) {
       cancelAnimationFrame(this.metricsUpdateFrame);
     }
-    
+
     // Clear timers
     if (this.stallDetectionTimer) clearTimeout(this.stallDetectionTimer);
     if (this.circuitBreakerTimer) clearTimeout(this.circuitBreakerTimer);
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.cancelStallRecovery();  // [CELLBUG FIX] Clean up stall recovery timer
     
+    // [PREFETCH FIX] Clean up prefetch listeners
+    this.cleanupPrefetchListeners();
+
     // Abort any pending operations
     if (this.abortController) {
       this.abortController.abort();
     }
-    
+
     // Stop playback
     this.stop();
     
