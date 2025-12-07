@@ -143,6 +143,7 @@ export class StreamingAudioEngine implements IAudioEngine {
   // State
   private currentTrackId: string | null = null;
   private nextTrackId: string | null = null;
+  private isLoadingTrack: boolean = false; // [FIX] Track if we're loading to prevent premature play()
   private volume: number = 0.7;
   private isPlayingState: boolean = false;
   private crossfadeDuration: number = 1000;
@@ -404,10 +405,11 @@ export class StreamingAudioEngine implements IAudioEngine {
     
     audio.addEventListener('timeupdate', () => {
       // [FAST START] Track first timeupdate as actual playback start
-      if (this.isFirstTimeupdate && audio.currentTime > 0 && audio === this.currentAudio) {
+      // [FIX] Also check !isLoadingTrack to ignore timeupdate from OLD track during channel switch
+      if (this.isFirstTimeupdate && audio.currentTime > 0 && audio === this.currentAudio && !this.isLoadingTrack) {
         this.isFirstTimeupdate = false;
         this.startupTimestamps.firstTimeupdateFired = performance.now();
-        
+
         // Log complete startup latency breakdown
         const breakdown = {
           totalStartupMs: this.startupTimestamps.playRequested > 0
@@ -422,7 +424,7 @@ export class StreamingAudioEngine implements IAudioEngine {
           playingToFirstAudioMs: this.startupTimestamps.playbackStarted > 0
             ? Math.round(this.startupTimestamps.firstTimeupdateFired - this.startupTimestamps.playbackStarted)
             : 'N/A',
-          wasPrefetched: this.startupTimestamps.playRequested === 0 || 
+          wasPrefetched: this.startupTimestamps.playRequested === 0 ||
             this.startupTimestamps.sourceSet < this.startupTimestamps.playRequested,
         };
         console.log('[AUDIO][STARTUP][COMPLETE] First audio output', breakdown);
@@ -1075,6 +1077,15 @@ export class StreamingAudioEngine implements IAudioEngine {
       throw new Error('Circuit breaker is open - too many recent failures');
     }
 
+    // [FIX] Mark that we're loading - prevents play() from playing old track
+    this.isLoadingTrack = true;
+    
+    // [FIX] Stop the current audio to prevent it from continuing to play
+    // while we load the new track (prevents audio/metadata mismatch)
+    if (this.currentAudio.src && !this.currentAudio.paused) {
+      this.currentAudio.pause();
+    }
+
     // [PREFETCH FIX] Clean up prefetch listeners BEFORE loading new track
     // The nextAudio element might have prefetch listeners that interfere with loading
     this.cleanupPrefetchListeners();
@@ -1130,7 +1141,11 @@ export class StreamingAudioEngine implements IAudioEngine {
       }
       
       this.recordSuccess();
+      // [FIX] Loading complete - safe to play now
+      this.isLoadingTrack = false;
     } catch (error) {
+      // [FIX] Loading failed - clear flag
+      this.isLoadingTrack = false;
       this.recordFailure();
       throw error;
     }
@@ -1532,6 +1547,12 @@ export class StreamingAudioEngine implements IAudioEngine {
   }
 
   async play(): Promise<void> {
+    // [FIX] If we're loading a new track, don't play the old one
+    if (this.isLoadingTrack) {
+      console.log('[AUDIO][STARTUP][PLAY] Skipping - track is loading');
+      return;
+    }
+    
     // [FAST START] Track when play was requested
     if (this.startupTimestamps.playRequested === 0) {
       this.startupTimestamps.playRequested = performance.now();
@@ -1541,16 +1562,16 @@ export class StreamingAudioEngine implements IAudioEngine {
         currentTrackId: this.currentTrackId,
       });
     }
-    
+
     if (!this.nextAudio.src && !this.currentAudio.src) {
       console.log('[AUDIO][STARTUP][PLAY] No source available, cannot play');
       return;
     }
-    
+
     const hasNewTrack = this.nextAudio.src &&
                         this.nextAudio.src !== this.currentAudio.src &&
                         this.nextAudio !== this.currentAudio;
-    
+
     if (hasNewTrack) {
       await this.crossfadeToNext();
     } else {
@@ -1559,7 +1580,7 @@ export class StreamingAudioEngine implements IAudioEngine {
         this.startupTimestamps.playbackStarted = performance.now();
         this.isPlayingState = true;
         this.metrics.playbackState = 'playing';
-        
+
         // [FAST START] Log play latency
         const playLatency = this.startupTimestamps.playRequested > 0
           ? Math.round(this.startupTimestamps.playbackStarted - this.startupTimestamps.playRequested)
@@ -1569,7 +1590,7 @@ export class StreamingAudioEngine implements IAudioEngine {
           readyState: this.currentAudio.readyState,
           currentTime: this.currentAudio.currentTime,
         });
-        
+
         this.updateMetrics();
       } catch (error) {
         console.warn('[AUDIO][STARTUP][PLAY] Play failed:', error);
