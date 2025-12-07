@@ -124,15 +124,16 @@ export class EnterpriseAudioEngine {
   private volume: number = 0.7;
   private isPlayingState: boolean = false;
   private crossfadeDuration: number = 500; // Default 500ms for snappy transitions
-  private crossfadeMode: 'overlap' | 'sequential' | 'none' = 'overlap'; // Default to radio-style
+  private crossfadeMode: 'overlap' | 'sequential' | 'none' = 'sequential'; // Default to sequential (safe)
   private enableCrossfade: boolean = true;
   private prefetchedNextTrack: boolean = false;
   private storageAdapter: StorageAdapter;
   
   // Track fade-in/fade-out for smooth transitions (eliminates clicks)
+  private readonly TRACK_FADE_DURATION = 500; // 500ms fade in/out
   private isFadingOut: boolean = false;
   private fadeOutTimer: NodeJS.Timeout | null = null;
-  // Flag to prevent double-triggering onTrackEnd when we trigger early for overlap crossfade
+  // Flag to track if we've already triggered early transition (overlap mode)
   private hasTriggeredEarlyTransition: boolean = false;
 
   private onTrackLoad: TrackLoadCallback | null = null;
@@ -894,7 +895,7 @@ export class EnterpriseAudioEngine {
   /**
    * Set crossfade mode.
    * - 'overlap': Radio-style - next track starts early, both play simultaneously during fade
-   * - 'sequential': Current track fades out completely, then next track fades in
+   * - 'sequential': Current track fades out, then next track fades in
    * - 'none': No fading, immediate cut between tracks
    */
   setCrossfadeMode(mode: 'overlap' | 'sequential' | 'none'): void {
@@ -904,24 +905,19 @@ export class EnterpriseAudioEngine {
 
   /**
    * Set crossfade duration in milliseconds.
-   * @param durationMs Duration in ms (default: 500, typical range: 200-3000)
+   * @param durationMs Duration in ms (default: 500, range: 200-5000)
    */
   setCrossfadeDuration(durationMs: number): void {
-    // Clamp to reasonable range
-    this.crossfadeDuration = Math.max(100, Math.min(5000, durationMs));
+    this.crossfadeDuration = Math.max(200, Math.min(5000, durationMs));
     console.log('[AUDIO] Crossfade duration set to:', this.crossfadeDuration, 'ms');
   }
 
-  /**
-   * Get current crossfade mode.
-   */
+  /** Get current crossfade mode */
   getCrossfadeMode(): 'overlap' | 'sequential' | 'none' {
     return this.crossfadeMode;
   }
 
-  /**
-   * Get current crossfade duration in milliseconds.
-   */
+  /** Get current crossfade duration in milliseconds */
   getCrossfadeDuration(): number {
     return this.crossfadeDuration;
   }
@@ -1000,7 +996,7 @@ export class EnterpriseAudioEngine {
     // Reset fade state for new track
     this.isFadingOut = false;
     this.hasTriggeredEarlyTransition = false;
-    
+
     // Reset iOS buffer clamp state for new track
     this.iosClampPrefetchDisabled = false;
     this.metrics.iosClamp.prefetchDisabled = false;
@@ -1207,13 +1203,13 @@ export class EnterpriseAudioEngine {
           
           return;  // Don't call onTrackEnd
         }
-        
+
         // Don't double-trigger if we already triggered early for overlap crossfade
         if (this.hasTriggeredEarlyTransition) {
           console.log('[AUDIO] Track ended naturally after early crossfade trigger - ignoring');
           return;
         }
-        
+
         if (this.isPlayingState && this.onTrackEnd) {
           console.log('[AUDIO][CELLBUG][ENDED] Track genuinely ended, advancing to next');
           this.consecutiveStallFailures = 0;  // Reset on successful track completion
@@ -1343,24 +1339,29 @@ export class EnterpriseAudioEngine {
 
   /**
    * Check if we're approaching the end of the track and handle transition.
-   * Called from timeupdate handler.
    * 
    * Behavior depends on crossfadeMode:
-   * - 'overlap': Trigger onTrackEnd early so next track starts, creating radio-style crossfade
-   * - 'sequential': Fade out current track, then next track fades in after
-   * - 'none': Let track end naturally with no fade
+   * - 'overlap': Trigger onTrackEnd EARLY so next track starts while this one plays.
+   *              The crossfadeToNext() will handle the simultaneous fade.
+   * - 'sequential': Fade out current track, let it end, then next track fades in.
+   * - 'none': Let track end naturally with no fade.
    */
   private checkEndOfTrackFade(audio: HTMLAudioElement): void {
+    // Skip if already handling transition
     if (this.isFadingOut || this.hasTriggeredEarlyTransition) return;
     if (!audio.duration || audio.duration === 0) return;
     if (this.crossfadeMode === 'none') return;
-    
+
     const timeRemaining = audio.duration - audio.currentTime;
-    const fadeThreshold = this.crossfadeDuration / 1000; // Convert ms to seconds
-    
+    // Use crossfadeDuration for overlap mode, TRACK_FADE_DURATION for sequential
+    const fadeThreshold = this.crossfadeMode === 'overlap' 
+      ? this.crossfadeDuration / 1000 
+      : this.TRACK_FADE_DURATION / 1000;
+
     if (timeRemaining <= fadeThreshold && timeRemaining > 0) {
       if (this.crossfadeMode === 'overlap') {
-        // Radio-style: Trigger early transition so next track starts while this one is still playing
+        // Radio-style: Trigger early transition
+        // DON'T fade out here - crossfadeToNext() will handle both fades
         this.hasTriggeredEarlyTransition = true;
         console.log('[AUDIO] Radio crossfade: triggering early transition', {
           currentTime: audio.currentTime,
@@ -1369,21 +1370,22 @@ export class EnterpriseAudioEngine {
           crossfadeDuration: this.crossfadeDuration,
         });
         
-        // Signal to load and play next track - the crossfadeToNext() will handle the overlapping fade
+        // Signal to advance playlist and start next track
+        // The crossfadeToNext() in play() will handle the overlapping fade
         if (this.onTrackEnd) {
           this.onTrackEnd();
         }
       } else {
-        // Sequential mode: Just fade out, next track will fade in after
+        // Sequential mode: Fade out first, then track ends naturally
         this.isFadingOut = true;
-        console.log('[AUDIO] Sequential fade: starting end-of-track fade-out', {
+        console.log('[AUDIO] Sequential fade-out starting', {
           currentTime: audio.currentTime,
           duration: audio.duration,
           timeRemaining,
         });
-        
+
         this.fadeOut(audio).then(() => {
-          console.log('[AUDIO] Sequential fade: end-of-track fade-out complete');
+          console.log('[AUDIO] Sequential fade-out complete');
         });
       }
     }
