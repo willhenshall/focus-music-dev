@@ -431,7 +431,7 @@ export function MobileHLSDiagnostics({ onClose, audioElement }: MobileHLSDiagnos
                   <div className="text-slate-400">Speed {seg.isEstimatedSize && <span className="text-slate-300">~</span>}</div>
                   <div className="font-semibold text-slate-700">
                     {seg.estimatedBandwidth > 0 
-                      ? `${seg.isEstimatedSize ? '~' : ''}${Math.round(seg.estimatedBandwidth / 1000)}kbps` 
+                      ? `${seg.isEstimatedSize ? '~' : ''}${(seg.estimatedBandwidth / 8_000_000).toFixed(1)} MB/s` 
                       : '-'}
                   </div>
                 </div>
