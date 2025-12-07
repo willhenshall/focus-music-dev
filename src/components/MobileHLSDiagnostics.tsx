@@ -420,16 +420,18 @@ export function MobileHLSDiagnostics({ onClose, audioElement }: MobileHLSDiagnos
                   <div className="font-semibold text-slate-700">{seg.downloadTime.toFixed(0)}ms</div>
                 </div>
                 <div>
-                  <div className="text-slate-400">Size</div>
+                  <div className="text-slate-400">Size {seg.isEstimatedSize && <span className="text-slate-300">~</span>}</div>
                   <div className="font-semibold text-slate-700">
-                    {seg.transferSize > 0 ? `${Math.round(seg.transferSize / 1024)}KB` : '-'}
+                    {seg.transferSize > 0 
+                      ? `${seg.isEstimatedSize ? '~' : ''}${Math.round(seg.transferSize / 1024)}KB` 
+                      : '-'}
                   </div>
                 </div>
                 <div>
-                  <div className="text-slate-400">Speed</div>
+                  <div className="text-slate-400">Speed {seg.isEstimatedSize && <span className="text-slate-300">~</span>}</div>
                   <div className="font-semibold text-slate-700">
                     {seg.estimatedBandwidth > 0 
-                      ? `${Math.round(seg.estimatedBandwidth / 1000)}kbps` 
+                      ? `${seg.isEstimatedSize ? '~' : ''}${Math.round(seg.estimatedBandwidth / 1000)}kbps` 
                       : '-'}
                   </div>
                 </div>

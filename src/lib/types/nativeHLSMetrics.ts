@@ -32,10 +32,12 @@ export interface SegmentRequest {
   startTime: number;
   /** Time taken to download (ms) */
   downloadTime: number;
-  /** Size in bytes (if available) */
+  /** Size in bytes (actual or estimated) */
   transferSize: number;
   /** Estimated bandwidth from this segment (bps) */
   estimatedBandwidth: number;
+  /** Whether the size was estimated (true) or from actual transfer size (false) */
+  isEstimatedSize?: boolean;
 }
 
 /**

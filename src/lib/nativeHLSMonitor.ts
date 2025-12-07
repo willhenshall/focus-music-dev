@@ -263,7 +263,25 @@ export class NativeHLSMonitor {
     
     const tier = extractTierFromUrl(url);
     const downloadTime = entry.duration;
-    const transferSize = entry.transferSize || 0;
+    
+    // transferSize is often 0 for cross-origin requests without Timing-Allow-Origin header
+    // Fall back to estimated size based on tier bitrate and 6-second segment duration
+    let transferSize = entry.transferSize || 0;
+    let isEstimated = false;
+    
+    if (transferSize === 0 && tier !== 'unknown') {
+      // Estimate: (bitrate in bps × 6 seconds) / 8 = bytes
+      // Our tiers: low=32kbps, medium=64kbps, high=96kbps, premium=128kbps
+      const audioBitrates: Record<string, number> = {
+        low: 32000,
+        medium: 64000,
+        high: 96000,
+        premium: 128000,
+      };
+      const segmentDuration = 6; // seconds (from our HLS encoding)
+      transferSize = Math.round((audioBitrates[tier] * segmentDuration) / 8);
+      isEstimated = true;
+    }
     
     // Calculate bandwidth from this segment
     const estimatedBandwidth = transferSize > 0 && downloadTime > 0
@@ -277,6 +295,7 @@ export class NativeHLSMonitor {
       downloadTime,
       transferSize,
       estimatedBandwidth,
+      isEstimatedSize: isEstimated,
     };
     
     // Add to history
