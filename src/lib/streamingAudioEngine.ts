@@ -144,6 +144,7 @@ export class StreamingAudioEngine implements IAudioEngine {
   private currentTrackId: string | null = null;
   private nextTrackId: string | null = null;
   private isLoadingTrack: boolean = false; // [FIX] Track if we're loading to prevent premature play()
+  private hasNewTrackLoaded: boolean = false; // [FIX] Track if new track is ready (hls.js doesn't set audio.src)
   private volume: number = 0.7;
   private isPlayingState: boolean = false;
   private crossfadeDuration: number = 1000;
@@ -1079,6 +1080,8 @@ export class StreamingAudioEngine implements IAudioEngine {
 
     // [FIX] Mark that we're loading - prevents play() from playing old track
     this.isLoadingTrack = true;
+    // [FIX] Reset new track flag - will be set true when loading completes
+    this.hasNewTrackLoaded = false;
     
     // [FIX] Stop the current audio to prevent it from continuing to play
     // while we load the new track (prevents audio/metadata mismatch)
@@ -1143,9 +1146,13 @@ export class StreamingAudioEngine implements IAudioEngine {
       this.recordSuccess();
       // [FIX] Loading complete - safe to play now
       this.isLoadingTrack = false;
+      // [FIX] Mark that we have a new track ready to play
+      this.hasNewTrackLoaded = true;
+      console.log('[AUDIO][STARTUP][LOAD] Track loaded successfully, hasNewTrackLoaded=true');
     } catch (error) {
-      // [FIX] Loading failed - clear flag
+      // [FIX] Loading failed - clear flags
       this.isLoadingTrack = false;
+      this.hasNewTrackLoaded = false;
       this.recordFailure();
       throw error;
     }
@@ -1563,16 +1570,18 @@ export class StreamingAudioEngine implements IAudioEngine {
       });
     }
 
-    if (!this.nextAudio.src && !this.currentAudio.src) {
+    // [FIX] Use hasNewTrackLoaded flag instead of checking audio.src
+    // (hls.js uses MediaSource internally so audio.src may be empty or blob URL)
+    if (!this.hasNewTrackLoaded && !this.currentAudio.src) {
       console.log('[AUDIO][STARTUP][PLAY] No source available, cannot play');
       return;
     }
 
-    const hasNewTrack = this.nextAudio.src &&
-                        this.nextAudio.src !== this.currentAudio.src &&
-                        this.nextAudio !== this.currentAudio;
+    console.log('[AUDIO][STARTUP][PLAY] Checking hasNewTrackLoaded:', this.hasNewTrackLoaded);
 
-    if (hasNewTrack) {
+    if (this.hasNewTrackLoaded) {
+      // Clear the flag before crossfade
+      this.hasNewTrackLoaded = false;
       await this.crossfadeToNext();
     } else {
       try {
