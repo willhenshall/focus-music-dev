@@ -2,15 +2,17 @@
  * Mobile HLS Diagnostics Panel
  * 
  * A mobile-optimized diagnostics panel for monitoring native HLS playback
- * on iOS Safari. Shows quality tier, bandwidth, buffer health, and more
- * by inferring data from network activity since native HLS doesn't expose ABR internals.
+ * on iOS Safari. Shows quality tier, bandwidth, buffer health, playlist info,
+ * and more by inferring data from network activity since native HLS doesn't 
+ * expose ABR internals.
  */
 
-import { X, Wifi, WifiOff, Activity, Clock, TrendingUp, TrendingDown, Minus, AlertTriangle, CheckCircle, Radio, Gauge, Layers, History, RefreshCw } from 'lucide-react';
+import { X, Wifi, WifiOff, Activity, Clock, TrendingUp, TrendingDown, Minus, AlertTriangle, CheckCircle, Radio, Gauge, Layers, History, RefreshCw, Music, ListMusic, SkipForward, Loader2, CheckCircle2, Play } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { NativeHLSMonitor, getNativeHLSMonitor } from '../lib/nativeHLSMonitor';
 import type { NativeHLSMetrics, QualityTier, TierSwitch, SegmentRequest } from '../lib/types/nativeHLSMetrics';
 import { TIER_BANDWIDTHS } from '../lib/types/nativeHLSMetrics';
+import { useMusicPlayer } from '../contexts/MusicPlayerContext';
 
 interface MobileHLSDiagnosticsProps {
   onClose: () => void;
@@ -54,7 +56,10 @@ const CONNECTION_COLORS: Record<string, string> = {
 export function MobileHLSDiagnostics({ onClose, audioElement }: MobileHLSDiagnosticsProps) {
   const [metrics, setMetrics] = useState<NativeHLSMetrics | null>(null);
   const [monitor, setMonitor] = useState<NativeHLSMonitor | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'history' | 'segments'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'playlist' | 'history' | 'segments'>('overview');
+  
+  // Get playlist and track info from music player context
+  const { playlist, currentTrackIndex, currentTrack, audioMetrics, isPlaying, audioEngine } = useMusicPlayer();
   
   // Initialize monitor when component mounts
   useEffect(() => {
@@ -389,6 +394,248 @@ export function MobileHLSDiagnostics({ onClose, audioElement }: MobileHLSDiagnos
     );
   };
   
+  // Format seconds to mm:ss
+  const formatTimeMMSS = (seconds: number): string => {
+    if (!isFinite(seconds) || seconds < 0) return '0:00';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+  
+  // Render Playlist Tab
+  const renderPlaylist = () => {
+    const nextTrack = playlist[currentTrackIndex + 1];
+    const currentTime = audioEngine?.getCurrentTime() ?? 0;
+    const duration = audioMetrics?.duration ?? 0;
+    const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
+    
+    // Prefetch info from metrics
+    const prefetchProgress = audioMetrics?.prefetchProgress ?? 0;
+    const prefetchReady = (audioMetrics?.prefetchReadyState ?? 0) >= 3; // HAVE_FUTURE_DATA
+    const prefetchTrackId = audioMetrics?.prefetchedTrackId;
+    
+    // Crossfade timing (typically starts at -5s before track end)
+    const crossfadeStart = duration > 5 ? duration - 5 : duration;
+    const inCrossfadeZone = currentTime >= crossfadeStart && duration > 0;
+    const timeToCrossfade = Math.max(0, crossfadeStart - currentTime);
+    
+    return (
+      <div className="space-y-4">
+        {/* Current Track Card */}
+        <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl p-4 text-white">
+          <div className="flex items-center gap-2 mb-3">
+            <Play className="w-4 h-4" />
+            <span className="text-xs uppercase tracking-wide opacity-80">Now Playing</span>
+          </div>
+          
+          {currentTrack ? (
+            <>
+              <div className="font-bold text-lg mb-1 line-clamp-1">
+                {currentTrack.track_name || 'Unknown Track'}
+              </div>
+              <div className="text-sm opacity-80 mb-3 line-clamp-1">
+                {currentTrack.artist_name || 'Unknown Artist'}
+              </div>
+              
+              {/* Progress Bar */}
+              <div className="mb-2">
+                <div className="h-2 bg-blue-900/50 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-white rounded-full transition-all duration-300"
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
+              </div>
+              
+              {/* Time Display */}
+              <div className="flex justify-between text-xs opacity-80">
+                <span>{formatTimeMMSS(currentTime)}</span>
+                <span>{formatTimeMMSS(duration)}</span>
+              </div>
+              
+              {/* Track Details */}
+              <div className="grid grid-cols-2 gap-2 mt-3 pt-3 border-t border-white/20 text-xs">
+                <div>
+                  <span className="opacity-60">Track ID:</span>
+                  <span className="ml-1 font-mono">{currentTrack.metadata?.track_id || '-'}</span>
+                </div>
+                <div>
+                  <span className="opacity-60">Position:</span>
+                  <span className="ml-1">{currentTrackIndex + 1} / {playlist.length}</span>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="text-center py-4 opacity-60">
+              No track playing
+            </div>
+          )}
+        </div>
+        
+        {/* Crossfade Status */}
+        <div className={`rounded-xl p-4 border ${
+          inCrossfadeZone 
+            ? 'bg-amber-50 border-amber-200' 
+            : 'bg-white border-slate-200'
+        }`}>
+          <div className="flex items-center gap-2 mb-2">
+            <SkipForward className={`w-4 h-4 ${inCrossfadeZone ? 'text-amber-600' : 'text-slate-500'}`} />
+            <span className="text-sm font-semibold text-slate-700">Crossfade Status</span>
+          </div>
+          
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div>
+              <div className="text-slate-400 text-xs">Time to Crossfade</div>
+              <div className={`font-semibold ${inCrossfadeZone ? 'text-amber-600' : 'text-slate-700'}`}>
+                {inCrossfadeZone ? 'NOW' : formatTimeMMSS(timeToCrossfade)}
+              </div>
+            </div>
+            <div>
+              <div className="text-slate-400 text-xs">Crossfade Duration</div>
+              <div className="font-semibold text-slate-700">5 sec</div>
+            </div>
+          </div>
+          
+          {inCrossfadeZone && (
+            <div className="mt-2 text-xs text-amber-600 flex items-center gap-1">
+              <Activity className="w-3 h-3 animate-pulse" />
+              Crossfade in progress...
+            </div>
+          )}
+        </div>
+        
+        {/* Next Track / Prefetch Card */}
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <ListMusic className="w-4 h-4 text-slate-500" />
+            <span className="text-sm font-semibold text-slate-700">Up Next (Prefetch)</span>
+          </div>
+          
+          {nextTrack ? (
+            <>
+              <div className="flex items-start gap-3 mb-3">
+                <div className="w-12 h-12 bg-slate-100 rounded-lg flex items-center justify-center">
+                  <Music className="w-6 h-6 text-slate-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-slate-800 line-clamp-1">
+                    {nextTrack.track_name || 'Unknown Track'}
+                  </div>
+                  <div className="text-sm text-slate-500 line-clamp-1">
+                    {nextTrack.artist_name || 'Unknown Artist'}
+                  </div>
+                  <div className="text-xs text-slate-400 mt-1">
+                    ID: {nextTrack.metadata?.track_id || '-'}
+                  </div>
+                </div>
+              </div>
+              
+              {/* Prefetch Progress */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-500">Prefetch Progress</span>
+                  <span className={`font-semibold ${prefetchReady ? 'text-green-600' : 'text-slate-600'}`}>
+                    {prefetchReady ? 'Ready' : `${Math.round(prefetchProgress * 100)}%`}
+                  </span>
+                </div>
+                <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full rounded-full transition-all duration-300 ${
+                      prefetchReady ? 'bg-green-500' : 'bg-blue-500'
+                    }`}
+                    style={{ width: `${Math.min(prefetchProgress * 100, 100)}%` }}
+                  />
+                </div>
+                
+                {/* Prefetch Status */}
+                <div className="flex items-center gap-2 text-xs">
+                  {prefetchReady ? (
+                    <>
+                      <CheckCircle2 className="w-3 h-3 text-green-600" />
+                      <span className="text-green-600">Ready for seamless playback</span>
+                    </>
+                  ) : prefetchProgress > 0 ? (
+                    <>
+                      <Loader2 className="w-3 h-3 text-blue-500 animate-spin" />
+                      <span className="text-blue-600">Loading next track...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Clock className="w-3 h-3 text-slate-400" />
+                      <span className="text-slate-500">Waiting to prefetch</span>
+                    </>
+                  )}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="text-center py-4 text-slate-400">
+              <ListMusic className="w-8 h-8 mx-auto mb-2 opacity-50" />
+              <p className="text-sm">No more tracks in playlist</p>
+            </div>
+          )}
+        </div>
+        
+        {/* Playlist Stats */}
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <ListMusic className="w-4 h-4 text-slate-500" />
+            <span className="text-sm font-semibold text-slate-700">Playlist Info</span>
+          </div>
+          
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div className="p-2 bg-slate-50 rounded-lg">
+              <div className="text-slate-400 text-xs">Total Tracks</div>
+              <div className="font-semibold text-slate-700">{playlist.length}</div>
+            </div>
+            <div className="p-2 bg-slate-50 rounded-lg">
+              <div className="text-slate-400 text-xs">Remaining</div>
+              <div className="font-semibold text-slate-700">{Math.max(0, playlist.length - currentTrackIndex - 1)}</div>
+            </div>
+            <div className="p-2 bg-slate-50 rounded-lg">
+              <div className="text-slate-400 text-xs">Playback State</div>
+              <div className={`font-semibold ${isPlaying ? 'text-green-600' : 'text-slate-500'}`}>
+                {isPlaying ? 'Playing' : 'Paused'}
+              </div>
+            </div>
+            <div className="p-2 bg-slate-50 rounded-lg">
+              <div className="text-slate-400 text-xs">Audio Element</div>
+              <div className="font-semibold text-slate-700 font-mono text-xs">
+                {audioMetrics?.audioElement || '-'}
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        {/* Upcoming Tracks Preview */}
+        {playlist.length > currentTrackIndex + 1 && (
+          <div className="bg-white rounded-xl border border-slate-200 p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <ListMusic className="w-4 h-4 text-slate-500" />
+              <span className="text-sm font-semibold text-slate-700">Queue Preview</span>
+              <span className="text-xs text-slate-400">(next 5)</span>
+            </div>
+            
+            <div className="space-y-2">
+              {playlist.slice(currentTrackIndex + 1, currentTrackIndex + 6).map((track, i) => (
+                <div 
+                  key={track.metadata?.track_id || i}
+                  className="flex items-center gap-3 p-2 bg-slate-50 rounded-lg"
+                >
+                  <span className="text-xs text-slate-400 w-4">{i + 1}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm text-slate-700 truncate">{track.track_name}</div>
+                    <div className="text-xs text-slate-400 truncate">{track.artist_name}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+  
   // Render Segments Tab
   const renderSegments = () => {
     if (!metrics || metrics.segmentHistory.length === 0) {
@@ -473,12 +720,12 @@ export function MobileHLSDiagnostics({ onClose, audioElement }: MobileHLSDiagnos
       
       {/* Tabs */}
       <div className="bg-white border-b border-slate-200 px-4">
-        <div className="flex gap-1">
-          {(['overview', 'history', 'segments'] as const).map((tab) => (
+        <div className="flex gap-1 overflow-x-auto">
+          {(['overview', 'playlist', 'history', 'segments'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+              className={`px-3 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
                 activeTab === tab
                   ? 'border-blue-600 text-blue-600'
                   : 'border-transparent text-slate-500 hover:text-slate-700'
@@ -493,6 +740,7 @@ export function MobileHLSDiagnostics({ onClose, audioElement }: MobileHLSDiagnos
       {/* Content */}
       <div className="flex-1 overflow-auto p-4">
         {activeTab === 'overview' && renderOverview()}
+        {activeTab === 'playlist' && renderPlaylist()}
         {activeTab === 'history' && renderHistory()}
         {activeTab === 'segments' && renderSegments()}
       </div>
