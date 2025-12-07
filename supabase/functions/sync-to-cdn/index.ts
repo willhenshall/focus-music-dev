@@ -274,24 +274,50 @@ Deno.serve(async (req: Request) => {
 
     } else if (operation === 'upload-hls') {
       // Upload HLS files from Supabase Storage to R2 CDN
+      // Supports both flat structure (legacy) and nested 4-bitrate ladder
       console.log(`Starting HLS sync for track ${trackId}`);
 
-      // List all HLS files for this track in Supabase Storage
-      const { data: hlsFiles, error: listError } = await supabase.storage
-        .from('audio-hls')
-        .list(trackId);
-
-      if (listError) {
-        return new Response(
-          JSON.stringify({ error: "Failed to list HLS files", details: listError }),
-          {
-            status: 500,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
+      // Helper function to recursively list all files in a folder
+      async function listAllHLSFiles(prefix: string): Promise<Array<{ path: string; name: string }>> {
+        const allFiles: Array<{ path: string; name: string }> = [];
+        
+        const { data: items, error } = await supabase.storage
+          .from('audio-hls')
+          .list(prefix);
+        
+        if (error || !items) {
+          console.error(`Failed to list ${prefix}:`, error);
+          return allFiles;
+        }
+        
+        for (const item of items) {
+          // Check if it's a folder (no extension or matches variant folder names)
+          const isFolder = !item.name.includes('.') && 
+            ['low', 'medium', 'high', 'premium'].includes(item.name);
+          
+          if (isFolder) {
+            // Recursively list files in subfolder
+            const subFiles = await listAllHLSFiles(`${prefix}/${item.name}`);
+            allFiles.push(...subFiles);
+          } else {
+            // It's a file
+            const relativePath = prefix === trackId 
+              ? item.name 
+              : `${prefix.replace(trackId + '/', '')}/${item.name}`;
+            allFiles.push({ 
+              path: `${prefix}/${item.name}`,
+              name: relativePath
+            });
           }
-        );
+        }
+        
+        return allFiles;
       }
 
-      if (!hlsFiles || hlsFiles.length === 0) {
+      // List all HLS files recursively (supports nested 4-bitrate ladder)
+      const hlsFiles = await listAllHLSFiles(trackId);
+
+      if (hlsFiles.length === 0) {
         return new Response(
           JSON.stringify({ error: "No HLS files found for track" }),
           {
@@ -301,7 +327,15 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      console.log(`Found ${hlsFiles.length} HLS files to sync`);
+      // Check if this is a 4-bitrate ladder
+      const isMultiBitrate = hlsFiles.some(f => 
+        f.name.startsWith('low/') || 
+        f.name.startsWith('medium/') || 
+        f.name.startsWith('high/') || 
+        f.name.startsWith('premium/')
+      );
+      
+      console.log(`Found ${hlsFiles.length} HLS files to sync (${isMultiBitrate ? '4-bitrate ladder' : 'single bitrate'})`);
 
       let uploadedCount = 0;
       let failedCount = 0;
@@ -309,21 +343,19 @@ Deno.serve(async (req: Request) => {
 
       // Upload each HLS file to R2
       for (const file of hlsFiles) {
-        const filePath = `${trackId}/${file.name}`;
-        
-        // Download from Supabase
+        // Download from Supabase using full path
         const { data: fileData, error: downloadError } = await supabase.storage
           .from('audio-hls')
-          .download(filePath);
+          .download(file.path);
 
         if (downloadError || !fileData) {
-          console.error(`Failed to download HLS file ${filePath}:`, downloadError);
+          console.error(`Failed to download HLS file ${file.path}:`, downloadError);
           errors.push(`Failed to download ${file.name}`);
           failedCount++;
           continue;
         }
 
-        // Upload to R2
+        // Upload to R2 with relative path (preserves folder structure)
         try {
           await uploadHLSFileToCDN(trackId, file.name, fileData);
           uploadedCount++;
@@ -334,6 +366,7 @@ Deno.serve(async (req: Request) => {
         }
       }
 
+      // Count segments (files ending in .ts)
       const segmentCount = hlsFiles.filter(f => f.name.endsWith('.ts')).length;
       const hlsCdnUrl = `${R2_CONFIG.publicUrl}/${R2_CONFIG.hlsPath}/${trackId}/master.m3u8`;
       const timestamp = new Date().toISOString();

@@ -9,20 +9,31 @@ import { useCDNSync } from '../hooks/useCDNSync';
 const HLS_TRANSCODER_URL = import.meta.env.VITE_HLS_TRANSCODER_URL || 'http://localhost:3000';
 
 // Response from HLS transcoder sync API
+// Supports both single-bitrate (legacy) and 4-bitrate ladder formats
 interface HLSTranscodeResult {
   success: boolean;
   jobId: string;
   originalFileName: string;
   hlsFolder: string;
   segmentCount: number;
+  // Files array - supports nested paths for 4-bitrate ladder
+  // e.g., "master.m3u8", "low/index.m3u8", "high/segment_001.ts"
   files: Array<{
-    name: string;
+    name: string;     // Full path including variant folder, e.g., "low/segment_001.ts"
     size: number;
     contentType: string;
-    data: string; // base64 encoded
+    data: string;     // base64 encoded
   }>;
   transcodeDurationMs: number;
   error?: string;
+  // 4-bitrate ladder metadata (optional, present in new format)
+  isMultiBitrate?: boolean;
+  variants?: Array<{
+    name: string;     // "low" | "medium" | "high" | "premium"
+    bitrate: number;  // 32, 64, 96, 128
+    bandwidth: number; // 48000, 96000, 144000, 192000
+    segmentCount: number;
+  }>;
 }
 
 interface TrackUploadModalProps {
@@ -691,7 +702,16 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
                 throw new Error(hlsResult.error || 'Transcoding failed');
               }
               updateTrackStep(tempId, 'transcoding', 'completed', trackInfo.trackId);
-              addLogEntry('success', `HLS transcoding complete (${hlsResult.segmentCount} segments, ${hlsResult.transcodeDurationMs}ms)`);
+              
+              // Log appropriate message based on format (single vs multi-bitrate)
+              if (hlsResult.isMultiBitrate && hlsResult.variants) {
+                const variantInfo = hlsResult.variants
+                  .map(v => `${v.name}:${v.bitrate}k`)
+                  .join(', ');
+                addLogEntry('success', `4-bitrate HLS ladder complete (${variantInfo}, ${hlsResult.transcodeDurationMs}ms)`);
+              } else {
+                addLogEntry('success', `HLS transcoding complete (${hlsResult.segmentCount} segments, ${hlsResult.transcodeDurationMs}ms)`);
+              }
 
               // STEP 6: Upload HLS files to Supabase Storage
               updateTrackStep(tempId, 'hls-storage', 'in-progress', trackInfo.trackId);
