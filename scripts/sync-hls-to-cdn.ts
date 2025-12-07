@@ -695,3 +695,4 @@ REQUIREMENTS:
 
 // Main entry point
 runSyncPipeline(parseArgs()).catch(console.error);
+
