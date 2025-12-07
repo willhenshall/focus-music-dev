@@ -143,8 +143,6 @@ export class StreamingAudioEngine implements IAudioEngine {
   // State
   private currentTrackId: string | null = null;
   private nextTrackId: string | null = null;
-  private isLoadingTrack: boolean = false; // [FIX] Track if we're loading to prevent premature play()
-  private hasNewTrackLoaded: boolean = false; // [FIX] Track if new track is ready (hls.js doesn't set audio.src)
   private volume: number = 0.7;
   private isPlayingState: boolean = false;
   private crossfadeDuration: number = 1000;
@@ -175,24 +173,6 @@ export class StreamingAudioEngine implements IAudioEngine {
   private stallDetectionTimer: NodeJS.Timeout | null = null;
   private retryTimer: NodeJS.Timeout | null = null;
   private abortController: AbortController | null = null;
-  
-  // [FAST START] Startup latency instrumentation
-  private startupTimestamps: {
-    playRequested: number;
-    sourceSet: number;
-    hlsManifestLoaded: number;
-    canPlayFired: number;
-    firstTimeupdateFired: number;
-    playbackStarted: number;
-  } = {
-    playRequested: 0,
-    sourceSet: 0,
-    hlsManifestLoaded: 0,
-    canPlayFired: 0,
-    firstTimeupdateFired: 0,
-    playbackStarted: 0,
-  };
-  private isFirstTimeupdate: boolean = true;
   
   // Feature detection
   private useNativeHLS: boolean;
@@ -380,21 +360,6 @@ export class StreamingAudioEngine implements IAudioEngine {
       this.updateMetrics();
     });
     
-    // [FAST START] Track canplay for startup latency
-    audio.addEventListener('canplay', () => {
-      if (this.startupTimestamps.canPlayFired === 0 && this.startupTimestamps.sourceSet > 0) {
-        this.startupTimestamps.canPlayFired = performance.now();
-        const timeFromSource = this.startupTimestamps.canPlayFired - this.startupTimestamps.sourceSet;
-        console.log('[AUDIO][STARTUP][CANPLAY] Can play fired', {
-          timeFromSourceMs: Math.round(timeFromSource),
-          timeFromPlayRequestMs: this.startupTimestamps.playRequested > 0 
-            ? Math.round(this.startupTimestamps.canPlayFired - this.startupTimestamps.playRequested)
-            : 'N/A (prefetched)',
-          readyState: audio.readyState,
-        });
-      }
-    });
-    
     audio.addEventListener('loadedmetadata', () => {
       this.updateMetrics();
     });
@@ -405,31 +370,6 @@ export class StreamingAudioEngine implements IAudioEngine {
     });
     
     audio.addEventListener('timeupdate', () => {
-      // [FAST START] Track first timeupdate as actual playback start
-      // [FIX] Also check !isLoadingTrack to ignore timeupdate from OLD track during channel switch
-      if (this.isFirstTimeupdate && audio.currentTime > 0 && audio === this.currentAudio && !this.isLoadingTrack) {
-        this.isFirstTimeupdate = false;
-        this.startupTimestamps.firstTimeupdateFired = performance.now();
-
-        // Log complete startup latency breakdown
-        const breakdown = {
-          totalStartupMs: this.startupTimestamps.playRequested > 0
-            ? Math.round(this.startupTimestamps.firstTimeupdateFired - this.startupTimestamps.playRequested)
-            : 'N/A',
-          sourceToCanPlayMs: this.startupTimestamps.canPlayFired > 0 && this.startupTimestamps.sourceSet > 0
-            ? Math.round(this.startupTimestamps.canPlayFired - this.startupTimestamps.sourceSet)
-            : 'N/A',
-          canPlayToPlayingMs: this.startupTimestamps.playbackStarted > 0 && this.startupTimestamps.canPlayFired > 0
-            ? Math.round(this.startupTimestamps.playbackStarted - this.startupTimestamps.canPlayFired)
-            : 'N/A',
-          playingToFirstAudioMs: this.startupTimestamps.playbackStarted > 0
-            ? Math.round(this.startupTimestamps.firstTimeupdateFired - this.startupTimestamps.playbackStarted)
-            : 'N/A',
-          wasPrefetched: this.startupTimestamps.playRequested === 0 ||
-            this.startupTimestamps.sourceSet < this.startupTimestamps.playRequested,
-        };
-        console.log('[AUDIO][STARTUP][COMPLETE] First audio output', breakdown);
-      }
       this.updateMetrics();
     });
     
@@ -965,27 +905,6 @@ export class StreamingAudioEngine implements IAudioEngine {
     // Include HLS metrics in main metrics
     this.metrics.hls = { ...this.hlsMetrics };
     
-    // [FAST START] Include startup latency metrics
-    if (this.startupTimestamps.playRequested > 0 || this.startupTimestamps.sourceSet > 0) {
-      const totalLatency = this.startupTimestamps.firstTimeupdateFired > 0 && this.startupTimestamps.playRequested > 0
-        ? this.startupTimestamps.firstTimeupdateFired - this.startupTimestamps.playRequested
-        : 0;
-      const bufferingLatency = this.startupTimestamps.canPlayFired > 0 && this.startupTimestamps.sourceSet > 0
-        ? this.startupTimestamps.canPlayFired - this.startupTimestamps.sourceSet
-        : 0;
-      
-      this.metrics.startupLatency = {
-        playRequestedAt: this.startupTimestamps.playRequested,
-        sourceSetAt: this.startupTimestamps.sourceSet,
-        canPlayAt: this.startupTimestamps.canPlayFired,
-        playbackStartedAt: this.startupTimestamps.playbackStarted,
-        firstAudioAt: this.startupTimestamps.firstTimeupdateFired,
-        totalLatencyMs: Math.round(totalLatency),
-        bufferingLatencyMs: Math.round(bufferingLatency),
-        wasPrefetched: this.startupTimestamps.sourceSet < this.startupTimestamps.playRequested,
-      };
-    }
-    
     if (this.onDiagnosticsUpdate) {
       this.onDiagnosticsUpdate({ ...this.metrics });
     }
@@ -1077,33 +996,7 @@ export class StreamingAudioEngine implements IAudioEngine {
     if (this.metrics.circuitBreakerState === 'open') {
       throw new Error('Circuit breaker is open - too many recent failures');
     }
-
-    // [FIX] Mark that we're loading - prevents play() from playing old track
-    this.isLoadingTrack = true;
-    // [FIX] Reset new track flag - will be set true when loading completes
-    this.hasNewTrackLoaded = false;
     
-    // [FIX] Stop the current audio to prevent it from continuing to play
-    // while we load the new track (prevents audio/metadata mismatch)
-    if (this.currentAudio.src && !this.currentAudio.paused) {
-      this.currentAudio.pause();
-    }
-
-    // [PREFETCH FIX] Clean up prefetch listeners BEFORE loading new track
-    // The nextAudio element might have prefetch listeners that interfere with loading
-    this.cleanupPrefetchListeners();
-    
-    // Reset prefetch state since we're loading a new track
-    this.prefetchedNextTrack = false;
-    this.nextTrackId = null;
-    this.metrics.prefetchedTrackId = null;
-    this.metrics.prefetchedTrackUrl = null;
-    this.metrics.prefetchProgress = 0;
-    this.metrics.prefetchReadyState = 0;
-
-    // [FAST START] Reset startup timestamps for new track load
-    this.resetStartupTimestamps();
-
     this.metrics.loadStartTime = performance.now();
     this.metrics.playbackState = 'loading';
     this.metrics.error = null;
@@ -1111,24 +1004,11 @@ export class StreamingAudioEngine implements IAudioEngine {
     this.metrics.retryAttempt = 0;
     this.metrics.recoveryAttempts = 0;
     this.currentTrackId = trackId;
-
-    // [FAST START] Mark source set time
-    this.startupTimestamps.sourceSet = performance.now();
-
-    console.log('[AUDIO][STARTUP][LOAD] Loading track', { trackId, filePath });
-
+    
     if (this.abortController) {
       this.abortController.abort();
     }
     this.abortController = new AbortController();
-    
-    // [FIX] Clear the nextAudio source to prevent stale state
-    // This ensures we start fresh when loading a new track
-    if (this.nextAudio.src) {
-      this.nextAudio.pause();
-      this.nextAudio.removeAttribute('src');
-      this.nextAudio.load(); // Reset the element
-    }
     
     try {
       // Check if HLS is available for this track
@@ -1144,15 +1024,7 @@ export class StreamingAudioEngine implements IAudioEngine {
       }
       
       this.recordSuccess();
-      // [FIX] Loading complete - safe to play now
-      this.isLoadingTrack = false;
-      // [FIX] Mark that we have a new track ready to play
-      this.hasNewTrackLoaded = true;
-      console.log('[AUDIO][STARTUP][LOAD] Track loaded successfully, hasNewTrackLoaded=true');
     } catch (error) {
-      // [FIX] Loading failed - clear flags
-      this.isLoadingTrack = false;
-      this.hasNewTrackLoaded = false;
       this.recordFailure();
       throw error;
     }
@@ -1177,22 +1049,11 @@ export class StreamingAudioEngine implements IAudioEngine {
       this.hlsMetrics.isNativeHLS = true;
       this.nextAudio.src = hlsUrl;
       await this.waitForCanPlay(this.nextAudio);
-    } else {
-      // hls.js - use the HLS instance attached to nextAudio
-      // [FIX] Previously used this.currentHls which may be attached to currentAudio
-      const hlsForNextAudio = this.nextAudio === this.primaryAudio 
-        ? this.primaryHls 
-        : this.secondaryHls;
-      
-      if (hlsForNextAudio) {
-        this.hlsMetrics.isNativeHLS = false;
-        hlsForNextAudio.loadSource(hlsUrl);
-        await this.waitForHLSReady(hlsForNextAudio);
-      } else {
-        // Fallback: just set src directly
-        this.nextAudio.src = hlsUrl;
-        await this.waitForCanPlay(this.nextAudio);
-      }
+    } else if (this.currentHls) {
+      // hls.js
+      this.hlsMetrics.isNativeHLS = false;
+      this.currentHls.loadSource(hlsUrl);
+      await this.waitForHLSReady();
     }
     
     if (metadata) {
@@ -1241,18 +1102,17 @@ export class StreamingAudioEngine implements IAudioEngine {
     }
   }
 
-  private waitForCanPlay(audio: HTMLAudioElement, fastStart: boolean = true): Promise<void> {
+  private waitForCanPlay(audio: HTMLAudioElement): Promise<void> {
     return new Promise((resolve, reject) => {
       // [CELLBUG FIX] Use extended timeout on cellular/throttled networks
       const effectiveTimeout = this.isCellular 
         ? CELLULAR_RETRY_CONFIG.timeoutPerAttempt  // 45 seconds
         : this.retryConfig.timeoutPerAttempt;       // 15 seconds
       
-      console.log('[AUDIO][STARTUP][LOAD] Waiting for canPlay', {
+      console.log('[AUDIO][CELLBUG][LOAD] Waiting for canPlay', {
         timeout: effectiveTimeout,
         isCellular: this.isCellular,
         connectionQuality: this.metrics.connectionQuality,
-        fastStart, // [FAST START] Use canplay instead of canplaythrough for faster start
       });
       
       const timeout = setTimeout(() => {
@@ -1274,30 +1134,19 @@ export class StreamingAudioEngine implements IAudioEngine {
       };
       
       const cleanup = () => {
-        // [FAST START] Remove both event listeners regardless of which was used
-        audio.removeEventListener('canplay', onCanPlay);
         audio.removeEventListener('canplaythrough', onCanPlay);
         audio.removeEventListener('error', onError);
       };
       
-      // [FAST START] Use 'canplay' for faster start (1-3 seconds of buffer)
-      // instead of 'canplaythrough' (full buffer). The HLS ladder will handle
-      // quality adaptation if needed. This matches Spotify/YouTube behavior.
-      if (fastStart) {
-        audio.addEventListener('canplay', onCanPlay, { once: true });
-      } else {
-        audio.addEventListener('canplaythrough', onCanPlay, { once: true });
-      }
+      audio.addEventListener('canplaythrough', onCanPlay, { once: true });
       audio.addEventListener('error', onError, { once: true });
       audio.load();
     });
   }
 
-  private waitForHLSReady(hls?: Hls | null): Promise<void> {
+  private waitForHLSReady(): Promise<void> {
     return new Promise((resolve, reject) => {
-      // [FIX] Use provided HLS instance or fall back to currentHls
-      const hlsInstance = hls || this.currentHls;
-      if (!hlsInstance) {
+      if (!this.currentHls) {
         reject(new Error('HLS not initialized'));
         return;
       }
@@ -1325,12 +1174,12 @@ export class StreamingAudioEngine implements IAudioEngine {
       };
       
       const cleanup = () => {
-        hlsInstance?.off(Hls.Events.MANIFEST_PARSED, onManifestParsed);
-        hlsInstance?.off(Hls.Events.ERROR, onError);
+        this.currentHls?.off(Hls.Events.MANIFEST_PARSED, onManifestParsed);
+        this.currentHls?.off(Hls.Events.ERROR, onError);
       };
       
-      hlsInstance.on(Hls.Events.MANIFEST_PARSED, onManifestParsed);
-      hlsInstance.on(Hls.Events.ERROR, onError);
+      this.currentHls.on(Hls.Events.MANIFEST_PARSED, onManifestParsed);
+      this.currentHls.on(Hls.Events.ERROR, onError);
     });
   }
 
@@ -1554,99 +1403,45 @@ export class StreamingAudioEngine implements IAudioEngine {
   }
 
   async play(): Promise<void> {
-    // [FIX] If we're loading a new track, don't play the old one
-    if (this.isLoadingTrack) {
-      console.log('[AUDIO][STARTUP][PLAY] Skipping - track is loading');
+    if (!this.nextAudio.src && !this.currentAudio.src) {
       return;
     }
     
-    // [FAST START] Track when play was requested
-    if (this.startupTimestamps.playRequested === 0) {
-      this.startupTimestamps.playRequested = performance.now();
-      console.log('[AUDIO][STARTUP][PLAY] Play requested', {
-        nextAudioHasSrc: !!this.nextAudio.src,
-        currentAudioHasSrc: !!this.currentAudio.src,
-        currentTrackId: this.currentTrackId,
-      });
-    }
-
-    // [FIX] Use hasNewTrackLoaded flag instead of checking audio.src
-    // (hls.js uses MediaSource internally so audio.src may be empty or blob URL)
-    if (!this.hasNewTrackLoaded && !this.currentAudio.src) {
-      console.log('[AUDIO][STARTUP][PLAY] No source available, cannot play');
-      return;
-    }
-
-    console.log('[AUDIO][STARTUP][PLAY] Checking hasNewTrackLoaded:', this.hasNewTrackLoaded);
-
-    if (this.hasNewTrackLoaded) {
-      // Clear the flag before crossfade
-      this.hasNewTrackLoaded = false;
+    const hasNewTrack = this.nextAudio.src &&
+                        this.nextAudio.src !== this.currentAudio.src &&
+                        this.nextAudio !== this.currentAudio;
+    
+    if (hasNewTrack) {
       await this.crossfadeToNext();
     } else {
-      try {
-        await this.currentAudio.play();
-        this.startupTimestamps.playbackStarted = performance.now();
-        this.isPlayingState = true;
-        this.metrics.playbackState = 'playing';
-
-        // [FAST START] Log play latency
-        const playLatency = this.startupTimestamps.playRequested > 0
-          ? Math.round(this.startupTimestamps.playbackStarted - this.startupTimestamps.playRequested)
-          : 0;
-        console.log('[AUDIO][STARTUP][PLAYING] Playback started', {
-          playLatencyMs: playLatency,
-          readyState: this.currentAudio.readyState,
-          currentTime: this.currentAudio.currentTime,
-        });
-
-        this.updateMetrics();
-      } catch (error) {
-        console.warn('[AUDIO][STARTUP][PLAY] Play failed:', error);
-        throw error;
-      }
+      await this.currentAudio.play();
+      this.isPlayingState = true;
+      this.metrics.playbackState = 'playing';
+      this.updateMetrics();
     }
   }
 
   private async crossfadeToNext(): Promise<void> {
-    // [PREFETCH FIX] Clean up prefetch listeners before switching audio elements
-    // The newAudio element might have prefetch listeners that would interfere
-    this.cleanupPrefetchListeners();
-    
     const oldAudio = this.currentAudio;
     const newAudio = this.nextAudio;
     const oldHls = this.currentHls;
     const newHls = oldAudio === this.primaryAudio ? this.secondaryHls : this.primaryHls;
-
+    
     const hasOldTrack = oldAudio.src && oldAudio.duration > 0;
     
     if (!hasOldTrack || !this.enableCrossfade) {
       if (hasOldTrack) {
-        // [CLICK FIX] Quick micro-fade before stopping old audio
-        await this.microFadeOut(oldAudio);
         oldAudio.pause();
         oldAudio.currentTime = 0;
-        oldAudio.volume = this.volume; // Restore for reuse
       }
       
       newAudio.volume = this.volume;
       await newAudio.play();
-      
-      // [FAST START] Track playback start
-      this.startupTimestamps.playbackStarted = performance.now();
-      if (this.startupTimestamps.playRequested > 0) {
-        const playLatency = Math.round(this.startupTimestamps.playbackStarted - this.startupTimestamps.playRequested);
-        console.log('[AUDIO][STARTUP][CROSSFADE] Direct start playback began', {
-          playLatencyMs: playLatency,
-        });
-      }
-      
       this.currentAudio = newAudio;
       this.nextAudio = oldAudio;
       this.currentHls = newHls;
       this.isPlayingState = true;
       this.metrics.playbackState = 'playing';
-      
       this.updateMetrics();
       return;
     }
@@ -1687,60 +1482,18 @@ export class StreamingAudioEngine implements IAudioEngine {
   }
 
   pause(): void {
-    // [CLICK FIX] Quick micro-fade to prevent click/pop sound
-    // The click happens when audio is cut mid-waveform
-    this.microFadeOut(this.currentAudio).then(() => {
-      this.currentAudio.pause();
-      // Restore volume for next play
-      this.currentAudio.volume = this.volume;
-    });
+    this.currentAudio.pause();
     this.isPlayingState = false;
     this.metrics.playbackState = 'paused';
     this.updateMetrics();
   }
 
   stop(): void {
-    // [CLICK FIX] Quick micro-fade to prevent click/pop sound
-    this.microFadeOut(this.currentAudio).then(() => {
-      this.currentAudio.pause();
-      this.currentAudio.currentTime = 0;
-      // Restore volume for next play
-      this.currentAudio.volume = this.volume;
-    });
+    this.currentAudio.pause();
+    this.currentAudio.currentTime = 0;
     this.isPlayingState = false;
     this.metrics.playbackState = 'stopped';
     this.updateMetrics();
-  }
-  
-  /**
-   * [CLICK FIX] Quick micro-fade to prevent audio click/pop when stopping
-   * Fades volume to 0 over ~10ms before actually stopping
-   */
-  private microFadeOut(audio: HTMLAudioElement): Promise<void> {
-    return new Promise((resolve) => {
-      const startVolume = audio.volume;
-      if (startVolume === 0 || audio.paused) {
-        resolve();
-        return;
-      }
-      
-      const fadeTime = 15; // 15ms micro-fade
-      const steps = 3;     // 3 steps = 5ms each
-      const stepTime = fadeTime / steps;
-      const volumeStep = startVolume / steps;
-      let currentStep = 0;
-      
-      const fadeInterval = setInterval(() => {
-        currentStep++;
-        audio.volume = Math.max(0, startVolume - (volumeStep * currentStep));
-        
-        if (currentStep >= steps) {
-          clearInterval(fadeInterval);
-          audio.volume = 0;
-          resolve();
-        }
-      }, stepTime);
-    });
   }
 
   seek(time: number): void {
@@ -1776,41 +1529,15 @@ export class StreamingAudioEngine implements IAudioEngine {
     return { ...this.metrics };
   }
 
-  /**
-   * [FAST START] Reset startup timestamps for a new playback cycle
-   */
-  private resetStartupTimestamps(): void {
-    this.startupTimestamps = {
-      playRequested: 0,
-      sourceSet: 0,
-      hlsManifestLoaded: 0,
-      canPlayFired: 0,
-      firstTimeupdateFired: 0,
-      playbackStarted: 0,
-    };
-    this.isFirstTimeupdate = true;
-  }
-
   prefetchNextTrack(trackId: string, filePath: string): void {
     if (this.nextTrackId === trackId) {
       return;
     }
     
-    console.log('[AUDIO][STARTUP][NEXT] Prefetching next track', { trackId });
-    
-    // [PREFETCH FIX] Clear previous prefetch listeners
-    this.cleanupPrefetchListeners();
-    
     this.nextTrackId = trackId;
     const prefetchAudio = this.currentAudio === this.primaryAudio 
       ? this.secondaryAudio 
       : this.primaryAudio;
-    
-    // [PREFETCH FIX] Reset prefetch metrics
-    this.metrics.prefetchProgress = 0;
-    this.metrics.prefetchReadyState = 0;
-    this.metrics.prefetchedTrackId = trackId;
-    this.updateMetrics();
     
     // Check if HLS is available and use HLS URL if supported
     const hlsAdapter = this.storageAdapter as HLSStorageAdapter;
@@ -1828,99 +1555,15 @@ export class StreamingAudioEngine implements IAudioEngine {
     };
     
     getPrefetchUrl().then(url => {
-      // [PREFETCH FIX] Set up progress tracking listeners
-      this.setupPrefetchListeners(prefetchAudio, trackId);
-      
       prefetchAudio.src = url;
       prefetchAudio.preload = 'auto';
       prefetchAudio.load();
       
       this.prefetchedNextTrack = true;
+      this.metrics.prefetchedTrackId = trackId;
       this.metrics.prefetchedTrackUrl = url;
       this.updateMetrics();
-      
-      console.log('[AUDIO][STARTUP][NEXT] Next track prefetch initiated', { 
-        trackId, 
-        url: url.substring(0, 100) + '...' 
-      });
-    }).catch(err => {
-      console.warn('[AUDIO][STARTUP][NEXT] Prefetch URL fetch failed:', err);
-      this.metrics.prefetchedTrackId = null;
-      this.metrics.prefetchedTrackUrl = null;
-      this.updateMetrics();
-    });
-  }
-  
-  // [PREFETCH FIX] Listeners for tracking prefetch progress
-  private prefetchProgressHandler: (() => void) | null = null;
-  private prefetchCanPlayHandler: (() => void) | null = null;
-  private prefetchErrorHandler: (() => void) | null = null;
-  private prefetchAudioElement: HTMLAudioElement | null = null;
-  
-  private setupPrefetchListeners(audio: HTMLAudioElement, trackId: string): void {
-    this.prefetchAudioElement = audio;
-    
-    // Progress handler - updates as data is buffered
-    this.prefetchProgressHandler = () => {
-      if (audio.buffered.length > 0 && audio.duration > 0) {
-        const bufferedEnd = audio.buffered.end(audio.buffered.length - 1);
-        this.metrics.prefetchProgress = bufferedEnd / audio.duration;
-      }
-      this.metrics.prefetchReadyState = audio.readyState;
-      this.updateMetrics();
-    };
-    
-    // Can play handler - track is ready for playback
-    this.prefetchCanPlayHandler = () => {
-      console.log('[AUDIO][STARTUP][NEXT] Prefetch ready for playback', { 
-        trackId, 
-        readyState: audio.readyState,
-        duration: audio.duration,
-      });
-      this.metrics.prefetchReadyState = audio.readyState;
-      // Set progress to 100% when canplay fires (enough buffered to start)
-      if (audio.duration > 0 && audio.buffered.length > 0) {
-        const bufferedEnd = audio.buffered.end(audio.buffered.length - 1);
-        this.metrics.prefetchProgress = bufferedEnd / audio.duration;
-      } else {
-        this.metrics.prefetchProgress = 1; // Assume ready
-      }
-      this.updateMetrics();
-    };
-    
-    // Error handler
-    this.prefetchErrorHandler = () => {
-      console.warn('[AUDIO][STARTUP][NEXT] Prefetch failed', { trackId });
-      this.metrics.prefetchProgress = 0;
-      this.metrics.prefetchReadyState = 0;
-      this.updateMetrics();
-    };
-    
-    audio.addEventListener('progress', this.prefetchProgressHandler);
-    audio.addEventListener('canplay', this.prefetchCanPlayHandler);
-    audio.addEventListener('canplaythrough', this.prefetchCanPlayHandler);
-    audio.addEventListener('loadedmetadata', this.prefetchProgressHandler);
-    audio.addEventListener('error', this.prefetchErrorHandler);
-  }
-  
-  private cleanupPrefetchListeners(): void {
-    if (this.prefetchAudioElement) {
-      if (this.prefetchProgressHandler) {
-        this.prefetchAudioElement.removeEventListener('progress', this.prefetchProgressHandler);
-        this.prefetchAudioElement.removeEventListener('loadedmetadata', this.prefetchProgressHandler);
-      }
-      if (this.prefetchCanPlayHandler) {
-        this.prefetchAudioElement.removeEventListener('canplay', this.prefetchCanPlayHandler);
-        this.prefetchAudioElement.removeEventListener('canplaythrough', this.prefetchCanPlayHandler);
-      }
-      if (this.prefetchErrorHandler) {
-        this.prefetchAudioElement.removeEventListener('error', this.prefetchErrorHandler);
-      }
-    }
-    this.prefetchProgressHandler = null;
-    this.prefetchCanPlayHandler = null;
-    this.prefetchErrorHandler = null;
-    this.prefetchAudioElement = null;
+    }).catch(console.warn);
   }
 
   destroy(): void {
@@ -1928,21 +1571,18 @@ export class StreamingAudioEngine implements IAudioEngine {
     if (this.metricsUpdateFrame) {
       cancelAnimationFrame(this.metricsUpdateFrame);
     }
-
+    
     // Clear timers
     if (this.stallDetectionTimer) clearTimeout(this.stallDetectionTimer);
     if (this.circuitBreakerTimer) clearTimeout(this.circuitBreakerTimer);
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.cancelStallRecovery();  // [CELLBUG FIX] Clean up stall recovery timer
     
-    // [PREFETCH FIX] Clean up prefetch listeners
-    this.cleanupPrefetchListeners();
-
     // Abort any pending operations
     if (this.abortController) {
       this.abortController.abort();
     }
-
+    
     // Stop playback
     this.stop();
     

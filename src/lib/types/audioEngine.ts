@@ -126,18 +126,6 @@ export interface AudioMetrics {
     prefetchDisabled: boolean;
   };
   
-  // [FAST START] Startup latency metrics
-  startupLatency?: {
-    playRequestedAt: number;
-    sourceSetAt: number;
-    canPlayAt: number;
-    playbackStartedAt: number;
-    firstAudioAt: number;
-    totalLatencyMs: number;
-    bufferingLatencyMs: number;
-    wasPrefetched: boolean;
-  };
-  
   // HLS-specific metrics (new)
   hls?: HLSMetrics;
 }

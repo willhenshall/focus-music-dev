@@ -36,9 +36,7 @@ export interface BufferConfig {
 
 const DEFAULT_BUFFER_CONFIG: BufferConfig = {
   targetBufferDuration: 30,      // 30 seconds ahead
-  // [FAST START] Reduced from 5s to 1.5s for faster playback start
-  // HLS adaptive bitrate will handle quality adjustments if buffer runs low
-  minBufferForPlayback: 1.5,     // 1.5 seconds minimum to start (was 5s)
+  minBufferForPlayback: 5,       // 5 seconds minimum to start
   maxBufferSizeBytes: 15_000_000, // 15MB - safe for iOS
   lowBufferThreshold: 10,        // Below 10s is low
   criticalBufferThreshold: 3,    // Below 3s is critical
