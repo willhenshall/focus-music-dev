@@ -96,6 +96,8 @@ type MusicPlayerContextType = {
   audioMetrics: AudioMetrics | null;
   sessionTimerActive: boolean;
   sessionTimerRemaining: number;
+  // Track which channel the current playlist belongs to (prevents stale track display)
+  playlistChannelId: string | null;
   // Engine selection (for A/B testing)
   engineType: AudioEngineType;
   isStreamingEngine: boolean;
@@ -125,6 +127,8 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const [playlist, setPlaylist] = useState<AudioTrack[]>([]);
   const [allTracks, setAllTracks] = useState<AudioTrack[]>([]);
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
+  // Track which channel the current playlist belongs to (prevents stale track display during channel switch)
+  const [playlistChannelId, setPlaylistChannelId] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [currentPlayEventId, setCurrentPlayEventId] = useState<string | null>(null);
@@ -847,6 +851,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
       // Set initial playlist with first track immediately
       setPlaylist(generatedTracks);
+      setPlaylistChannelId(activeChannel.id);
       setCurrentTrackIndex(0);
 
       // Force track reload by clearing lastLoadedTrackId
@@ -941,6 +946,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       .filter((t): t is AudioTrack => t !== undefined);
 
     setPlaylist(orderedTracks);
+    setPlaylistChannelId(activeChannel.id);
     setCurrentTrackIndex(0);
 
     await supabase.from('playlists').insert({
@@ -1029,6 +1035,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
     if (turnOn) {
       // No special context resume needed for HTML5 audio
+      
+      // Clear playlistChannelId immediately to prevent stale track display during transition
+      setPlaylistChannelId(null);
 
       const newStates: Record<string, ChannelState> = {};
       Object.keys(channelStates).forEach(key => {
@@ -1149,6 +1158,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     if (activeChannel?.id !== channelId) {
       // Don't stop audio immediately - let current track play until new track loads
       // The loadAndPlay function will handle the transition
+      
+      // Clear playlistChannelId immediately to prevent stale track display during transition
+      setPlaylistChannelId(null);
 
       const newStates: Record<string, ChannelState> = {};
       Object.keys(channelStates).forEach(key => {
@@ -1184,6 +1196,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
       // Store the current playing state
       const wasPlaying = isPlaying;
+      
+      // Clear playlistChannelId to prevent stale track display during energy level change
+      setPlaylistChannelId(null);
 
       setChannelStates(prev => ({
         ...prev,
@@ -1453,6 +1468,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         audioMetrics,
         sessionTimerActive,
         sessionTimerRemaining,
+        playlistChannelId,
         engineType,
         isStreamingEngine,
         setSessionTimer,

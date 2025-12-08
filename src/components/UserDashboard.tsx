@@ -46,7 +46,7 @@ type UserChannelOrder = {
 
 export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAudioDiagnostics = false, onToggleAudioDiagnostics }: UserDashboardProps = {}) {
   const { user, profile, signOut } = useAuth();
-  const { channels, activeChannel, channelStates, toggleChannel, setChannelEnergy, loadChannels, isPlaying, currentTrack, audioEngine, skipTrack } = useMusicPlayer();
+  const { channels, activeChannel, channelStates, toggleChannel, setChannelEnergy, loadChannels, isPlaying, currentTrack, audioEngine, skipTrack, playlistChannelId } = useMusicPlayer();
   const { channelImages } = useImageSet();
   const [activeTab, setActiveTab] = useState<ActiveTab>(initialTab);
   const [recommendedChannels, setRecommendedChannels] = useState<RecommendedChannel[]>([]);
@@ -1802,14 +1802,27 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
                             </button>
                           </div>
 
-                          {/* Track Info */}
+                          {/* Track Info - only show when playlist is ready for this channel */}
                           <div className="text-center space-y-0.5 w-full min-w-0">
-                            <div className="text-xs text-slate-600 truncate px-2">
-                              {currentTrack?.artist_name || 'Unknown Artist'}
-                            </div>
-                            <div className="text-sm font-semibold text-slate-900 truncate px-2">
-                              {currentTrack?.track_name || 'No Track Playing'}
-                            </div>
+                            {playlistChannelId === activeChannel?.id ? (
+                              <>
+                                <div className="text-xs text-slate-600 truncate px-2">
+                                  {currentTrack?.artist_name || 'Unknown Artist'}
+                                </div>
+                                <div className="text-sm font-semibold text-slate-900 truncate px-2">
+                                  {currentTrack?.track_name || 'No Track Playing'}
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <div className="text-xs text-slate-400 truncate px-2">
+                                  Loading...
+                                </div>
+                                <div className="text-sm font-semibold text-slate-400 truncate px-2 animate-pulse">
+                                  Loading track...
+                                </div>
+                              </>
+                            )}
                           </div>
 
                           {/* Control Buttons */}
