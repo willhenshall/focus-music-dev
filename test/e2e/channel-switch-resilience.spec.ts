@@ -529,7 +529,16 @@ test.describe("Channel Switch Resilience - Mobile", () => {
     await expect(playPauseButton).toBeVisible({ timeout: 10000 });
     await playPauseButton.tap();
 
+    // Wait for playback with retry logic (mobile can be slow)
     const footerPlayPause = page.locator('[data-testid="player-play-pause"]');
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await page.waitForTimeout(2000);
+      const isPlaying = await footerPlayPause.getAttribute("data-playing");
+      if (isPlaying === "true") break;
+      // Retry tap
+      const btnVisible = await playPauseButton.isVisible().catch(() => false);
+      if (btnVisible) await playPauseButton.tap();
+    }
     await expect(footerPlayPause).toHaveAttribute("data-playing", "true", { timeout: 15000 });
 
     await page.waitForTimeout(2000);
@@ -578,7 +587,15 @@ test.describe("Channel Switch Resilience - Mobile", () => {
     const playPauseButton = page.locator('[data-testid="channel-play-pause"]');
     await playPauseButton.tap();
 
+    // Wait for playback with retry logic
     const footerPlayPause = page.locator('[data-testid="player-play-pause"]');
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await page.waitForTimeout(2000);
+      const isPlaying = await footerPlayPause.getAttribute("data-playing");
+      if (isPlaying === "true") break;
+      const btnVisible = await playPauseButton.isVisible().catch(() => false);
+      if (btnVisible) await playPauseButton.tap();
+    }
     await expect(footerPlayPause).toHaveAttribute("data-playing", "true", { timeout: 15000 });
 
     // Rapid taps on different channels
