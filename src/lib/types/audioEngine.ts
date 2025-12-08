@@ -355,6 +355,14 @@ export interface IAudioEngine {
   // Prefetch
   prefetchNextTrack(trackId: string, filePath: string): void;
   
+  // iOS-specific
+  /**
+   * [iOS FIX] Unlock iOS audio context synchronously from a user gesture.
+   * Must be called BEFORE any async operations to preserve user gesture context.
+   * Optional - only implemented by StreamingAudioEngine.
+   */
+  unlockIOSAudio?(): void;
+  
   // Cleanup
   destroy(): void;
 }

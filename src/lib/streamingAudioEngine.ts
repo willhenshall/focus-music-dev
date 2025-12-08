@@ -1855,6 +1855,50 @@ export class StreamingAudioEngine implements IAudioEngine {
     }).catch(console.warn);
   }
 
+  /**
+   * [iOS FIX] Unlock iOS audio context synchronously.
+   * Must be called from within a user gesture (tap/click handler) BEFORE any async operations.
+   * iOS requires play() to be initiated directly from user gesture - calling this method
+   * "unlocks" the audio context so subsequent play() calls work even after async delays.
+   */
+  unlockIOSAudio(): void {
+    if (!this.isIOS) return;
+    if (this.isAudioUnlocked) return;
+    
+    console.log('[STREAMING AUDIO] Unlocking iOS audio context');
+    
+    // Use the current audio element - play then immediately pause
+    // This must be synchronous (no await) to preserve user gesture context
+    const audio = this.currentAudio;
+    
+    // Set volume to 0 to avoid any audio blip
+    const originalVolume = audio.volume;
+    audio.volume = 0;
+    
+    // The play() promise will resolve/reject, but we don't await it
+    // The synchronous call to play() is what unlocks iOS audio
+    const playPromise = audio.play();
+    
+    if (playPromise !== undefined) {
+      playPromise
+        .then(() => {
+          // Successfully unlocked - pause immediately if we weren't meant to play
+          if (!this.isPlayingState) {
+            audio.pause();
+          }
+          audio.volume = originalVolume;
+          this.isAudioUnlocked = true;
+          console.log('[STREAMING AUDIO] iOS audio context unlocked successfully');
+        })
+        .catch((err) => {
+          // This can still fail if there's no src loaded, which is fine
+          // The unlock will happen on actual playback
+          audio.volume = originalVolume;
+          console.log('[STREAMING AUDIO] iOS unlock attempt (may retry on play):', err.name);
+        });
+    }
+  }
+
   destroy(): void {
     // Stop metrics loop
     if (this.metricsUpdateFrame) {
