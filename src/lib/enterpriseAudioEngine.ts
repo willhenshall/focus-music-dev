@@ -996,7 +996,7 @@ export class EnterpriseAudioEngine {
     // Reset fade state for new track
     this.isFadingOut = false;
     this.hasTriggeredEarlyTransition = false;
-
+    
     // Reset iOS buffer clamp state for new track
     this.iosClampPrefetchDisabled = false;
     this.metrics.iosClamp.prefetchDisabled = false;
@@ -1209,7 +1209,7 @@ export class EnterpriseAudioEngine {
           console.log('[AUDIO] Track ended naturally after early crossfade trigger - ignoring');
           return;
         }
-
+        
         if (this.isPlayingState && this.onTrackEnd) {
           console.log('[AUDIO][CELLBUG][ENDED] Track genuinely ended, advancing to next');
           this.consecutiveStallFailures = 0;  // Reset on successful track completion
@@ -1351,13 +1351,13 @@ export class EnterpriseAudioEngine {
     if (this.isFadingOut || this.hasTriggeredEarlyTransition) return;
     if (!audio.duration || audio.duration === 0) return;
     if (this.crossfadeMode === 'none') return;
-
+    
     const timeRemaining = audio.duration - audio.currentTime;
     // Use crossfadeDuration for overlap mode, TRACK_FADE_DURATION for sequential
     const fadeThreshold = this.crossfadeMode === 'overlap' 
       ? this.crossfadeDuration / 1000 
       : this.TRACK_FADE_DURATION / 1000;
-
+    
     if (timeRemaining <= fadeThreshold && timeRemaining > 0) {
       if (this.crossfadeMode === 'overlap') {
         // Radio-style: Trigger early transition
@@ -1377,16 +1377,16 @@ export class EnterpriseAudioEngine {
         }
       } else {
         // Sequential mode: Fade out first, then track ends naturally
-        this.isFadingOut = true;
+      this.isFadingOut = true;
         console.log('[AUDIO] Sequential fade-out starting', {
-          currentTime: audio.currentTime,
-          duration: audio.duration,
-          timeRemaining,
-        });
-
-        this.fadeOut(audio).then(() => {
+        currentTime: audio.currentTime,
+        duration: audio.duration,
+        timeRemaining,
+      });
+      
+      this.fadeOut(audio).then(() => {
           console.log('[AUDIO] Sequential fade-out complete');
-        });
+      });
       }
     }
   }

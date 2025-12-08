@@ -1596,11 +1596,11 @@ export class StreamingAudioEngine implements IAudioEngine {
     if (!this.nextAudio.src && !this.currentAudio.src) {
       return;
     }
-    
+
     const hasNewTrack = this.nextAudio.src &&
                         this.nextAudio.src !== this.currentAudio.src &&
                         this.nextAudio !== this.currentAudio;
-    
+
     if (hasNewTrack) {
       await this.crossfadeToNext();
     } else {
@@ -1685,7 +1685,12 @@ export class StreamingAudioEngine implements IAudioEngine {
       
       if (progress >= 1) {
         clearInterval(fade);
-        console.log('[STREAMING AUDIO] Crossfade complete, cleaning up old track');
+        console.log('[STREAMING AUDIO] Crossfade complete, cleaning up old track', {
+          oldAudioPaused: oldAudio.paused,
+          oldAudioVolume: oldAudio.volume,
+          newAudioPaused: newAudio.paused,
+          newAudioVolume: newAudio.volume,
+        });
         
         // Clear event handlers first
         oldAudio.onended = null;
@@ -1697,6 +1702,7 @@ export class StreamingAudioEngine implements IAudioEngine {
           console.log('[STREAMING AUDIO] Destroying old HLS instance');
           oldHls.stopLoad();
           oldHls.detachMedia();
+          // Note: we don't call destroy() because we might reuse this instance
         }
         
         // Now pause and clear the audio element
@@ -1705,6 +1711,11 @@ export class StreamingAudioEngine implements IAudioEngine {
         oldAudio.currentTime = 0;
         oldAudio.src = ''; // Clear source after HLS is detached
         oldAudio.load(); // Force the audio element to reset
+        
+        console.log('[STREAMING AUDIO] Old audio cleanup complete', {
+          oldAudioPaused: oldAudio.paused,
+          oldAudioSrc: oldAudio.src,
+        });
         
         // Swap audio elements
         this.currentAudio = newAudio;
