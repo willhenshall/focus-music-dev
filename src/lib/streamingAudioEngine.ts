@@ -1860,41 +1860,40 @@ export class StreamingAudioEngine implements IAudioEngine {
    * Must be called from within a user gesture (tap/click handler) BEFORE any async operations.
    * iOS requires play() to be initiated directly from user gesture - calling this method
    * "unlocks" the audio context so subsequent play() calls work even after async delays.
+   * 
+   * Uses a tiny silent audio data URI since the main audio elements may not have a source yet.
    */
   unlockIOSAudio(): void {
     if (!this.isIOS) return;
     if (this.isAudioUnlocked) return;
     
-    console.log('[STREAMING AUDIO] Unlocking iOS audio context');
+    console.log('[STREAMING AUDIO] Unlocking iOS audio context with silent buffer');
     
-    // Use the current audio element - play then immediately pause
-    // This must be synchronous (no await) to preserve user gesture context
-    const audio = this.currentAudio;
+    // Tiny silent MP3 - this is a valid MP3 file that plays silence
+    // Using a data URI ensures we have something to play even if no track is loaded
+    const silentMp3 = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAABhgC7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7//////////////////////////////////////////////////////////////////8AAAAATGF2YzU4LjEzAAAAAAAAAAAAAAAAJAAAAAAAAAAAAYYtRKZJAAAAAAAAAAAAAAAAAAAAAAD/+1DEAAAHAAGkAAAAIAAANIAAAAQMHfwOMB8AB8AB8AB8AB8AB8AB//sQRAAD/wAAB/wAAACAAATSAAAAEP/7EEQAs/8AAAf8AAAAgAAE0gAAABD/+xBEAzP/AAAH/AAAAIAABNIAAAAf//sQRAYz/wAAB/wAAACAAATSAAAA//tQRAkz/wAAB/wAAACAAATSAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//sQZAwz/wAAB/wAAACAAATSAAAA//sQZA8z/wAAB/wAAACAAATSAAAA';
     
-    // Set volume to 0 to avoid any audio blip
-    const originalVolume = audio.volume;
-    audio.volume = 0;
+    // Create a temporary audio element for unlocking
+    const unlockAudio = new Audio();
+    unlockAudio.volume = 0.001; // Nearly silent but not zero (some browsers ignore volume 0)
+    unlockAudio.src = silentMp3;
     
-    // The play() promise will resolve/reject, but we don't await it
     // The synchronous call to play() is what unlocks iOS audio
-    const playPromise = audio.play();
+    // We don't await - just fire and handle the promise
+    const playPromise = unlockAudio.play();
     
     if (playPromise !== undefined) {
       playPromise
         .then(() => {
-          // Successfully unlocked - pause immediately if we weren't meant to play
-          if (!this.isPlayingState) {
-            audio.pause();
-          }
-          audio.volume = originalVolume;
           this.isAudioUnlocked = true;
           console.log('[STREAMING AUDIO] iOS audio context unlocked successfully');
+          // Clean up the temporary element
+          unlockAudio.pause();
+          unlockAudio.src = '';
         })
         .catch((err) => {
-          // This can still fail if there's no src loaded, which is fine
-          // The unlock will happen on actual playback
-          audio.volume = originalVolume;
-          console.log('[STREAMING AUDIO] iOS unlock attempt (may retry on play):', err.name);
+          console.warn('[STREAMING AUDIO] iOS unlock failed:', err.name, err.message);
+          // Don't set isAudioUnlocked - let it retry on actual play
         });
     }
   }
