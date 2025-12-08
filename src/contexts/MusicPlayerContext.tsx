@@ -1034,7 +1034,12 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     });
 
     if (turnOn) {
-      // No special context resume needed for HTML5 audio
+      // [iOS FIX] Unlock audio context SYNCHRONOUSLY before any async operations.
+      // iOS requires play() to be called directly from user gesture - this "unlocks"
+      // the audio context so subsequent play() calls work even after DB queries.
+      if (audioEngine?.unlockIOSAudio) {
+        audioEngine.unlockIOSAudio();
+      }
       
       // Clear playlistChannelId immediately to prevent stale track display during transition
       setPlaylistChannelId(null);
