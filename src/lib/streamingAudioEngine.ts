@@ -189,6 +189,9 @@ export class StreamingAudioEngine implements IAudioEngine {
   private useHLSJS: boolean;
   private isIOS: boolean;
   
+  // iOS audio unlock tracking - first play must be direct, not via crossfade
+  private isAudioUnlocked: boolean = false;
+
   // [CELLBUG FIX] Track cellular connection status for more lenient handling
   private isCellular: boolean = false;
   
@@ -1592,7 +1595,7 @@ export class StreamingAudioEngine implements IAudioEngine {
       console.log('[STREAMING AUDIO] Ignoring play() call during transition');
       return;
     }
-    
+
     if (!this.nextAudio.src && !this.currentAudio.src) {
       return;
     }
@@ -1601,13 +1604,52 @@ export class StreamingAudioEngine implements IAudioEngine {
                         this.nextAudio.src !== this.currentAudio.src &&
                         this.nextAudio !== this.currentAudio;
 
+    // [iOS FIX] On iOS, the FIRST play() must be called directly from user gesture
+    // Crossfade uses async callbacks which iOS blocks on first interaction
+    // Skip crossfade on first play to ensure audio unlocks properly
+    if (hasNewTrack && this.isIOS && !this.isAudioUnlocked) {
+      console.log('[STREAMING AUDIO] iOS first play - skipping crossfade to unlock audio');
+      
+      // Play directly without crossfade - this preserves user gesture context
+      const newAudio = this.nextAudio;
+      const oldAudio = this.currentAudio;
+      const newHls = oldAudio === this.primaryAudio ? this.secondaryHls : this.primaryHls;
+      
+      // Stop old audio if playing
+      if (oldAudio.src) {
+        oldAudio.pause();
+        oldAudio.currentTime = 0;
+      }
+      
+      // Start new audio directly
+      newAudio.volume = this.volume;
+      try {
+        await newAudio.play();
+        this.isAudioUnlocked = true; // Audio context is now unlocked
+        console.log('[STREAMING AUDIO] iOS audio unlocked successfully');
+        
+        this.currentAudio = newAudio;
+        this.nextAudio = oldAudio;
+        this.currentHls = newHls;
+        this.isPlayingState = true;
+        this.metrics.playbackState = 'playing';
+        this.updateMetrics();
+      } catch (err) {
+        console.error('[STREAMING AUDIO] iOS first play failed:', err);
+        // Don't throw - let user try again
+      }
+      return;
+    }
+
     if (hasNewTrack) {
       await this.crossfadeToNext();
+      this.isAudioUnlocked = true; // Mark as unlocked after successful crossfade
     } else {
       await this.currentAudio.play();
       this.isPlayingState = true;
       this.metrics.playbackState = 'playing';
       this.updateMetrics();
+      this.isAudioUnlocked = true;
     }
   }
 
