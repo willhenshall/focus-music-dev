@@ -629,8 +629,8 @@ export function MusicLibrary() {
         aValue = getEnergyScore(a);
         bValue = getEnergyScore(b);
       } else if (sortField === 'channels') {
-        aValue = (trackAssignmentsCache[a.metadata?.track_id || ''] || []).length;
-        bValue = (trackAssignmentsCache[b.metadata?.track_id || ''] || []).length;
+        aValue = (trackAssignmentsCache[a.track_id || ''] || []).length;
+        bValue = (trackAssignmentsCache[b.track_id || ''] || []).length;
       } else {
         aValue = a.metadata?.[sortField] || '';
         bValue = b.metadata?.[sortField] || '';
@@ -2646,7 +2646,7 @@ FROM audio_tracks;
       {selectedTrack && (
         <TrackDetailModal
           track={selectedTrack}
-          channelAssignments={trackAssignmentsCache[selectedTrack.metadata?.track_id || ''] || []}
+          channelAssignments={trackAssignmentsCache[selectedTrack.track_id || ''] || []}
           channels={channels}
           loadingAssignments={loadingAssignments}
           onClose={() => {
