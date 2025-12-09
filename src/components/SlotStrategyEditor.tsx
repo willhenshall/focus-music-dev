@@ -309,30 +309,52 @@ export function SlotStrategyEditor({ channelId, energyTier, onSave }: SlotStrate
         'music_key_value'
       ];
 
-      // Fetch distinct values for each text field
-      for (const field of textFields) {
+      // Fetch distinct values for each text field using RPC for efficiency
+      // This avoids the 1000 record limit issue by using DISTINCT in the database
+      const promises = textFields.map(async (field) => {
         try {
-          const { data } = await supabase
-            .from('audio_tracks')
-            .select(field)
-            .is('deleted_at', null)
-            .not(field, 'is', null)
-            .limit(1000); // Limit to prevent overwhelming the dropdown
+          // Use the RPC function to get all distinct values efficiently
+          const { data, error } = await supabase
+            .rpc('get_distinct_column_values', { column_name: field });
 
-          if (data && data.length > 0) {
-            const values = [...new Set(data.map((t: any) => t[field]))]
-              .filter(v => v && v !== '')
-              .map(v => String(v))
-              .sort();
+          if (error) {
+            // Fallback to manual query if RPC fails (e.g., function not deployed yet)
+            console.warn(`RPC failed for ${field}, using fallback:`, error.message);
+            const { data: fallbackData } = await supabase
+              .from('audio_tracks')
+              .select(field)
+              .is('deleted_at', null)
+              .not(field, 'is', null)
+              .limit(5000); // Increased limit for fallback
 
-            if (values.length > 0) {
-              options[field] = values;
+            if (fallbackData && fallbackData.length > 0) {
+              const values = [...new Set(fallbackData.map((t: any) => t[field]))]
+                .filter(v => v && v !== '')
+                .map(v => String(v))
+                .sort();
+              if (values.length > 0) {
+                return { field, values };
+              }
             }
+          } else if (data && Array.isArray(data) && data.length > 0) {
+            // RPC returns an array of distinct values directly
+            return { field, values: data };
           }
         } catch (err) {
           console.error(`Error fetching distinct values for ${field}:`, err);
         }
-      }
+        return null;
+      });
+
+      // Wait for all queries to complete in parallel
+      const results = await Promise.all(promises);
+
+      // Populate options from results
+      results.forEach((result) => {
+        if (result && result.values.length > 0) {
+          options[result.field] = result.values;
+        }
+      });
 
       setFieldOptions(options);
     } catch (error) {
@@ -1898,11 +1920,13 @@ export function SlotStrategyEditor({ channelId, energyTier, onSave }: SlotStrate
                               className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                             >
                               <option value="">Select value...</option>
-                              {fieldOptions[rule.field].map(option => (
-                                <option key={option} value={option}>
-                                  {option}
-                                </option>
-                              ))}
+                              {fieldOptions[rule.field]
+                                .filter((option): option is string => option != null && option !== '')
+                                .map(option => (
+                                  <option key={option} value={option}>
+                                    {option}
+                                  </option>
+                                ))}
                             </select>
                           ) : (
                             <input
