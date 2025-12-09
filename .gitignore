@@ -18,3 +18,8 @@ test-results/
 # Generated/temp files
 assets/
 supabase/.temp/
+
+# IDE/Tool configs
+.cursor/
+.cursorrules
+.giga/
