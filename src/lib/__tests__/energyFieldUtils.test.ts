@@ -9,6 +9,7 @@ import {
   energyLevelToBooleans,
   hasEnergyDefined,
   matchesEnergyLevel,
+  getEnergyBooleanFieldName,
   type EnergyBooleans,
 } from '../energyFieldUtils';
 
@@ -362,6 +363,44 @@ describe('energyFieldUtils', () => {
     });
   });
 
+  describe('getEnergyBooleanFieldName', () => {
+    it('returns "energy_low" for "low"', () => {
+      expect(getEnergyBooleanFieldName('low')).toBe('energy_low');
+    });
+
+    it('returns "energy_medium" for "medium"', () => {
+      expect(getEnergyBooleanFieldName('medium')).toBe('energy_medium');
+    });
+
+    it('returns "energy_high" for "high"', () => {
+      expect(getEnergyBooleanFieldName('high')).toBe('energy_high');
+    });
+
+    it('handles uppercase values (case-insensitive)', () => {
+      expect(getEnergyBooleanFieldName('LOW')).toBe('energy_low');
+      expect(getEnergyBooleanFieldName('MEDIUM')).toBe('energy_medium');
+      expect(getEnergyBooleanFieldName('HIGH')).toBe('energy_high');
+    });
+
+    it('handles mixed case values', () => {
+      expect(getEnergyBooleanFieldName('Low')).toBe('energy_low');
+      expect(getEnergyBooleanFieldName('Medium')).toBe('energy_medium');
+      expect(getEnergyBooleanFieldName('High')).toBe('energy_high');
+    });
+
+    it('handles values with whitespace', () => {
+      expect(getEnergyBooleanFieldName(' low ')).toBe('energy_low');
+      expect(getEnergyBooleanFieldName(' medium ')).toBe('energy_medium');
+      expect(getEnergyBooleanFieldName(' high ')).toBe('energy_high');
+    });
+
+    it('returns null for invalid values', () => {
+      expect(getEnergyBooleanFieldName('invalid')).toBeNull();
+      expect(getEnergyBooleanFieldName('')).toBeNull();
+      expect(getEnergyBooleanFieldName('unknown')).toBeNull();
+    });
+  });
+
   describe('matchesEnergyLevel', () => {
     describe('matching "low" energy', () => {
       it('returns true for track with low energy', () => {
@@ -537,6 +576,72 @@ describe('Energy Field Integration Tests', () => {
       expect(matchesEnergyLevel(tracks[1], 'low')).toBe(true);
       expect(matchesEnergyLevel(tracks[1], 'medium')).toBe(true);
       expect(matchesEnergyLevel(tracks[1], 'high')).toBe(true);
+    });
+  });
+
+  describe('Slot Sequencer Filter Translation Scenario', () => {
+    /**
+     * FIX: The Slot Sequencer was filtering on `energy_level` TEXT column,
+     * but this column is NOT reliably populated. The boolean columns
+     * (energy_low, energy_medium, energy_high) are the source of truth.
+     * 
+     * This test verifies the filter translation logic:
+     * - Filter rule: { field: 'energy_level', operator: 'eq', value: 'medium' }
+     * - Should be translated to query: .eq('energy_medium', true)
+     */
+    it('translates energy_level filter to correct boolean field for low', () => {
+      const filterValue = 'low';
+      const booleanField = getEnergyBooleanFieldName(filterValue);
+      expect(booleanField).toBe('energy_low');
+    });
+
+    it('translates energy_level filter to correct boolean field for medium', () => {
+      const filterValue = 'medium';
+      const booleanField = getEnergyBooleanFieldName(filterValue);
+      expect(booleanField).toBe('energy_medium');
+    });
+
+    it('translates energy_level filter to correct boolean field for high', () => {
+      const filterValue = 'high';
+      const booleanField = getEnergyBooleanFieldName(filterValue);
+      expect(booleanField).toBe('energy_high');
+    });
+
+    it('simulates track matching with translated filter', () => {
+      // Simulate a track that has medium energy (as stored in DB)
+      const track = {
+        id: 'abc123',
+        energy_low: false,
+        energy_medium: true,
+        energy_high: false,
+        // Note: energy_level TEXT field might be empty or incorrect!
+        energy_level: '', // Legacy field - not populated
+      };
+
+      // The Slot Sequencer filter would be: { field: 'energy_level', value: 'medium' }
+      // After translation, we check: track[energy_medium] === true
+      const translatedField = getEnergyBooleanFieldName('medium');
+      expect(translatedField).toBe('energy_medium');
+      expect(track[translatedField!]).toBe(true);
+    });
+
+    it('correctly identifies tracks that would NOT match before the fix', () => {
+      // This track has energy_medium=true, but energy_level TEXT is empty
+      // Before fix: Filtering on energy_level='medium' would NOT find this track
+      // After fix: Filtering on energy_medium=true WILL find this track
+      const track = {
+        energy_low: false,
+        energy_medium: true,
+        energy_high: false,
+        energy_level: '', // Empty! This was the bug.
+      };
+
+      // Old query would fail (string match on empty field)
+      expect(track.energy_level === 'medium').toBe(false);
+      
+      // New query succeeds (boolean check)
+      const booleanField = getEnergyBooleanFieldName('medium');
+      expect(track[booleanField!]).toBe(true);
     });
   });
 });

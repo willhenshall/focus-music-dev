@@ -4,6 +4,7 @@ import { Download, Upload, Save, Plus, Trash2, ArrowLeft, Zap, X, Play, Settings
 import { SlotPreviewModal } from './SlotPreviewModal';
 import { SequencePreviewModal } from './SequencePreviewModal';
 import { useMusicPlayer } from '../contexts/MusicPlayerContext';
+import { getEnergyBooleanFieldName } from '../lib/energyFieldUtils';
 
 type EnergyTier = 'low' | 'medium' | 'high';
 type SlotField = 'speed' | 'intensity' | 'brightness' | 'complexity' | 'valence' | 'arousal' | 'bpm' | 'key' | 'proximity';
@@ -505,6 +506,17 @@ export function SlotStrategyEditor({ channelId, energyTier, onSave }: SlotStrate
       ruleGroups.forEach(group => {
         group.rules.forEach((rule: any) => {
           if (rule.field && rule.value !== '') {
+            // CRITICAL FIX: energy_level TEXT column is not reliably populated
+            // The boolean columns (energy_low, energy_medium, energy_high) are the source of truth
+            // Convert energy_level filters to use the appropriate boolean column
+            if (rule.field === 'energy_level' && rule.operator === 'eq') {
+              const booleanField = getEnergyBooleanFieldName(rule.value);
+              if (booleanField) {
+                query = query.eq(booleanField, true);
+                return; // Skip the rest of this rule's processing
+              }
+            }
+
             // Check if this is a JSONB metadata field (contains ->>, ->, or #>)
             const isMetadataField = rule.field.includes('->') || rule.field.includes('#>');
 

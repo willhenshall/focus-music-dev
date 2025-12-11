@@ -171,3 +171,23 @@ export function matchesEnergyLevel(track: EnergyBooleans | undefined | null, lev
     case 'high': return track.energy_high || false;
   }
 }
+
+/**
+ * Gets the boolean field name for a given energy level string.
+ * Used for converting legacy `energy_level` text filters to boolean field filters.
+ * 
+ * The `energy_level` TEXT column is NOT reliably populated in the database.
+ * The boolean columns (energy_low, energy_medium, energy_high) are the source of truth.
+ * 
+ * @param energyLevelValue - The energy level string value (case-insensitive)
+ * @returns The boolean field name, or null if not a valid energy level
+ */
+export function getEnergyBooleanFieldName(energyLevelValue: string): 'energy_low' | 'energy_medium' | 'energy_high' | null {
+  const normalized = String(energyLevelValue).toLowerCase().trim();
+  switch (normalized) {
+    case 'low': return 'energy_low';
+    case 'medium': return 'energy_medium';
+    case 'high': return 'energy_high';
+    default: return null;
+  }
+}
