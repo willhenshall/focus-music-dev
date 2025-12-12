@@ -1,0 +1,22 @@
+[
+  {
+    "fileName": "main-overview.mdc",
+    "description": "Complete system overview documenting the core architecture, primary components, and high-level data flow of the cognitive music platform, including the brain type profiling system and personalized audio delivery system"
+  },
+  {
+    "fileName": "cognitive-profiling-algorithms.mdc",
+    "description": "Detailed documentation of the brain type calculation algorithms, OCEAN scoring system, ADHD/ASD indicators, and how these map to channel recommendations and music preferences"
+  },
+  {
+    "fileName": "playlist-generation-engine.mdc",
+    "description": "Comprehensive documentation of the slot-based playlist generation system, including energy level transitions, track selection algorithms, and scoring mechanisms"
+  },
+  {
+    "fileName": "data-models-relationships.mdc",
+    "description": "Complete documentation of data models and relationships between users, cognitive profiles, channels, tracks, playlists, and slot strategies with their associated metadata"
+  },
+  {
+    "fileName": "audio-delivery-architecture.mdc",
+    "description": "Technical documentation of the audio delivery system, including HLS implementation, multi-CDN strategy, bitrate ladder, and iOS-specific optimizations"
+  }
+]

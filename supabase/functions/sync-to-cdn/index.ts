@@ -10,9 +10,12 @@ const corsHeaders = {
 
 interface SyncRequest {
   trackId: string;
-  operation: 'upload' | 'delete' | 'upload-hls';
+  operation: 'upload' | 'delete' | 'upload-hls' | 'upload-hls-file';
   filePath?: string;
   sidecarPath?: string;
+  // For single HLS file upload
+  hlsFileName?: string;
+  hlsFileData?: string; // base64 encoded
   // Optional: provide track data directly to avoid database lookup
   trackData?: {
     cdn_url?: string;
@@ -45,7 +48,7 @@ Deno.serve(async (req: Request) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { trackId, operation, trackData: providedTrackData }: SyncRequest = await req.json();
+    const { trackId, operation, trackData: providedTrackData, hlsFileName, hlsFileData }: SyncRequest = await req.json();
 
     if (!trackId) {
       return new Response(
@@ -57,11 +60,23 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    // Parse trackId as integer for database queries (track_id column is integer)
+    const trackIdInt = parseInt(trackId, 10);
+    if (isNaN(trackIdInt)) {
+      return new Response(
+        JSON.stringify({ error: "trackId must be a valid number" }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
     if (operation === 'upload') {
       const { data: trackData, error: trackError } = await supabase
         .from('audio_tracks')
         .select('file_path, metadata')
-        .eq('track_id', trackId)
+        .eq('track_id', trackIdInt)
         .is('deleted_at', null)
         .maybeSingle();
 
@@ -119,7 +134,7 @@ Deno.serve(async (req: Request) => {
             }
           }
         })
-        .eq('track_id', trackId);
+        .eq('track_id', trackIdInt);
 
       if (updateError) {
         console.error('Failed to update database:', updateError);
@@ -148,7 +163,7 @@ Deno.serve(async (req: Request) => {
         const { data: dbTrackData } = await supabase
           .from('audio_tracks')
           .select('cdn_url, metadata, storage_locations')
-          .eq('track_id', trackId)
+          .eq('track_id', trackIdInt)
           .maybeSingle();
 
         if (!dbTrackData) {
@@ -232,7 +247,7 @@ Deno.serve(async (req: Request) => {
             }
           }
         })
-        .eq('track_id', trackId);
+        .eq('track_id', trackIdInt);
 
       if (updateError) {
         console.error('Failed to update database:', updateError);
@@ -272,18 +287,48 @@ Deno.serve(async (req: Request) => {
         }
       );
 
-    } else if (operation === 'upload-hls') {
-      // Upload HLS files from Supabase Storage to R2 CDN
-      console.log(`Starting HLS sync for track ${trackId}`);
+    } else if (operation === 'upload-hls-file') {
+      // Upload a single HLS file directly to R2 CDN (fast, no timeout risk)
+      // This is called once per file from the frontend
+      console.log(`Uploading single HLS file for track ${trackId}: ${hlsFileName}`);
 
-      // List all HLS files for this track in Supabase Storage
-      const { data: hlsFiles, error: listError } = await supabase.storage
-        .from('audio-hls')
-        .list(trackId);
-
-      if (listError) {
+      if (!hlsFileName || !hlsFileData) {
         return new Response(
-          JSON.stringify({ error: "Failed to list HLS files", details: listError }),
+          JSON.stringify({ error: "hlsFileName and hlsFileData are required" }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      try {
+        // Decode base64 file data
+        const binaryData = Uint8Array.from(atob(hlsFileData), c => c.charCodeAt(0));
+        const blob = new Blob([binaryData]);
+
+        // Upload to R2
+        await uploadHLSFileToCDN(trackId, hlsFileName, blob);
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            message: `Uploaded ${hlsFileName}`,
+            trackId,
+            fileName: hlsFileName,
+          }),
+          {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      } catch (error: any) {
+        console.error(`Failed to upload HLS file ${hlsFileName}:`, error);
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: `Failed to upload ${hlsFileName}: ${error.message}`,
+          }),
           {
             status: 500,
             headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -291,7 +336,50 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      if (!hlsFiles || hlsFiles.length === 0) {
+    } else if (operation === 'upload-hls') {
+      // Upload HLS files from Supabase Storage to R2 CDN (legacy - prefer upload-hls-file)
+      console.log(`Starting HLS sync for track ${trackId}`);
+
+      // Recursively list all HLS files for this track in Supabase Storage
+      // HLS files may be in subdirectories (e.g., low/, medium/, high/)
+      const allFiles: Array<{ name: string; path: string }> = [];
+      
+      async function listFilesRecursively(prefix: string) {
+        const { data: items, error } = await supabase.storage
+          .from('audio-hls')
+          .list(prefix);
+        
+        if (error) {
+          console.error(`Failed to list files in ${prefix}:`, error);
+          return;
+        }
+        
+        for (const item of items || []) {
+          const itemPath = prefix ? `${prefix}/${item.name}` : item.name;
+          
+          // Check if this is a file (has metadata.size) or a folder
+          if (item.metadata && item.metadata.size !== undefined) {
+            // It's a file
+            allFiles.push({ name: item.name, path: itemPath });
+          } else if (item.id === null) {
+            // It's a folder (folders have id: null in Supabase storage)
+            await listFilesRecursively(itemPath);
+          } else if (!item.metadata) {
+            // Ambiguous - try to download it as a file, if it fails, treat as folder
+            // For HLS, files should have extensions like .m3u8 or .ts
+            if (item.name.endsWith('.m3u8') || item.name.endsWith('.ts')) {
+              allFiles.push({ name: item.name, path: itemPath });
+            } else {
+              // Likely a folder, recurse
+              await listFilesRecursively(itemPath);
+            }
+          }
+        }
+      }
+      
+      await listFilesRecursively(trackId);
+
+      if (allFiles.length === 0) {
         return new Response(
           JSON.stringify({ error: "No HLS files found for track" }),
           {
@@ -301,40 +389,57 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      console.log(`Found ${hlsFiles.length} HLS files to sync`);
+      console.log(`Found ${allFiles.length} HLS files to sync (recursive)`);
 
       let uploadedCount = 0;
       let failedCount = 0;
       const errors: string[] = [];
 
-      // Upload each HLS file to R2
-      for (const file of hlsFiles) {
-        const filePath = `${trackId}/${file.name}`;
-        
-        // Download from Supabase
-        const { data: fileData, error: downloadError } = await supabase.storage
-          .from('audio-hls')
-          .download(filePath);
-
-        if (downloadError || !fileData) {
-          console.error(`Failed to download HLS file ${filePath}:`, downloadError);
-          errors.push(`Failed to download ${file.name}`);
-          failedCount++;
-          continue;
-        }
-
-        // Upload to R2
+      // Process files in parallel batches for speed (avoid timeout)
+      // Higher parallelism to complete faster before edge function timeout
+      const BATCH_SIZE = 50; // Process 50 files at a time
+      
+      async function processFile(file: { name: string; path: string }) {
         try {
-          await uploadHLSFileToCDN(trackId, file.name, fileData);
-          uploadedCount++;
+          // Download from Supabase
+          const { data: fileData, error: downloadError } = await supabase.storage
+            .from('audio-hls')
+            .download(file.path);
+
+          if (downloadError || !fileData) {
+            console.error(`Failed to download HLS file ${file.path}:`, downloadError);
+            return { success: false, error: `Failed to download ${file.path}` };
+          }
+
+          // Upload to R2 - preserve the relative path structure
+          const relativePath = file.path.replace(`${trackId}/`, '');
+          await uploadHLSFileToCDN(trackId, relativePath, fileData);
+          return { success: true };
         } catch (uploadError: any) {
-          console.error(`Failed to upload HLS file ${file.name}:`, uploadError);
-          errors.push(`Failed to upload ${file.name}: ${uploadError.message}`);
-          failedCount++;
+          const relativePath = file.path.replace(`${trackId}/`, '');
+          console.error(`Failed to upload HLS file ${relativePath}:`, uploadError);
+          return { success: false, error: `Failed to upload ${relativePath}: ${uploadError.message}` };
         }
       }
 
-      const segmentCount = hlsFiles.filter(f => f.name.endsWith('.ts')).length;
+      // Process in batches
+      for (let i = 0; i < allFiles.length; i += BATCH_SIZE) {
+        const batch = allFiles.slice(i, i + BATCH_SIZE);
+        const results = await Promise.all(batch.map(processFile));
+        
+        for (const result of results) {
+          if (result.success) {
+            uploadedCount++;
+          } else {
+            failedCount++;
+            if (result.error) errors.push(result.error);
+          }
+        }
+        
+        console.log(`Processed batch ${Math.floor(i / BATCH_SIZE) + 1}: ${uploadedCount} uploaded, ${failedCount} failed`);
+      }
+
+      const segmentCount = allFiles.filter(f => f.name.endsWith('.ts')).length;
       const hlsCdnUrl = `${R2_CONFIG.publicUrl}/${R2_CONFIG.hlsPath}/${trackId}/master.m3u8`;
       const timestamp = new Date().toISOString();
 
@@ -347,7 +452,7 @@ Deno.serve(async (req: Request) => {
           hls_segment_count: segmentCount,
           hls_transcoded_at: timestamp,
         })
-        .eq('track_id', trackId);
+        .eq('track_id', trackIdInt);
 
       if (updateError) {
         console.error('Failed to update database with HLS info:', updateError);
