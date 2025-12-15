@@ -83,8 +83,9 @@ export interface SelectionResult {
 
 /**
  * Field normalization ranges and defaults
+ * @internal Exported for testing
  */
-const FIELD_RANGES: Record<SlotField, { min: number; max: number; tolerance: number }> = {
+export const FIELD_RANGES: Record<SlotField, { min: number; max: number; tolerance: number }> = {
   speed: { min: 0, max: 5, tolerance: 0.5 },
   intensity: { min: 0, max: 5, tolerance: 0.5 },
   brightness: { min: 0, max: 5, tolerance: 0.5 },
@@ -98,8 +99,9 @@ const FIELD_RANGES: Record<SlotField, { min: number; max: number; tolerance: num
 
 /**
  * Normalize a field value to [0, 1] range
+ * @internal Exported for testing
  */
-function normalizeField(field: SlotField, value: number | null | undefined): number {
+export function normalizeField(field: SlotField, value: number | null | undefined): number {
   if (value === null || value === undefined) return 0.5; // Middle value for missing data
 
   const range = FIELD_RANGES[field];
@@ -109,8 +111,9 @@ function normalizeField(field: SlotField, value: number | null | undefined): num
 
 /**
  * Calculate distance between two values in normalized space
+ * @internal Exported for testing
  */
-function calculateDistance(
+export function calculateDistance(
   field: SlotField,
   target: number | string | null | undefined,
   value: number | string | null | undefined,
@@ -147,8 +150,9 @@ function calculateDistance(
 
 /**
  * Evaluate a single rule against track metadata
+ * @internal Exported for testing
  */
-function evaluateRule(rule: SlotRule, metadata: Record<string, any>): boolean {
+export function evaluateRule(rule: SlotRule, metadata: Record<string, any>): boolean {
   // Handle both direct field names and SQL-style field expressions
   let fieldValue: any;
 
@@ -191,8 +195,9 @@ function evaluateRule(rule: SlotRule, metadata: Record<string, any>): boolean {
 
 /**
  * Evaluate rule groups against track metadata
+ * @internal Exported for testing
  */
-function evaluateRuleGroups(groups: SlotRuleGroup[], metadata: Record<string, any>): boolean {
+export function evaluateRuleGroups(groups: SlotRuleGroup[], metadata: Record<string, any>): boolean {
   if (groups.length === 0) return true;
 
   // Evaluate each group
@@ -212,8 +217,9 @@ function evaluateRuleGroups(groups: SlotRuleGroup[], metadata: Record<string, an
 
 /**
  * Score a track candidate against slot targets with weighted boosts
+ * @internal Exported for testing
  */
-function scoreTrack(
+export function scoreTrack(
   targets: SlotTargets,
   boosts: SlotBoost[],
   metadata: Record<string, any>
