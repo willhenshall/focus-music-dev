@@ -821,7 +821,7 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
         className="hidden md:block fixed top-0 left-0 z-[100]"
         style={{
           height: '48px',
-          width: 'calc(100% - 400px)', // Leave right 400px for buttons
+          width: '400px', // Fixed width on left side to avoid overlapping centered header buttons
           pointerEvents: autoHideNavEnabled && activeTab === 'channels' && sortMethod !== 'collections' ? 'auto' : 'none',
         }}
       />
