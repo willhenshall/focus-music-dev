@@ -238,10 +238,10 @@ export function SequencePreviewModal({
                     </div>
                   </div>
                   <div className="flex gap-2 text-xs text-slate-500">
-                    <span>S:{track.speed?.toFixed(1) ?? 'N/A'}</span>
-                    <span>I:{track.intensity?.toFixed(1) ?? 'N/A'}</span>
-                    <span>B:{track.brightness?.toFixed(1) ?? 'N/A'}</span>
-                    <span>C:{track.complexity?.toFixed(1) ?? 'N/A'}</span>
+                    <span>S:{track.speed != null ? Number(track.speed).toFixed(1) : 'N/A'}</span>
+                    <span>I:{track.intensity != null ? Number(track.intensity).toFixed(1) : 'N/A'}</span>
+                    <span>B:{track.brightness != null ? Number(track.brightness).toFixed(1) : 'N/A'}</span>
+                    <span>C:{track.complexity != null ? Number(track.complexity).toFixed(1) : 'N/A'}</span>
                   </div>
                   <div className="text-xs text-slate-400">
                     {Math.floor((track.duration_seconds ?? 0) / 60)}:{String((track.duration_seconds ?? 0) % 60).padStart(2, '0')}
