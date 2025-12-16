@@ -155,6 +155,149 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const handleTrackEndRef = useRef<(() => void) | null>(null);
   // Playback session ID for E2E test tracking - increments on each new track load
   const playbackSessionIdRef = useRef<number>(0);
+  // Fast-start timing (user gesture -> first audible/playing)
+  const fastStartRef = useRef<{
+    requestedAt: number | null;
+    requestContext: { source: string; channelId?: string; energyLevel?: 'low' | 'medium' | 'high' } | null;
+    pending: { trackId?: string; playbackSessionId?: number } | null;
+    last: {
+      requestedAt: number;
+      firstPlayingAt: number;
+      firstAudioMs: number;
+      trackId?: string;
+      playbackSessionId?: number;
+      channelId?: string;
+      energyLevel?: 'low' | 'medium' | 'high';
+      source: string;
+    } | null;
+  }>({ requestedAt: null, requestContext: null, pending: null, last: null });
+
+  const getFastStartEnabled = (): boolean => {
+    const envEnabled = (import.meta as any)?.env?.VITE_FAST_START_AUDIO;
+    if (envEnabled === 'true') return true;
+    if (envEnabled === 'false') return false;
+    try {
+      return localStorage.getItem('fastStartAudio') === '1';
+    } catch {
+      return false;
+    }
+  };
+  const fastStartEnabledRef = useRef<boolean>(getFastStartEnabled());
+
+  const startFastStartTimer = (source: string, channelId?: string, energyLevel?: 'low' | 'medium' | 'high') => {
+    // Only track user-gesture starts (not auto-advance, not background loads)
+    fastStartRef.current.requestedAt = performance.now();
+    fastStartRef.current.requestContext = { source, channelId, energyLevel };
+    fastStartRef.current.pending = null;
+  };
+
+  // First-track cache for fast-start (in-memory, per-session)
+  // Note: `prewarmedAt` is only set once the audio engine has actually prewarmed the HLS pipeline.
+  const firstTrackCacheRef = useRef<Map<string, { track: AudioTrack; warmedAt: number; prewarmedAt: number | null }>>(new Map());
+  const firstTrackWarmupInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
+
+  const firstTrackCacheKey = (channelId: string, energyLevel: 'low' | 'medium' | 'high') => `${channelId}:${energyLevel}`;
+
+  const warmFirstTrack = async (channel: AudioChannel, energyLevel: 'low' | 'medium' | 'high') => {
+    if (!user) return;
+    if (!fastStartEnabledRef.current) return;
+
+    const key = firstTrackCacheKey(channel.id, energyLevel);
+    const cached = firstTrackCacheRef.current.get(key);
+    if (cached && (Date.now() - cached.warmedAt) < 5 * 60 * 1000) {
+      return;
+    }
+
+    const existingInFlight = firstTrackWarmupInFlightRef.current.get(key);
+    if (existingInFlight) return existingInFlight;
+
+    const work = (async () => {
+      try {
+        const strategyConfig = channel.playlist_strategy?.[energyLevel];
+        const channelStrategy = strategyConfig?.strategy;
+        const engineAny = audioEngine as any;
+
+        if (channelStrategy === 'slot_based') {
+          const cachedStrategy = await preloadSlotStrategy(channel.id, energyLevel);
+          if (!cachedStrategy?.strategy) return;
+
+          const numSlots = cachedStrategy.strategy.num_slots || 20;
+
+          // Approximate the true start position (so warmed track matches what the user will hear)
+          let startPosition = 0;
+          const playbackContinuation = strategyConfig?.playbackContinuation || 'continue';
+          if (playbackContinuation !== 'restart_login') {
+            const { data: playbackState } = await supabase
+              .from('user_playback_state')
+              .select('last_position')
+              .eq('user_id', user.id)
+              .eq('channel_id', channel.id)
+              .eq('energy_level', energyLevel)
+              .maybeSingle();
+            if (playbackState?.last_position !== undefined && playbackState?.last_position !== null) {
+              startPosition = playbackState.last_position;
+            }
+          }
+
+          const firstSlotIndex = getCurrentSlotIndex(startPosition, numSlots);
+          const history: string[] = [];
+          const firstResult = await selectNextTrackCached(supabase, {
+            channelId: channel.id,
+            energyTier: energyLevel,
+            slotIndex: firstSlotIndex,
+            history,
+            cachedStrategy,
+          });
+          if (!firstResult) return;
+
+          const { data: firstTrack } = await supabase
+            .from('audio_tracks')
+            .select('*')
+            .eq('id', firstResult.id)
+            .is('deleted_at', null)
+            .maybeSingle();
+          if (!firstTrack?.file_path) return;
+
+          // Cache immediately (so UI can use the first track), but mark prewarm separately.
+          firstTrackCacheRef.current.set(key, { track: firstTrack as AudioTrack, warmedAt: Date.now(), prewarmedAt: null });
+          if (engineAny && typeof engineAny.prewarmTrack === 'function') {
+            await engineAny.prewarmTrack((firstTrack as AudioTrack).track_id, firstTrack.file_path, { preferHLS: true, startLevel: 0 });
+            firstTrackCacheRef.current.set(key, { track: firstTrack as AudioTrack, warmedAt: Date.now(), prewarmedAt: Date.now() });
+          }
+          return;
+        }
+
+        // Non-slot strategies: warm the first track via playlister service.
+        const playlistResponse = await generatePlaylist({
+          channelId: channel.id,
+          energyLevel: energyLevel as EnergyLevel,
+          userId: user.id,
+          strategy: channelStrategy || 'weighted',
+        });
+        const firstTrackId = playlistResponse.trackIds?.[0];
+        if (!firstTrackId) return;
+
+        const { data: firstTrack } = await supabase
+          .from('audio_tracks')
+          .select('*')
+          .eq('track_id', firstTrackId)
+          .is('deleted_at', null)
+          .maybeSingle();
+        if (!firstTrack?.file_path) return;
+
+        firstTrackCacheRef.current.set(key, { track: firstTrack as AudioTrack, warmedAt: Date.now(), prewarmedAt: null });
+        if (engineAny && typeof engineAny.prewarmTrack === 'function') {
+          await engineAny.prewarmTrack((firstTrack as AudioTrack).track_id, firstTrack.file_path, { preferHLS: true, startLevel: 0 });
+          firstTrackCacheRef.current.set(key, { track: firstTrack as AudioTrack, warmedAt: Date.now(), prewarmedAt: Date.now() });
+        }
+      } finally {
+        firstTrackWarmupInFlightRef.current.delete(key);
+      }
+    })();
+
+    firstTrackWarmupInFlightRef.current.set(key, work);
+    return work;
+  };
 
   // Initialize Web Audio Engine (runs ONCE on mount, never again)
   useEffect(() => {
@@ -264,6 +407,18 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     initializeApp();
   }, [user]); // Re-run when user changes (login/logout)
 
+  // Fast-start warm-up: precompute first tracks for likely actions.
+  // Minimal-risk heuristic: active channel at its current energy.
+  useEffect(() => {
+    if (!user) return;
+    if (!fastStartEnabledRef.current) return;
+    if (channels.length === 0) return;
+
+    if (!activeChannel) return;
+    const energy = channelStates[activeChannel.id]?.energyLevel ?? 'medium';
+    warmFirstTrack(activeChannel, energy).catch(() => {});
+  }, [user, channels, activeChannel]);
+
   // Control crossfading based on admin mode
   useEffect(() => {
     if (!audioEngine) return;
@@ -275,7 +430,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   // Generate new playlist when channel or tracks change
   // Note: Energy level changes are handled separately via setChannelEnergy
   useEffect(() => {
-    if (activeChannel && allTracks.length > 0 && user) {
+    // Playlist generation does not require `allTracks` to be loaded.
+    // Waiting for the full `audio_tracks` table can delay first playback.
+    if (activeChannel && user) {
       const channelState = channelStates[activeChannel.id];
 
       // Don't generate playlist if channel isn't turned on yet
@@ -296,7 +453,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       lastPlaylistGeneration.current = { channelId: activeChannel.id, energyLevel, timestamp: now };
       generateNewPlaylist();
     }
-  }, [activeChannel, allTracks, user, channelStates]);
+  }, [activeChannel, user, channelStates]);
 
   // Load and play track when index changes or admin preview changes
   useEffect(() => {
@@ -338,6 +495,14 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       lastLoadedTrackId.current = trackId;
       // Increment playback session ID for E2E test tracking
       playbackSessionIdRef.current += 1;
+
+      // If a user-gesture fast-start request is active, latch the next track/session.
+      if (fastStartRef.current.requestedAt && !fastStartRef.current.pending) {
+        fastStartRef.current.pending = {
+          trackId: track.track_id,
+          playbackSessionId: playbackSessionIdRef.current,
+        };
+      }
 
       try {
         // Validate track has required data before attempting to load
@@ -469,6 +634,39 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       audioEngine.pause();
     }
   }, [isPlaying, audioEngine]);
+
+  // Finalize fast-start timing when the engine first reaches "playing" for the requested track.
+  useEffect(() => {
+    const requestedAt = fastStartRef.current.requestedAt;
+    if (!requestedAt) return;
+    if (!audioMetrics) return;
+    if (audioMetrics.playbackState !== 'playing') return;
+
+    const pendingTrackId = fastStartRef.current.pending?.trackId;
+    if (pendingTrackId && audioMetrics.currentTrackId && audioMetrics.currentTrackId !== pendingTrackId) {
+      return;
+    }
+
+    const firstPlayingAt = performance.now();
+    const firstAudioMs = Math.max(0, firstPlayingAt - requestedAt);
+    const ctx = fastStartRef.current.requestContext;
+
+    fastStartRef.current.last = {
+      requestedAt,
+      firstPlayingAt,
+      firstAudioMs,
+      trackId: pendingTrackId ?? audioMetrics.currentTrackId ?? undefined,
+      playbackSessionId: fastStartRef.current.pending?.playbackSessionId,
+      channelId: ctx?.channelId,
+      energyLevel: ctx?.energyLevel,
+      source: ctx?.source ?? 'unknown',
+    };
+
+    // Clear the active request so stalls/rebuffer doesn't overwrite the first measurement.
+    fastStartRef.current.requestedAt = null;
+    fastStartRef.current.requestContext = null;
+    fastStartRef.current.pending = null;
+  }, [audioMetrics]);
 
   const handleTrackEnd = async () => {
     if (isAdminMode) return;
@@ -1040,6 +1238,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       if (audioEngine?.unlockIOSAudio) {
         audioEngine.unlockIOSAudio();
       }
+
+      // Start fast-start timer on the user gesture critical path
+      startFastStartTimer(fromPlayer ? 'player' : 'channel_card', channel.id, channelStates[channel.id]?.energyLevel || 'medium');
       
       // Clear playlistChannelId immediately to prevent stale track display during transition
       setPlaylistChannelId(null);
@@ -1054,56 +1255,124 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         energyLevel: channelStates[channel.id]?.energyLevel || 'medium'
       };
 
+      const selectedEnergyLevel = newStates[channel.id].energyLevel;
+      let usedCachedFirstTrack = false;
+      let cachedFirstTrack: AudioTrack | null = null;
+
+      // If warm cache exists, start playback immediately from cached first track (no DB awaits).
+      if (fastStartEnabledRef.current) {
+        const cached = firstTrackCacheRef.current.get(firstTrackCacheKey(channel.id, selectedEnergyLevel));
+        if (cached?.track) {
+          usedCachedFirstTrack = true;
+          cachedFirstTrack = cached.track;
+          lastPlaylistGeneration.current = { channelId: channel.id, energyLevel: selectedEnergyLevel, timestamp: Date.now() };
+          setPlaylist([cached.track]);
+          setPlaylistChannelId(channel.id);
+          setCurrentTrackIndex(0);
+          lastLoadedTrackId.current = null;
+
+          // If the cached first track has been fully prewarmed, start playback immediately
+          // from the user gesture (helps mobile autoplay constraints).
+          const engineAny = audioEngine as any;
+          if (cached.prewarmedAt && engineAny && typeof engineAny.playPrewarmedTrack === 'function') {
+            // Increment playback session id (mirrors loadAndPlay effect behavior)
+            playbackSessionIdRef.current += 1;
+            fastStartRef.current.pending = {
+              trackId: cached.track.track_id,
+              playbackSessionId: playbackSessionIdRef.current,
+            };
+
+            // Prevent the loadAndPlay effect from re-loading the same track.
+            lastLoadedTrackId.current = cached.track.metadata?.track_id?.toString() || cached.track.track_id;
+            shouldAutoPlayRef.current = false;
+
+            engineAny.playPrewarmedTrack(cached.track.track_id, cached.track.file_path, {
+              trackName: cached.track.track_name,
+              artistName: cached.track.artist_name,
+            }).catch(() => {});
+          }
+        } else {
+          // Kick off warm-up in background so the next tap is instant.
+          warmFirstTrack(channel, selectedEnergyLevel).catch(() => {});
+        }
+      }
+
       if (user) {
-        const energyLevel = newStates[channel.id].energyLevel;
+        const energyLevel = selectedEnergyLevel;
         const strategyConfig = channel.playlist_strategy?.[energyLevel];
         const channelStrategy = strategyConfig?.strategy;
 
         // Preload slot strategy data if this is a slot-based channel
         // This runs in parallel with saving preferences
-        const preloadPromise = channelStrategy === 'slot_based'
-          ? preloadSlotStrategy(channel.id, energyLevel)
-          : Promise.resolve(null);
+        if (channelStrategy === 'slot_based') {
+          preloadSlotStrategy(channel.id, energyLevel).catch(() => {});
+        }
 
-        // Run saveLastChannel and session creation in parallel with preload
-        await Promise.all([
-          saveLastChannel(channel.id),
-          preloadPromise,
-          supabase
-            .from('listening_sessions')
-            .insert({
-              user_id: user.id,
-              channel_id: channel.id,
-              energy_level: energyLevel,
-              started_at: new Date().toISOString(),
-            })
-            .select()
-            .single()
-            .then(({ data }) => {
-              if (data) setCurrentSessionId(data.id);
-            })
-        ]);
+        // Fire-and-forget Supabase writes (NOT on the user-gesture critical path)
+        saveLastChannel(channel.id).catch(() => {});
+        supabase
+          .from('listening_sessions')
+          .insert({
+            user_id: user.id,
+            channel_id: channel.id,
+            energy_level: energyLevel,
+            started_at: new Date().toISOString(),
+          })
+          .select()
+          .single()
+          .then(({ data }) => {
+            if (data) setCurrentSessionId(data.id);
+          })
+          .catch(() => {});
+
+        // If we started from a cached first track on a non-slot strategy, build the rest of the
+        // playlist in the background without changing the already-playing first track.
+        if (usedCachedFirstTrack && cachedFirstTrack && channelStrategy !== 'slot_based') {
+          (async () => {
+            const playlistResponse = await generatePlaylist({
+              channelId: channel.id,
+              energyLevel: energyLevel as EnergyLevel,
+              userId: user.id,
+              strategy: channelStrategy || 'weighted',
+            });
+
+            const { data: playlistTracks } = await supabase
+              .from('audio_tracks')
+              .select('*')
+              .in('track_id', playlistResponse.trackIds)
+              .is('deleted_at', null);
+
+            if (!playlistTracks || playlistTracks.length === 0) return;
+
+            const orderedTracks = playlistResponse.trackIds
+              .map(trackId => playlistTracks.find(t => t.metadata?.track_id === trackId))
+              .filter((t): t is AudioTrack => t !== undefined);
+
+            const firstId = cachedFirstTrack.metadata?.track_id;
+            const deduped = [
+              cachedFirstTrack,
+              ...orderedTracks.filter(t => t.metadata?.track_id !== firstId),
+            ];
+
+            setPlaylist(deduped);
+            setPlaylistChannelId(channel.id);
+            setCurrentTrackIndex(0);
+          })().catch(() => {});
+        }
 
         // Check if channel uses restart_session mode and clear state BEFORE turning on
         const playbackContinuation = strategyConfig?.playbackContinuation;
 
         // If restart_session mode, delete playback state and manually trigger playlist generation
         if (playbackContinuation === 'restart_session') {
-          await supabase
+          supabase
             .from('user_playback_state')
             .delete()
             .eq('user_id', user.id)
             .eq('channel_id', channel.id)
-            .eq('energy_level', energyLevel);
-
-          // Set state first
-          setChannelStates(newStates);
-          setActiveChannel(channel);
-          setIsPlaying(true);
-
-          // Then manually generate playlist with forceRestart=true to skip playback state query
-          await generateNewPlaylist(energyLevel, true);
-          return;
+            .eq('energy_level', energyLevel)
+            .then(() => {})
+            .catch(() => {});
         }
       }
 
@@ -1136,28 +1405,31 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     if (!channel) return;
 
     if (user) {
-      const { data: userPreference } = await supabase
-        .from('user_preferences')
-        .select('channel_energy_levels')
-        .eq('user_id', user.id)
-        .maybeSingle();
+      // Fire-and-forget preference persistence (not on the critical path)
+      (async () => {
+        const { data: userPreference } = await supabase
+          .from('user_preferences')
+          .select('channel_energy_levels')
+          .eq('user_id', user.id)
+          .maybeSingle();
 
-      const energyLevels = userPreference?.channel_energy_levels || {};
-      energyLevels[channelId] = energyLevel;
+        const energyLevels = userPreference?.channel_energy_levels || {};
+        energyLevels[channelId] = energyLevel;
 
-      await supabase
-        .from('user_preferences')
-        .upsert(
-          {
-            user_id: user.id,
-            last_channel_id: channelId,
-            channel_energy_levels: energyLevels,
-            last_energy_level: energyLevel
-          },
-          {
-            onConflict: 'user_id'
-          }
-        );
+        await supabase
+          .from('user_preferences')
+          .upsert(
+            {
+              user_id: user.id,
+              last_channel_id: channelId,
+              channel_energy_levels: energyLevels,
+              last_energy_level: energyLevel
+            },
+            {
+              onConflict: 'user_id'
+            }
+          );
+      })().catch(() => {});
     }
 
     if (activeChannel?.id !== channelId) {
@@ -1182,9 +1454,8 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       setIsPlaying(true);
 
       if (user) {
-        await saveLastChannel(channelId);
-
-        const { data } = await supabase
+        saveLastChannel(channelId).catch(() => {});
+        supabase
           .from('listening_sessions')
           .insert({
             user_id: user.id,
@@ -1193,9 +1464,11 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
             started_at: new Date().toISOString(),
           })
           .select()
-          .single();
-
-        if (data) setCurrentSessionId(data.id);
+          .single()
+          .then(({ data }) => {
+            if (data) setCurrentSessionId(data.id);
+          })
+          .catch(() => {});
       }
     } else {
 
@@ -1210,7 +1483,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         [channelId]: { ...prev[channelId], energyLevel }
       }));
 
-      if (allTracks.length > 0 && user) {
+      if (user) {
         // Clear last loaded track so new playlist starts fresh
         lastLoadedTrackId.current = null;
 
@@ -1219,8 +1492,25 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
           shouldAutoPlayRef.current = true;
         }
 
-        // Pass energy level directly to avoid stale state
-        await generateNewPlaylist(energyLevel);
+        // Start fast-start timer for energy changes on the active channel
+        startFastStartTimer('energy_toggle', channelId, energyLevel);
+
+        // If cached first track exists, start immediately from it.
+        if (fastStartEnabledRef.current) {
+          const cached = firstTrackCacheRef.current.get(firstTrackCacheKey(channelId, energyLevel));
+          if (cached?.track) {
+            lastPlaylistGeneration.current = { channelId, energyLevel, timestamp: Date.now() };
+            setPlaylist([cached.track]);
+            setPlaylistChannelId(channelId);
+            setCurrentTrackIndex(0);
+            lastLoadedTrackId.current = null;
+          } else {
+            warmFirstTrack(channel, energyLevel).catch(() => {});
+          }
+        }
+
+        // Pass energy level directly to avoid stale state (background, non-blocking)
+        generateNewPlaylist(energyLevel).catch(() => {});
       }
     }
   };
@@ -1393,7 +1683,21 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         getActiveChannel: () => activeChannel,
         getChannelStates: () => channelStates,
         isAdminMode: () => isAdminMode,
-        getMetrics: () => audioMetrics,
+        getMetrics: () => ({
+          ...(audioMetrics ? (audioMetrics as any) : {}),
+          playbackSessionId: playbackSessionIdRef.current,
+          fastStart: fastStartRef.current.last,
+          // Expose whether the active channel's first-track cache is fully prewarmed (for E2E/diagnostics)
+          fastStartCache: activeChannel
+            ? {
+                channelId: activeChannel.id,
+                energyLevel: channelStates[activeChannel.id]?.energyLevel ?? 'medium',
+                entry: firstTrackCacheRef.current.get(
+                  `${activeChannel.id}:${channelStates[activeChannel.id]?.energyLevel ?? 'medium'}`
+                ) ?? null,
+              }
+            : null,
+        }),
         getCurrentTrackUrl: () => audioMetrics?.currentTrackUrl ?? null,
         getPlaybackSessionId: () => playbackSessionIdRef.current,
         getCurrentTime: () => audioEngine?.getCurrentTime() ?? 0,

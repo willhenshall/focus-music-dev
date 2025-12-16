@@ -1,4 +1,3 @@
-import { defineConfig, devices } from "@playwright/test";
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -9,6 +8,20 @@ const __dirname = path.dirname(__filename);
 
 // Load test environment variables from .env.test
 dotenv.config({ path: path.resolve(__dirname, ".env.test") });
+
+// Playwright defaults to using `chromium-headless-shell` in headless mode.
+// For our audio-focused E2E suite, we prefer full Chromium to avoid feature gaps.
+process.env.PW_CHROMIUM_USE_HEADLESS_SHELL ??= "0";
+
+// On some macOS + Apple Silicon setups, Playwright can mis-detect the host platform as x64.
+// Force the correct platform so browser downloads/executables resolve consistently.
+if (process.platform === "darwin" && process.arch === "arm64") {
+  process.env.PLAYWRIGHT_HOST_PLATFORM_OVERRIDE ??= "mac-arm64";
+}
+
+// IMPORTANT: use a dynamic import so the env overrides above are set
+// before Playwright initializes and decides which browser binary to use.
+const { defineConfig, devices } = await import("@playwright/test");
 
 export default defineConfig({
   testDir: "./test/e2e",
@@ -28,11 +41,12 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      // Force full Chromium (not chromium-headless-shell) for better media parity.
+      use: { ...devices["Desktop Chrome"], channel: "chromium" },
     },
     {
       name: "mobile-chrome",
-      use: { ...devices["Pixel 5"] },
+      use: { ...devices["Pixel 5"], channel: "chromium" },
     },
   ],
 
