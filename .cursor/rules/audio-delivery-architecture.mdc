@@ -36,6 +36,11 @@ iOS-Specific Optimizations:
 - Version tracking for crossfade implementation
 Importance Score: 75
 
+⚠️ PROTECTION WARNING:
+- Audio engine files (enterpriseAudioEngine.ts and related) are HIGH-RISK
+- Do NOT modify timing, crossfade, autoplay, or playback lifecycle unless explicitly requested
+- See high-risk-areas.mdc for approval protocol
+
 The architecture focuses on resilient audio delivery through multi-CDN distribution and adaptive bitrate streaming, with special consideration for iOS platform requirements.
 
 $END$
