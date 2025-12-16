@@ -1762,6 +1762,15 @@ export class StreamingAudioEngine implements IAudioEngine {
                         this.nextAudio.src !== this.currentAudio.src &&
                         this.nextAudio !== this.currentAudio;
 
+    // Safety: prewarm may have muted the inactive element. Ensure audible playback when we actually play.
+    try {
+      if (hasNewTrack) {
+        this.nextAudio.muted = false;
+      } else {
+        this.currentAudio.muted = false;
+      }
+    } catch {}
+
     // [iOS FIX] On iOS, the FIRST play() must be called directly from user gesture
     // Crossfade uses async callbacks which iOS blocks on first interaction
     // Skip crossfade on first play to ensure audio unlocks properly
@@ -1780,6 +1789,9 @@ export class StreamingAudioEngine implements IAudioEngine {
       }
       
       // Start new audio directly
+      try {
+        newAudio.muted = false;
+      } catch {}
       newAudio.volume = this.volume;
       try {
         await newAudio.play();
@@ -1803,6 +1815,9 @@ export class StreamingAudioEngine implements IAudioEngine {
       await this.crossfadeToNext();
       this.isAudioUnlocked = true; // Mark as unlocked after successful crossfade
     } else {
+      try {
+        this.currentAudio.muted = false;
+      } catch {}
       await this.currentAudio.play();
       this.isPlayingState = true;
       this.metrics.playbackState = 'playing';
@@ -1832,6 +1847,9 @@ export class StreamingAudioEngine implements IAudioEngine {
       }
       
       // Always start at volume 0 and fade in to eliminate clicks
+      try {
+        newAudio.muted = false;
+      } catch {}
       newAudio.volume = 0;
       await newAudio.play();
       this.currentAudio = newAudio;
@@ -1859,6 +1877,9 @@ export class StreamingAudioEngine implements IAudioEngine {
     
     newAudio.volume = 0;
     try {
+      try {
+        newAudio.muted = false;
+      } catch {}
       await newAudio.play();
       console.log('[STREAMING AUDIO] New track play() succeeded');
     } catch (err) {

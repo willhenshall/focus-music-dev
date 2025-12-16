@@ -408,15 +408,30 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   }, [user]); // Re-run when user changes (login/logout)
 
   // Fast-start warm-up: precompute first tracks for likely actions.
-  // Minimal-risk heuristic: active channel at its current energy.
+  // Heuristic: active channel + first few visible cards (one energy each), limited fan-out.
   useEffect(() => {
     if (!user) return;
     if (!fastStartEnabledRef.current) return;
     if (channels.length === 0) return;
 
-    if (!activeChannel) return;
-    const energy = channelStates[activeChannel.id]?.energyLevel ?? 'medium';
-    warmFirstTrack(activeChannel, energy).catch(() => {});
+    const warmCandidates: AudioChannel[] = [];
+    if (activeChannel) warmCandidates.push(activeChannel);
+
+    for (const ch of channels) {
+      if (warmCandidates.length >= 4) break; // active + first 3 cards
+      if (activeChannel && ch.id === activeChannel.id) continue;
+      warmCandidates.push(ch);
+    }
+
+    (async () => {
+      for (const ch of warmCandidates) {
+        const energy = channelStates[ch.id]?.energyLevel ?? 'medium';
+        // Sequential to avoid saturating the network on mobile/tethered connections.
+        // Each warmFirstTrack has its own de-dupe via firstTrackWarmupInFlightRef anyway.
+        // eslint-disable-next-line no-await-in-loop
+        await warmFirstTrack(ch, energy);
+      }
+    })().catch(() => {});
   }, [user, channels, activeChannel]);
 
   // Control crossfading based on admin mode
