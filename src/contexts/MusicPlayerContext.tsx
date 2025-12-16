@@ -177,12 +177,35 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     if (envEnabled === 'true') return true;
     if (envEnabled === 'false') return false;
     try {
-      return localStorage.getItem('fastStartAudio') === '1';
+      const ls = localStorage.getItem('fastStartAudio');
+      // In dev, default ON (unless explicitly disabled) so localhost matches intended behavior.
+      // In prod, default OFF unless explicitly enabled.
+      const isDev = Boolean((import.meta as any)?.env?.DEV);
+      if (isDev) {
+        if (ls === '0') return false;
+        if (ls === '1') return true;
+        return true;
+      }
+      return ls === '1';
     } catch {
       return false;
     }
   };
   const fastStartEnabledRef = useRef<boolean>(getFastStartEnabled());
+
+  // Keep fast-start flag in sync (useful on localhost when toggling localStorage).
+  useEffect(() => {
+    const refresh = () => {
+      fastStartEnabledRef.current = getFastStartEnabled();
+    };
+    refresh();
+    window.addEventListener('focus', refresh);
+    window.addEventListener('storage', refresh);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('storage', refresh);
+    };
+  }, []);
 
   const startFastStartTimer = (source: string, channelId?: string, energyLevel?: 'low' | 'medium' | 'high') => {
     // Only track user-gesture starts (not auto-advance, not background loads)
@@ -1702,6 +1725,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
           ...(audioMetrics ? (audioMetrics as any) : {}),
           playbackSessionId: playbackSessionIdRef.current,
           fastStart: fastStartRef.current.last,
+          fastStartEnabled: fastStartEnabledRef.current,
           // Expose whether the active channel's first-track cache is fully prewarmed (for E2E/diagnostics)
           fastStartCache: activeChannel
             ? {
