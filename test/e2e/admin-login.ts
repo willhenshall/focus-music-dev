@@ -47,7 +47,8 @@ export async function signInAsAdmin(page: Page): Promise<boolean> {
 
   try {
     // Navigate to the app
-    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    // NOTE: Vite dev server keeps a websocket connection, so "networkidle" can hang.
+    await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
 
     // Bypass password gate if present
     await bypassPasswordGate(page);
@@ -71,9 +72,23 @@ export async function signInAsAdmin(page: Page): Promise<boolean> {
     // Submit the form
     await page.locator("form").getByRole("button", { name: /sign in/i }).click();
 
-    // Wait for admin dashboard to load - admin button indicates successful admin login
-    const adminButton = page.getByRole("button", { name: /admin/i });
-    await adminButton.waitFor({ state: "visible", timeout: 15000 });
+    // Wait for logged-in UI to render.
+    await page.locator("[data-channel-id]").first().waitFor({ state: "visible", timeout: 20000 });
+
+    // Confirm admin-only affordance exists.
+    // Desktop: diagnostics button in header.
+    // Mobile: diagnostics entry in hamburger menu.
+    const mobileMenuButton = page.getByTestId("mobile-menu-button");
+    const isMobile = await mobileMenuButton.isVisible().catch(() => false);
+
+    if (isMobile) {
+      await mobileMenuButton.click();
+      await page.getByTestId("mobile-audio-diagnostics").waitFor({ state: "visible", timeout: 10000 });
+      // Close menu (best-effort)
+      await mobileMenuButton.click().catch(() => {});
+    } else {
+      await page.locator("button[title=\"Audio Engine Diagnostics\"]").waitFor({ state: "visible", timeout: 15000 });
+    }
 
     console.log("[ADMIN LOGIN] Successfully signed in as admin");
     return true;

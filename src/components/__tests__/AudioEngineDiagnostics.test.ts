@@ -6,26 +6,11 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { getDeliverySource, calculateHealthScore, formatBitrate } from '../AudioEngineDiagnostics';
 
 // ============================================================================
-// Helper function implementations (mirroring component logic for testing)
+// Lightweight mock metric types (match the helper signatures)
 // ============================================================================
-
-type DeliverySource = { source: string; type: 'hls' | 'mp3' | 'unknown' };
-
-function getDeliverySource(url: string | null): DeliverySource {
-  if (!url) return { source: 'None', type: 'unknown' };
-  if (url.includes('.m3u8') || url.includes('audio-hls')) {
-    return { source: 'Supabase HLS', type: 'hls' };
-  }
-  if (url.includes('r2.dev') || url.includes('cloudflare')) {
-    return { source: 'Cloudflare CDN', type: 'mp3' };
-  }
-  if (url.includes('supabase')) {
-    return { source: 'Supabase Storage', type: 'mp3' };
-  }
-  return { source: 'Unknown', type: 'unknown' };
-}
 
 interface HLSMetrics {
   isHLSActive: boolean;
@@ -36,65 +21,6 @@ interface HLSMetrics {
     failed: number;
     retried: number;
   };
-}
-
-interface MockMetrics {
-  failureCount: number;
-  stallCount: number;
-  connectionQuality: 'excellent' | 'good' | 'fair' | 'poor' | 'offline';
-  circuitBreakerState: 'closed' | 'open' | 'half-open';
-  hls?: HLSMetrics;
-}
-
-function calculateHealthScore(metrics: MockMetrics | null): { score: number; status: 'excellent' | 'good' | 'fair' | 'poor' } {
-  if (!metrics) return { score: 0, status: 'poor' };
-  
-  let score = 100;
-  
-  // Deduct for failures
-  if (metrics.failureCount > 0) score -= Math.min(metrics.failureCount * 10, 30);
-  
-  // Deduct for stalls
-  if (metrics.stallCount > 0) score -= Math.min(metrics.stallCount * 5, 20);
-  
-  // Deduct for poor connection
-  if (metrics.connectionQuality === 'poor') score -= 20;
-  else if (metrics.connectionQuality === 'fair') score -= 10;
-  else if (metrics.connectionQuality === 'offline') score -= 50;
-  
-  // Deduct for circuit breaker state
-  if (metrics.circuitBreakerState === 'open') score -= 30;
-  else if (metrics.circuitBreakerState === 'half-open') score -= 15;
-  
-  // HLS-specific deductions
-  const hls = metrics.hls;
-  if (hls?.isHLSActive) {
-    // Buffer health
-    const bufferRatio = hls.bufferLength / hls.targetBuffer;
-    if (bufferRatio < 0.3) score -= 15;
-    else if (bufferRatio < 0.5) score -= 5;
-    
-    // Fragment failures
-    const totalFrags = hls.fragmentStats.loaded + hls.fragmentStats.failed;
-    if (totalFrags > 0) {
-      const failRate = hls.fragmentStats.failed / totalFrags;
-      if (failRate > 0.1) score -= 20;
-      else if (failRate > 0.05) score -= 10;
-    }
-  }
-  
-  score = Math.max(0, Math.min(100, score));
-  
-  if (score >= 90) return { score, status: 'excellent' };
-  if (score >= 70) return { score, status: 'good' };
-  if (score >= 50) return { score, status: 'fair' };
-  return { score, status: 'poor' };
-}
-
-function formatBitrate(bps: number): string {
-  if (bps >= 1000000) return `${(bps / 1000000).toFixed(1)} Mbps`;
-  if (bps >= 1000) return `${Math.round(bps / 1000)} kbps`;
-  return `${bps} bps`;
 }
 
 // ============================================================================
