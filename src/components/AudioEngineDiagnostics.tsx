@@ -37,16 +37,24 @@ export type DeliverySource = { source: string; type: 'hls' | 'mp3' | 'unknown' }
 // Determine delivery source from URL
 export function getDeliverySource(url: string | null): DeliverySource {
   if (!url) return { source: 'None', type: 'unknown' };
-  if (url.includes('.m3u8') || url.includes('audio-hls')) {
-    return { source: 'Supabase HLS', type: 'hls' };
+  const lower = url.toLowerCase();
+  const isHls = lower.includes('.m3u8') || lower.includes('/hls/');
+  const isMp3 = lower.includes('.mp3');
+
+  // Prefer host-based classification (same file type can be served from different origins)
+  const isCloudflare = lower.includes('r2.dev') || lower.includes('cloudflare') || lower.includes('r2.cloudflarestorage.com');
+  if (isCloudflare) {
+    return { source: 'Cloudflare CDN', type: isHls ? 'hls' : isMp3 ? 'mp3' : 'unknown' };
   }
-  if (url.includes('r2.dev') || url.includes('cloudflare')) {
-    return { source: 'Cloudflare CDN', type: 'mp3' };
+
+  // Supabase buckets/domains
+  const isSupabase = lower.includes('supabase');
+  if (isSupabase) {
+    if (lower.includes('audio-hls') || isHls) return { source: 'Supabase HLS', type: 'hls' };
+    return { source: 'Supabase Storage', type: isMp3 ? 'mp3' : 'unknown' };
   }
-  if (url.includes('supabase')) {
-    return { source: 'Supabase Storage', type: 'mp3' };
-  }
-  return { source: 'Unknown', type: 'unknown' };
+
+  return { source: 'Unknown', type: isHls ? 'hls' : isMp3 ? 'mp3' : 'unknown' };
 }
 
 type HealthScoreInput = {
@@ -754,7 +762,7 @@ export function AudioEngineDiagnostics({
               </div>
               {(currentTrackFilePath || currentFileName) && (
                 <div className="ml-[72px] text-[10px] text-slate-500 font-mono truncate" title={currentTrackFilePath || currentFileName || ''}>
-                  File: {currentTrackFilePath || currentFileName}
+                  Track file_path: {currentTrackFilePath || currentFileName}
                 </div>
               )}
               {metrics.currentTrackUrl && (
@@ -796,7 +804,7 @@ export function AudioEngineDiagnostics({
               </div>
               {(prefetchTrackFilePath || prefetchFileName) && (
                 <div className="ml-[72px] text-[10px] text-slate-500 font-mono truncate" title={prefetchTrackFilePath || prefetchFileName || ''}>
-                  File: {prefetchTrackFilePath || prefetchFileName}
+                  Track file_path: {prefetchTrackFilePath || prefetchFileName}
                 </div>
               )}
               {metrics.prefetchedTrackUrl && (

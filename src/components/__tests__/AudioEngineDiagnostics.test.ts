@@ -34,9 +34,9 @@ describe('AudioEngineDiagnostics Helper Functions', () => {
       expect(result).toEqual({ source: 'None', type: 'unknown' });
     });
 
-    it('should detect HLS from .m3u8 extension', () => {
+    it('should detect HLS type from .m3u8 extension (unknown origin)', () => {
       const result = getDeliverySource('https://example.com/audio/12345/master.m3u8');
-      expect(result).toEqual({ source: 'Supabase HLS', type: 'hls' });
+      expect(result).toEqual({ source: 'Unknown', type: 'hls' });
     });
 
     it('should detect HLS from audio-hls bucket path', () => {
@@ -47,6 +47,11 @@ describe('AudioEngineDiagnostics Helper Functions', () => {
     it('should detect Cloudflare CDN from r2.dev domain', () => {
       const result = getDeliverySource('https://pub-16f9274cf01948468de2d5af8a6fdb23.r2.dev/audio/179845.mp3');
       expect(result).toEqual({ source: 'Cloudflare CDN', type: 'mp3' });
+    });
+
+    it('should detect Cloudflare CDN HLS from r2.dev domain', () => {
+      const result = getDeliverySource('https://pub-16f9274cf01948468de2d5af8a6fdb23.r2.dev/hls/179845/master.m3u8');
+      expect(result).toEqual({ source: 'Cloudflare CDN', type: 'hls' });
     });
 
     it('should detect Cloudflare CDN from cloudflare domain', () => {
@@ -61,7 +66,7 @@ describe('AudioEngineDiagnostics Helper Functions', () => {
 
     it('should return Unknown for unrecognized URLs', () => {
       const result = getDeliverySource('https://example.com/audio.mp3');
-      expect(result).toEqual({ source: 'Unknown', type: 'unknown' });
+      expect(result).toEqual({ source: 'Unknown', type: 'mp3' });
     });
   });
 
