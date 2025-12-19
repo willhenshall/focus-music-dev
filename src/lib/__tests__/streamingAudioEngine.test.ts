@@ -545,4 +545,26 @@ describe('StreamingAudioEngine Integration', () => {
       engine.destroy();
     });
   });
+
+  it('keeps metrics currentLevel in sync with hls.js state', () => {
+    const adapter = createMockStorageAdapter();
+    const engine = new StreamingAudioEngine(adapter as any);
+    const [primaryHls] = (Hls as any).__instances;
+
+    // Simulate HLS being active, but without emitting LEVEL_SWITCHED.
+    // This can happen around cold starts / channel switches.
+    (engine as any).hlsMetrics.isHLSActive = true;
+
+    primaryHls.currentLevel = 3; // premium
+    primaryHls.loadLevel = 3;
+
+    // Force a metrics refresh
+    (engine as any).updateMetrics();
+
+    const metrics = engine.getMetrics();
+    expect(metrics.hls?.currentLevel).toBe(3);
+    expect(metrics.hls?.abr.currentQualityTier).toBe('premium');
+
+    engine.destroy();
+  });
 });

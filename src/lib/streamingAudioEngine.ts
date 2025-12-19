@@ -903,6 +903,16 @@ export class StreamingAudioEngine implements IAudioEngine {
       // Bandwidth
       this.hlsMetrics.bandwidthEstimate = hls.bandwidthEstimate || 0;
       this.metrics.estimatedBandwidth = Math.floor(this.hlsMetrics.bandwidthEstimate / 1000);
+
+      // Keep "current level" in sync even if we miss/lag HLS events.
+      // LEVEL_SWITCHED can be inconsistent around cold-start / channel switches; reading from the instance is the source of truth.
+      const effectiveCurrentLevel =
+        hls.currentLevel >= 0
+          ? hls.currentLevel
+          : hls.loadLevel >= 0
+            ? hls.loadLevel
+            : this.hlsMetrics.currentLevel;
+      this.hlsMetrics.currentLevel = effectiveCurrentLevel;
       
       // ABR state from hls.js
       this.hlsMetrics.abr.autoLevelEnabled = hls.autoLevelEnabled;
@@ -914,7 +924,7 @@ export class StreamingAudioEngine implements IAudioEngine {
       this.hlsMetrics.abr.effectiveBandwidth = hls.bandwidthEstimate || 0;
       
       // Quality tier recommendations
-      this.hlsMetrics.abr.currentQualityTier = this.getQualityTierName(hls.currentLevel);
+      this.hlsMetrics.abr.currentQualityTier = this.getQualityTierName(effectiveCurrentLevel);
       this.hlsMetrics.abr.recommendedQualityTier = this.getRecommendedTier(hls.bandwidthEstimate || 0);
       
       // Time since last switch
@@ -923,7 +933,7 @@ export class StreamingAudioEngine implements IAudioEngine {
       }
       
       // Determine ABR state
-      const currentLevel = hls.currentLevel;
+      const currentLevel = effectiveCurrentLevel;
       const recommendedLevel = this.hlsMetrics.levels.findIndex(
         l => l.tierName === this.hlsMetrics.abr.recommendedQualityTier
       );
