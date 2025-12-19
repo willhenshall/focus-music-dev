@@ -888,6 +888,18 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
                   <SettingsIcon size={18} />
                   <span className="font-medium">Settings</span>
                 </button>
+                {profile?.is_admin && onToggleAudioDiagnostics && (
+                  <button
+                    onClick={() => { onToggleAudioDiagnostics(); setShowMobileMenu(false); }}
+                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-left ${
+                      showAudioDiagnostics ? 'bg-blue-50 text-blue-700' : 'text-slate-700 hover:bg-slate-100'
+                    }`}
+                    data-testid="mobile-audio-diagnostics"
+                  >
+                    <Activity size={18} />
+                    <span className="font-medium">Audio Diagnostics</span>
+                  </button>
+                )}
                 {onSwitchToAdmin && (
                   <button
                     onClick={() => { onSwitchToAdmin(); setShowMobileMenu(false); }}

@@ -294,7 +294,7 @@ function AppContent() {
           <SlotStrategyEditor channelId={channelId} energyTier={energyTier} />
           <NowPlayingFooter onOpenSlideshow={() => setShowSlideshow(true)} />
           {showSlideshow && <SlideshowOverlay onClose={() => setShowSlideshow(false)} />}
-          {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} engineType={engineType} isStreamingEngine={isStreamingEngine} currentTrackInfo={{ trackName: currentTrack?.track_name, artistName: currentTrack?.artist_name }} prefetchTrackInfo={{ trackName: playlist[currentTrackIndex + 1]?.track_name, artistName: playlist[currentTrackIndex + 1]?.artist_name }} />}
+          {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} engineType={engineType} isStreamingEngine={isStreamingEngine} currentTrackInfo={{ trackName: currentTrack?.track_name, artistName: currentTrack?.artist_name }} prefetchTrackInfo={{ trackName: playlist[currentTrackIndex + 1]?.track_name, artistName: playlist[currentTrackIndex + 1]?.artist_name }} currentTrackFilePath={currentTrack?.file_path ?? null} prefetchTrackFilePath={playlist[currentTrackIndex + 1]?.file_path ?? null} />}
         </>
       );
     }
@@ -313,7 +313,7 @@ function AppContent() {
           />
           <NowPlayingFooter onOpenSlideshow={() => setShowSlideshow(true)} />
           {showSlideshow && <SlideshowOverlay onClose={() => setShowSlideshow(false)} />}
-          {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} engineType={engineType} isStreamingEngine={isStreamingEngine} currentTrackInfo={{ trackName: currentTrack?.track_name, artistName: currentTrack?.artist_name }} prefetchTrackInfo={{ trackName: playlist[currentTrackIndex + 1]?.track_name, artistName: playlist[currentTrackIndex + 1]?.artist_name }} />}
+          {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} engineType={engineType} isStreamingEngine={isStreamingEngine} currentTrackInfo={{ trackName: currentTrack?.track_name, artistName: currentTrack?.artist_name }} prefetchTrackInfo={{ trackName: playlist[currentTrackIndex + 1]?.track_name, artistName: playlist[currentTrackIndex + 1]?.artist_name }} currentTrackFilePath={currentTrack?.file_path ?? null} prefetchTrackFilePath={playlist[currentTrackIndex + 1]?.file_path ?? null} />}
         </>
       );
     }
@@ -332,7 +332,7 @@ function AppContent() {
         />
         <NowPlayingFooter onOpenSlideshow={() => setShowSlideshow(true)} />
         {showSlideshow && <SlideshowOverlay onClose={() => setShowSlideshow(false)} />}
-        {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} engineType={engineType} isStreamingEngine={isStreamingEngine} currentTrackInfo={{ trackName: currentTrack?.track_name, artistName: currentTrack?.artist_name }} prefetchTrackInfo={{ trackName: playlist[currentTrackIndex + 1]?.track_name, artistName: playlist[currentTrackIndex + 1]?.artist_name }} />}
+        {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} engineType={engineType} isStreamingEngine={isStreamingEngine} currentTrackInfo={{ trackName: currentTrack?.track_name, artistName: currentTrack?.artist_name }} prefetchTrackInfo={{ trackName: playlist[currentTrackIndex + 1]?.track_name, artistName: playlist[currentTrackIndex + 1]?.artist_name }} currentTrackFilePath={currentTrack?.file_path ?? null} prefetchTrackFilePath={playlist[currentTrackIndex + 1]?.file_path ?? null} />}
       </>
     );
   }
@@ -347,7 +347,7 @@ function AppContent() {
       <UserDashboard initialTab={initialTab} />
       <NowPlayingFooter onOpenSlideshow={() => setShowSlideshow(true)} />
       {showSlideshow && <SlideshowOverlay onClose={() => setShowSlideshow(false)} />}
-      {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} engineType={engineType} isStreamingEngine={isStreamingEngine} currentTrackInfo={{ trackName: currentTrack?.track_name, artistName: currentTrack?.artist_name }} prefetchTrackInfo={{ trackName: playlist[currentTrackIndex + 1]?.track_name, artistName: playlist[currentTrackIndex + 1]?.artist_name }} />}
+      {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} engineType={engineType} isStreamingEngine={isStreamingEngine} currentTrackInfo={{ trackName: currentTrack?.track_name, artistName: currentTrack?.artist_name }} prefetchTrackInfo={{ trackName: playlist[currentTrackIndex + 1]?.track_name, artistName: playlist[currentTrackIndex + 1]?.artist_name }} currentTrackFilePath={currentTrack?.file_path ?? null} prefetchTrackFilePath={playlist[currentTrackIndex + 1]?.file_path ?? null} />}
     </>
   );
 }
