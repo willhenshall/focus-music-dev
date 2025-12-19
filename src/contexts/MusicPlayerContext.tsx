@@ -227,7 +227,18 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
     const key = firstTrackCacheKey(channel.id, energyLevel);
     const cached = firstTrackCacheRef.current.get(key);
+    const engineAny = audioEngine as any;
+    // If we already have the first track cached recently, we still might need to prewarm it
+    // (e.g. cache populated before the audio engine finished initializing).
     if (cached && (Date.now() - cached.warmedAt) < 5 * 60 * 1000) {
+      if (!cached.prewarmedAt && engineAny && typeof engineAny.prewarmTrack === 'function') {
+        try {
+          await engineAny.prewarmTrack(cached.track.track_id, cached.track.file_path, { preferHLS: true, startLevel: 0 });
+          firstTrackCacheRef.current.set(key, { track: cached.track, warmedAt: Date.now(), prewarmedAt: Date.now() });
+        } catch {
+          // ignore
+        }
+      }
       return;
     }
 
@@ -238,7 +249,6 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       try {
         const strategyConfig = channel.playlist_strategy?.[energyLevel];
         const channelStrategy = strategyConfig?.strategy;
-        const engineAny = audioEngine as any;
 
         if (channelStrategy === 'slot_based') {
           const cachedStrategy = await preloadSlotStrategy(channel.id, energyLevel);
@@ -436,12 +446,13 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     if (!user) return;
     if (!fastStartEnabledRef.current) return;
     if (channels.length === 0) return;
+    if (!audioEngine) return;
 
     const warmCandidates: AudioChannel[] = [];
     if (activeChannel) warmCandidates.push(activeChannel);
 
     for (const ch of channels) {
-      if (warmCandidates.length >= 4) break; // active + first 3 cards
+      if (warmCandidates.length >= 8) break; // active + first 7 cards (covers visible grid on desktop)
       if (activeChannel && ch.id === activeChannel.id) continue;
       warmCandidates.push(ch);
     }
@@ -455,7 +466,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         await warmFirstTrack(ch, energy);
       }
     })().catch(() => {});
-  }, [user, channels, activeChannel]);
+  }, [user, channels, activeChannel, audioEngine, channelStates]);
 
   // Control crossfading based on admin mode
   useEffect(() => {
