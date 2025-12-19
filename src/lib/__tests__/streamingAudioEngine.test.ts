@@ -6,36 +6,86 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { StreamingAudioEngine } from '../streamingAudioEngine';
+import Hls from 'hls.js';
 
 // Mock hls.js
 vi.mock('hls.js', () => {
-  const MockHls = vi.fn(() => ({
-    loadSource: vi.fn(),
-    attachMedia: vi.fn(),
-    destroy: vi.fn(),
-    on: vi.fn(),
-    off: vi.fn(),
-    startLoad: vi.fn(),
-    recoverMediaError: vi.fn(),
-    bandwidthEstimate: 1000000,
-    media: null,
-  }));
-  
-  (MockHls as any).isSupported = () => true;
-  (MockHls as any).Events = {
-    MANIFEST_PARSED: 'hlsManifestParsed',
-    LEVEL_SWITCHED: 'hlsLevelSwitched',
-    FRAG_LOADED: 'hlsFragLoaded',
-    FRAG_LOAD_EMERGENCY_ABORTED: 'hlsFragLoadEmergencyAborted',
-    ERROR: 'hlsError',
-    BUFFER_APPENDED: 'hlsBufferAppended',
-  };
-  (MockHls as any).ErrorTypes = {
-    NETWORK_ERROR: 'networkError',
-    MEDIA_ERROR: 'mediaError',
-    OTHER_ERROR: 'otherError',
-  };
-  
+  type Listener = (...args: any[]) => void;
+
+  class MockHls {
+    static __instances: MockHls[] = [];
+
+    static isSupported = () => true;
+
+    static Events = {
+      MANIFEST_PARSED: 'hlsManifestParsed',
+      LEVEL_SWITCHED: 'hlsLevelSwitched',
+      FRAG_LOADED: 'hlsFragLoaded',
+      FRAG_BUFFERED: 'hlsFragBuffered',
+      FRAG_LOAD_EMERGENCY_ABORTED: 'hlsFragLoadEmergencyAborted',
+      ERROR: 'hlsError',
+      BUFFER_APPENDED: 'hlsBufferAppended',
+    };
+
+    static ErrorTypes = {
+      NETWORK_ERROR: 'networkError',
+      MEDIA_ERROR: 'mediaError',
+      OTHER_ERROR: 'otherError',
+    };
+
+    public media: any = null;
+    public bandwidthEstimate = 1_000_000;
+
+    // ABR-related state used by the engine
+    public autoLevelEnabled = true;
+    public autoLevelCapping = -1;
+    public currentLevel = 0;
+    public manualLevel = -1;
+    public loadLevel = 0;
+    public nextLoadLevel = 0;
+    public nextAutoLevel = 0;
+    public startLevel = -1;
+    public levels: any[] = [{ bitrate: 64_000 }];
+
+    public loadSource = vi.fn();
+    public attachMedia = vi.fn((media: any) => {
+      this.media = media;
+    });
+    public detachMedia = vi.fn(() => {
+      this.media = null;
+    });
+    public destroy = vi.fn();
+    public startLoad = vi.fn();
+    public stopLoad = vi.fn();
+    public recoverMediaError = vi.fn();
+
+    private listeners = new Map<string, Set<Listener>>();
+
+    public on = vi.fn((event: string, cb: Listener) => {
+      const set = this.listeners.get(event) ?? new Set<Listener>();
+      set.add(cb);
+      this.listeners.set(event, set);
+    });
+
+    public off = vi.fn((event: string, cb: Listener) => {
+      const set = this.listeners.get(event);
+      if (!set) return;
+      set.delete(cb);
+    });
+
+    // Test helper: emit mock HLS events
+    public emit(event: string, data?: any) {
+      const set = this.listeners.get(event);
+      if (!set) return;
+      for (const cb of set) cb(event, data);
+    }
+
+    constructor() {
+      MockHls.__instances.push(this);
+    }
+  }
+
   return { default: MockHls };
 });
 
@@ -79,13 +129,22 @@ const _createMockAudioElement = () => {
   return audio;
 };
 
-// Mock document.body.appendChild
-const originalAppendChild = document.body.appendChild;
+// Prevent runaway requestAnimationFrame loops in unit tests
+const originalRAF = globalThis.requestAnimationFrame;
+const originalCancelRAF = globalThis.cancelAnimationFrame;
 beforeEach(() => {
-  document.body.appendChild = vi.fn();
+  globalThis.requestAnimationFrame = vi.fn(() => 1) as any;
+  globalThis.cancelAnimationFrame = vi.fn() as any;
 });
 afterEach(() => {
-  document.body.appendChild = originalAppendChild;
+  globalThis.requestAnimationFrame = originalRAF;
+  globalThis.cancelAnimationFrame = originalCancelRAF;
+
+  // Cleanup any appended audio elements from engine instances
+  document.querySelectorAll('audio').forEach((el) => el.remove());
+
+  // Reset mock instances between tests
+  if ((Hls as any)?.__instances) (Hls as any).__instances = [];
 });
 
 describe('StreamingAudioEngine', () => {
@@ -212,20 +271,59 @@ describe('StreamingAudioEngine', () => {
 
 describe('StreamingAudioEngine Integration', () => {
   describe('Track Loading', () => {
-    it('should prefer HLS when available', async () => {
+    it('should prefer HLS when supported', async () => {
       const adapter = createMockStorageAdapter();
-      const hasHLS = await adapter.hasHLSSupport('test-track');
-      
-      expect(hasHLS).toBe(true);
-      expect(adapter.hasHLSSupport).toHaveBeenCalledWith('test-track');
+      const engine = new StreamingAudioEngine(adapter as any);
+      const [, secondaryHls] = (Hls as any).__instances;
+
+      const p = engine.loadTrack('test-track', 'file/path.mp3');
+
+      // Wait until loadSource is invoked so readiness listeners are attached.
+      for (let i = 0; i < 20 && secondaryHls.loadSource.mock.calls.length === 0; i++) {
+        // eslint-disable-next-line no-await-in-loop
+        await Promise.resolve();
+      }
+
+      secondaryHls.media = {
+        readyState: 2,
+        currentTime: 0,
+        buffered: { length: 1, end: () => 1 },
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      };
+      secondaryHls.emit(Hls.Events.MANIFEST_PARSED, { levels: [{ bitrate: 32_000 }] });
+      secondaryHls.emit(Hls.Events.BUFFER_APPENDED, {});
+
+      await p;
+
+      expect(adapter.getHLSUrl).toHaveBeenCalled();
+      expect(secondaryHls.loadSource).toHaveBeenCalled();
+      engine.destroy();
     });
 
-    it('should fallback to direct MP3 when HLS unavailable', async () => {
+    it('should fallback to direct MP3 when HLS load fails', async () => {
       const adapter = createMockStorageAdapter();
-      adapter.hasHLSSupport.mockResolvedValue(false);
-      
-      const hasHLS = await adapter.hasHLSSupport('test-track');
-      expect(hasHLS).toBe(false);
+      const engine = new StreamingAudioEngine(adapter as any);
+      const [, secondaryHls] = (Hls as any).__instances;
+
+      // In jsdom, HTMLMediaElement does not actually load/play media.
+      // Stub canPlay waiting so fallback doesn't hang.
+      (engine as any).waitForCanPlay = () => Promise.resolve();
+
+      const p = engine.loadTrack('test-track', 'file/path.mp3');
+
+      for (let i = 0; i < 20 && secondaryHls.loadSource.mock.calls.length === 0; i++) {
+        // eslint-disable-next-line no-await-in-loop
+        await Promise.resolve();
+      }
+
+      // Trigger a fatal HLS error so engine falls back
+      secondaryHls.emit(Hls.Events.ERROR, { fatal: true, details: 'manifestLoadError', type: 'networkError' });
+
+      await p;
+
+      expect(adapter.getAudioUrl).toHaveBeenCalled();
+      engine.destroy();
     });
   });
 
@@ -263,6 +361,188 @@ describe('StreamingAudioEngine Integration', () => {
       expect(clampSeek(-10)).toBe(0);
       expect(clampSeek(50)).toBe(50);
       expect(clampSeek(150)).toBe(100);
+    });
+  });
+
+  describe('Fast-start prewarm', () => {
+    it('prewarmTrack loads the HLS source into the inactive pipeline', async () => {
+      const adapter = createMockStorageAdapter();
+      const engine = new StreamingAudioEngine(adapter as any);
+
+      // Engine constructor should have created two HLS instances (primary/secondary)
+      expect((Hls as any).__instances.length).toBe(2);
+      const [primaryHls, secondaryHls] = (Hls as any).__instances;
+
+      // Kick off prewarm without awaiting yet (it blocks on readiness)
+      const prewarmPromise = engine.prewarmTrack('track-1', 'file/path.mp3', {
+        preferHLS: true,
+        startLevel: 0,
+      });
+
+      // Simulate readiness on the *inactive* (secondary) pipeline
+      // Use a plain object here rather than a real HTMLAudioElement, since
+      // readyState/buffered are not reliably writable in jsdom.
+      secondaryHls.media = {
+        readyState: 2,
+        currentTime: 0,
+        buffered: { length: 1, end: () => 1 },
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      };
+
+      // Ensure prewarm got far enough to attach readiness listeners
+      for (let i = 0; i < 20 && secondaryHls.loadSource.mock.calls.length === 0; i++) {
+        // eslint-disable-next-line no-await-in-loop
+        await Promise.resolve();
+      }
+
+      secondaryHls.emit(Hls.Events.MANIFEST_PARSED, { levels: [{ bitrate: 32_000 }] });
+      secondaryHls.emit(Hls.Events.BUFFER_APPENDED, {});
+
+      await prewarmPromise;
+
+      expect(secondaryHls.loadSource).toHaveBeenCalledTimes(1);
+      expect(primaryHls.loadSource).not.toHaveBeenCalled();
+      expect(secondaryHls.startLoad).toHaveBeenCalled();
+
+      const metrics = engine.getMetrics();
+      expect(metrics.prefetchedTrackId).toBe('track-1');
+      expect(metrics.prefetchedTrackUrl).toContain('master.m3u8');
+
+      engine.destroy();
+    });
+
+    it('loadTrack reuses the prewarmed HLS pipeline for the same track', async () => {
+      const adapter = createMockStorageAdapter();
+      const engine = new StreamingAudioEngine(adapter as any);
+      const [, secondaryHls] = (Hls as any).__instances;
+
+      // Prewarm track-4
+      const prewarmPromise = engine.prewarmTrack('track-4', 'file/path.mp3', {
+        preferHLS: true,
+        startLevel: 0,
+      });
+
+      secondaryHls.media = {
+        readyState: 2,
+        currentTime: 0,
+        buffered: { length: 1, end: () => 1 },
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      };
+
+      for (let i = 0; i < 20 && secondaryHls.loadSource.mock.calls.length === 0; i++) {
+        // eslint-disable-next-line no-await-in-loop
+        await Promise.resolve();
+      }
+      secondaryHls.emit(Hls.Events.MANIFEST_PARSED, { levels: [{ bitrate: 32_000 }] });
+      secondaryHls.emit(Hls.Events.BUFFER_APPENDED, {});
+
+      await prewarmPromise;
+      expect(secondaryHls.loadSource).toHaveBeenCalledTimes(1);
+
+      // Now load the same track through the normal loadTrack path.
+      const loadPromise = engine.loadTrack('track-4', 'file/path.mp3');
+
+      // Allow loadTrack to attach its readiness listeners before emitting events.
+      for (let i = 0; i < 5; i++) {
+        // eslint-disable-next-line no-await-in-loop
+        await Promise.resolve();
+      }
+
+      secondaryHls.emit(Hls.Events.MANIFEST_PARSED, { levels: [{ bitrate: 32_000 }] });
+      secondaryHls.emit(Hls.Events.BUFFER_APPENDED, {});
+      await loadPromise;
+
+      // Crucially: loadSource was NOT called again (pipeline reused)
+      expect(secondaryHls.loadSource).toHaveBeenCalledTimes(1);
+
+      engine.destroy();
+    });
+
+    it('does not require a fixed 500ms delay to become ready', async () => {
+      vi.useFakeTimers();
+
+      const adapter = createMockStorageAdapter();
+      const engine = new StreamingAudioEngine(adapter as any);
+      const [, secondaryHls] = (Hls as any).__instances;
+
+      let resolved = false;
+      const p = engine
+        .prewarmTrack('track-2', 'file/path.mp3', { preferHLS: true, startLevel: 0 })
+        .then(() => {
+          resolved = true;
+        });
+
+      // Trigger readiness immediately via HLS events (no timer advancement)
+      secondaryHls.media = {
+        readyState: 2,
+        currentTime: 0,
+        buffered: { length: 1, end: () => 1 },
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      };
+
+      for (let i = 0; i < 20 && secondaryHls.loadSource.mock.calls.length === 0; i++) {
+        // eslint-disable-next-line no-await-in-loop
+        await Promise.resolve();
+      }
+      secondaryHls.emit(Hls.Events.MANIFEST_PARSED, { levels: [{ bitrate: 32_000 }] });
+      secondaryHls.emit(Hls.Events.FRAG_BUFFERED, {});
+      secondaryHls.emit(Hls.Events.BUFFER_APPENDED, {});
+
+      // Flush microtasks; do NOT advance timers
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(resolved).toBe(true);
+
+      await p;
+      engine.destroy();
+      vi.useRealTimers();
+    });
+
+    it('releases the fast-start ABR lock on first playing', async () => {
+      const adapter = createMockStorageAdapter();
+      const engine = new StreamingAudioEngine(adapter as any);
+      const [, secondaryHls] = (Hls as any).__instances;
+
+      const prewarmPromise = engine.prewarmTrack('track-3', 'file/path.mp3', {
+        preferHLS: true,
+        startLevel: 0,
+      });
+
+      secondaryHls.media = {
+        readyState: 2,
+        currentTime: 0,
+        buffered: { length: 1, end: () => 1 },
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      };
+
+      for (let i = 0; i < 20 && secondaryHls.loadSource.mock.calls.length === 0; i++) {
+        // eslint-disable-next-line no-await-in-loop
+        await Promise.resolve();
+      }
+      secondaryHls.emit(Hls.Events.MANIFEST_PARSED, { levels: [{ bitrate: 32_000 }] });
+      secondaryHls.emit(Hls.Events.BUFFER_APPENDED, {});
+
+      await prewarmPromise;
+
+      // ABR should be locked to startLevel=0 after prewarm
+      expect(secondaryHls.startLevel).toBe(0);
+
+      // Simulate playback starting on the prewarmed (secondary) audio element
+      const audios = Array.from(document.querySelectorAll('audio'));
+      expect(audios.length).toBeGreaterThanOrEqual(2);
+      const secondaryAudio = audios[1];
+      secondaryAudio.dispatchEvent(new Event('playing'));
+
+      // ABR lock should be released (auto)
+      expect(secondaryHls.startLevel).toBe(-1);
+      expect(secondaryHls.currentLevel).toBe(-1);
+
+      engine.destroy();
     });
   });
 });
