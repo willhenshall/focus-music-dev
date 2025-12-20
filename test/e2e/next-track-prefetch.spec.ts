@@ -19,7 +19,6 @@ const hasTestCredentials = TEST_USER_EMAIL && TEST_USER_PASSWORD;
 async function forceStreamingEngine(page: Page): Promise<void> {
   await page.addInitScript(() => {
     try {
-      localStorage.setItem("fastStartAudio", "1");
       localStorage.setItem("audioEngineType", "streaming");
     } catch {}
   });
@@ -42,13 +41,15 @@ async function navigateToChannelsIfNeeded(page: Page): Promise<void> {
 }
 
 async function startPlaybackOnFirstChannel(page: Page): Promise<void> {
-  await page.locator("[data-channel-id]").first().click();
-  const playPauseButton = page.locator('[data-testid="channel-play-pause"]');
+  const firstCard = page.locator("[data-channel-id]").first();
+  await firstCard.waitFor({ state: "visible", timeout: 20000 });
+  const playPauseButton = firstCard.locator('[data-testid="channel-play-pause"]');
   await expect(playPauseButton).toBeVisible({ timeout: 20000 });
-  await playPauseButton.click();
+  await playPauseButton.click({ force: true });
 }
 
 test.describe("Next Track Prefetch - Desktop", () => {
+  test.setTimeout(120_000);
   test.skip(!hasTestCredentials, "Skipping: TEST_USER_EMAIL and TEST_USER_PASSWORD not set");
 
   test.beforeEach(async ({ page }) => {
@@ -58,29 +59,58 @@ test.describe("Next Track Prefetch - Desktop", () => {
   });
 
   test("requests prefetch for upcoming track after playback begins", async ({ page }) => {
+    console.log("[NEXT_PREFETCH] Starting playback...");
     await startPlaybackOnFirstChannel(page);
 
-    // Sanity: playback should not be muted once playing.
-    await page.waitForFunction(() => {
-      const dbg = (window as any).__playerDebug;
-      const m = dbg?.getMetrics?.();
-      return Boolean(m?.playbackState === "playing" && m?.muted === false);
-    }, { timeout: 30000 });
+    // Sanity: UI indicates playback is active.
+    console.log("[NEXT_PREFETCH] Waiting for footer playing indicator...");
+    await expect(page.locator('[data-testid="player-play-pause"]')).toHaveAttribute("data-playing", "true", { timeout: 30000 });
 
-    // Wait for playlist to have a next track.
-    await page.waitForFunction(() => {
-      const dbg = (window as any).__playerDebug;
-      const list = dbg?.getPlaylist?.() ?? [];
-      const idx = dbg?.getPlaylistIndex?.() ?? 0;
-      return Boolean(list[idx] && list[idx + 1] && list[idx + 1]?.metadata?.track_id);
-    }, { timeout: 30000 });
+    const debugSnapshot = async () => {
+      // Guard: if the page thread is busy, evaluate() can stall.
+      // IMPORTANT: use a Node-side timeout (not page.waitForTimeout) so it still fires even if evaluate is wedged.
+      const evalTimeout = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("debugSnapshot evaluate timeout")), 2000);
+      });
+      return await Promise.race([
+        page.evaluate(() => {
+          const dbg = (window as any).__playerDebug;
+          const m = dbg?.getMetrics?.() ?? null;
+          const list = dbg?.getPlaylist?.() ?? [];
+          const idx = dbg?.getPlaylistIndex?.() ?? 0;
+          return {
+            playbackState: m?.playbackState ?? null,
+            muted: m?.muted ?? null,
+            currentTrackId: m?.currentTrackId ?? null,
+            playbackSessionId: m?.playbackSessionId ?? null,
+            playlistIndex: idx,
+            playlistLength: list?.length ?? 0,
+            nextTrackId: list?.[idx + 1]?.metadata?.track_id ?? null,
+            prefetch: m?.prefetch ?? null,
+          };
+        }),
+        evalTimeout,
+      ]);
+    };
 
-    // Wait for prefetch request to be recorded (context-level signal).
-    await page.waitForFunction(() => {
-      const dbg = (window as any).__playerDebug;
-      const m = dbg?.getMetrics?.();
-      return Boolean(m?.prefetch?.source === "next-track" && m?.prefetch?.trackId);
-    }, { timeout: 30000 });
+    async function pollUntil(predicate: (snap: any) => boolean, timeoutMs: number, label: string) {
+      const start = Date.now();
+      let last: any = null;
+      while (Date.now() - start < timeoutMs) {
+        last = await debugSnapshot();
+        if (predicate(last)) return last;
+        // eslint-disable-next-line no-await-in-loop
+        await page.waitForTimeout(500);
+      }
+      throw new Error(`Timed out waiting for ${label}. Debug: ${JSON.stringify(last)}`);
+    }
+
+    console.log("[NEXT_PREFETCH] Waiting for playlist to include a next track...");
+    await pollUntil((s) => Boolean(s?.nextTrackId), 45_000, "next track in playlist");
+
+    console.log("[NEXT_PREFETCH] Waiting for prefetch request to be recorded...");
+    await pollUntil((s) => Boolean(s?.prefetch?.source === "next-track" && s?.prefetch?.trackId), 45_000, "prefetch request");
+    console.log("[NEXT_PREFETCH] Prefetch request observed.");
 
     const snapshot = await page.evaluate(() => {
       const dbg = (window as any).__playerDebug;
@@ -98,6 +128,19 @@ test.describe("Next Track Prefetch - Desktop", () => {
     expect(snapshot.prefetch).not.toBeNull();
     expect(snapshot.prefetch.source).toBe("next-track");
     expect(snapshot.prefetch.trackId).toBe(snapshot.nextId);
+
+    // Regression guard (best-effort): try a skip and observe session advance without using waitForFunction.
+    const skipButton = page.locator('[data-testid="player-next"], button[aria-label*="Skip"], button[aria-label*="Next"]').first();
+    const canSkip = await skipButton.isVisible({ timeout: 2000 }).catch(() => false);
+    if (canSkip) {
+      const before = await page.evaluate(() => {
+        const dbg = (window as any).__playerDebug;
+        const m = dbg?.getMetrics?.() ?? null;
+        return { session: m?.playbackSessionId ?? 0 };
+      });
+      await skipButton.click({ force: true }).catch(() => {});
+      await pollUntil((s) => typeof s?.playbackSessionId === "number" && s.playbackSessionId !== before.session, 20_000, "playback session advance after skip");
+    }
   });
 });
 

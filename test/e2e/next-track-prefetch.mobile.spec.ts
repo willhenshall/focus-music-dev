@@ -97,18 +97,36 @@ test.describe("Next Track Prefetch - Mobile", () => {
       return Boolean(m?.muted === false);
     }, { timeout: 45000 });
 
-    await page.waitForFunction(() => {
-      const dbg = (window as any).__playerDebug;
-      const list = dbg?.getPlaylist?.() ?? [];
-      const idx = dbg?.getPlaylistIndex?.() ?? 0;
-      return Boolean(list[idx] && list[idx + 1] && list[idx + 1]?.metadata?.track_id);
-    }, { timeout: 45000 });
+    async function debugSnapshot() {
+      return page.evaluate(() => {
+        const dbg = (window as any).__playerDebug;
+        const m = dbg?.getMetrics?.() ?? null;
+        const list = dbg?.getPlaylist?.() ?? [];
+        const idx = dbg?.getPlaylistIndex?.() ?? 0;
+        return {
+          playlistIndex: idx,
+          playlistLength: list?.length ?? 0,
+          nextTrackId: list?.[idx + 1]?.metadata?.track_id ?? null,
+          prefetch: m?.prefetch ?? null,
+          playbackSessionId: m?.playbackSessionId ?? null,
+        };
+      });
+    }
 
-    await page.waitForFunction(() => {
-      const dbg = (window as any).__playerDebug;
-      const m = dbg?.getMetrics?.();
-      return Boolean(m?.prefetch?.source === "next-track" && m?.prefetch?.trackId);
-    }, { timeout: 45000 });
+    async function pollUntil(predicate: (snap: any) => boolean, timeoutMs: number, label: string) {
+      const start = Date.now();
+      let last: any = null;
+      while (Date.now() - start < timeoutMs) {
+        last = await debugSnapshot();
+        if (predicate(last)) return last;
+        // eslint-disable-next-line no-await-in-loop
+        await page.waitForTimeout(500);
+      }
+      throw new Error(`Timed out waiting for ${label}. Debug: ${JSON.stringify(last)}`);
+    }
+
+    await pollUntil((s) => Boolean(s?.nextTrackId), 45_000, "next track in playlist");
+    await pollUntil((s) => Boolean(s?.prefetch?.source === "next-track" && s?.prefetch?.trackId), 45_000, "prefetch request");
 
     const snapshot = await page.evaluate(() => {
       const dbg = (window as any).__playerDebug;
@@ -126,6 +144,19 @@ test.describe("Next Track Prefetch - Mobile", () => {
     expect(snapshot.prefetch).not.toBeNull();
     expect(snapshot.prefetch.source).toBe("next-track");
     expect(snapshot.prefetch.trackId).toBe(snapshot.nextId);
+
+    // Regression guard (best-effort): skipping should advance playback without using waitForFunction.
+    const skipButton = page.locator('[data-testid="player-next"], button[aria-label*="Skip"], button[aria-label*="Next"]').first();
+    const canSkip = await skipButton.isVisible({ timeout: 2000 }).catch(() => false);
+    if (canSkip) {
+      const before = await debugSnapshot();
+      await skipButton.click({ force: true }).catch(() => {});
+      await pollUntil(
+        (s) => typeof s?.playbackSessionId === "number" && s.playbackSessionId !== before.playbackSessionId,
+        30_000,
+        "playback session advance after skip"
+      );
+    }
   });
 });
 

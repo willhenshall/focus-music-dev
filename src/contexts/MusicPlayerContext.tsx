@@ -737,9 +737,11 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     if (!audioEngine) return;
     if (!isPlaying) return;
     if (!audioMetrics) return;
-    // On slow networks, the streaming engine can enter "buffering" immediately after play starts.
-    // Prefetch is still safe here (current pipeline is active), and helps avoid gaps.
-    if (audioMetrics.playbackState !== 'playing' && audioMetrics.playbackState !== 'buffering') return;
+    // Prefetch must only happen after the engine has switched to the active pipeline for the current track.
+    // Use the engine's own playing state (most reliable), but also allow "buffering" which can occur
+    // immediately after play begins on slow networks.
+    const enginePlaying = audioEngine.isPlaying?.() ?? false;
+    if (!enginePlaying && audioMetrics.playbackState !== 'buffering' && audioMetrics.playbackState !== 'playing') return;
 
     requestNextTrackPrefetch();
   }, [audioEngine, isPlaying, audioMetrics?.playbackState, audioMetrics?.currentTrackId, playlist, currentTrackIndex]);

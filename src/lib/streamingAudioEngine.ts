@@ -1674,12 +1674,14 @@ export class StreamingAudioEngine implements IAudioEngine {
   }
   
   private setupTrackEndHandler(): void {
-    // [CELLBUG FIX] Guard against false "ended" events on iOS cellular
-    // iOS Safari can fire "ended" prematurely when buffer runs dry during network stalls
-    this.nextAudio.onended = () => {
-      const audio = this.nextAudio;
-      const currentTime = audio.currentTime;
-      const duration = audio.duration;
+    // [CELLBUG FIX] Guard against false "ended" events on iOS cellular.
+    // IMPORTANT: bind the handler to the actual audio element that ended.
+    // We cannot read `this.nextAudio` inside the handler because pipeline swaps change that reference.
+    const attach = (audioEl: HTMLAudioElement) => {
+      audioEl.onended = () => {
+        const audio = audioEl;
+        const currentTime = audio.currentTime;
+        const duration = audio.duration;
       
       // [CELLBUG FIX] Verify the track actually ended
       // Allow 2 second tolerance for rounding/timing issues
@@ -1737,24 +1739,35 @@ export class StreamingAudioEngine implements IAudioEngine {
         return;  // Don't call onTrackEnd for false ended events
       }
 
-      // Don't trigger during channel switch transitions
-      if (this.isTransitioning) {
-        console.log('[STREAMING AUDIO] Track ended during transition - ignoring');
-        return;
-      }
+        // Only advance when the ENDED element is the currently active element.
+        // During transitions, the old element may end while no longer current.
+        if (audio !== this.currentAudio) {
+          return;
+        }
 
-      // Don't double-trigger if we already triggered early for overlap crossfade
-      if (this.hasTriggeredEarlyTransition) {
-        console.log('[STREAMING AUDIO] Track ended naturally after early crossfade trigger - ignoring');
-        return;
-      }
+        // Don't trigger during channel switch transitions
+        if (this.isTransitioning) {
+          console.log('[STREAMING AUDIO] Track ended during transition - ignoring');
+          return;
+        }
 
-      if (this.isPlayingState && this.onTrackEnd) {
-        console.log('[AUDIO][CELLBUG][ENDED] Track genuinely ended, advancing to next');
-        this.consecutiveStallFailures = 0;  // Reset on successful track completion
-        this.onTrackEnd();
-      }
+        // Don't double-trigger if we already triggered early for overlap crossfade
+        if (this.hasTriggeredEarlyTransition) {
+          console.log('[STREAMING AUDIO] Track ended naturally after early crossfade trigger - ignoring');
+          return;
+        }
+
+        if (this.isPlayingState && this.onTrackEnd) {
+          console.log('[AUDIO][CELLBUG][ENDED] Track genuinely ended, advancing to next');
+          this.consecutiveStallFailures = 0;  // Reset on successful track completion
+          this.onTrackEnd();
+        }
+      };
     };
+
+    // Ensure both audio elements always have a stable ended handler.
+    attach(this.primaryAudio);
+    attach(this.secondaryAudio);
   }
 
   async play(): Promise<void> {
