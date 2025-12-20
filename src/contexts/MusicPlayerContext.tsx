@@ -172,6 +172,47 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     } | null;
   }>({ requestedAt: null, requestContext: null, pending: null, last: null });
 
+  // Prefetch debug (tracks next-track prefetch requests even if the engine prewarm fails on slow networks)
+  const prefetchDebugRef = useRef<{
+    requestedAt: number | null;
+    source: 'next-track' | null;
+    trackId: string | null;
+    filePath: string | null;
+  }>({ requestedAt: null, source: null, trackId: null, filePath: null });
+
+  // Keep latest state for async callbacks (avoid stale-closure bugs in effects/promises).
+  const prefetchInputsRef = useRef<{
+    isAdminMode: boolean;
+    activeChannelId: string | null;
+    playlist: typeof playlist;
+    currentTrackIndex: number;
+  }>({ isAdminMode: false, activeChannelId: null, playlist: [], currentTrackIndex: 0 });
+  prefetchInputsRef.current = {
+    isAdminMode,
+    activeChannelId: activeChannel?.id ?? null,
+    playlist,
+    currentTrackIndex,
+  };
+
+  const requestNextTrackPrefetch = () => {
+    if (!audioEngine) return;
+    const snap = prefetchInputsRef.current;
+    if (snap.isAdminMode) return;
+    if (!snap.activeChannelId) return;
+    if (snap.playlist.length === 0) return;
+
+    const nextTrack = snap.playlist[snap.currentTrackIndex + 1];
+    if (nextTrack?.metadata?.track_id && nextTrack.file_path) {
+      prefetchDebugRef.current = {
+        requestedAt: performance.now(),
+        source: 'next-track',
+        trackId: String(nextTrack.metadata.track_id),
+        filePath: nextTrack.file_path,
+      };
+      audioEngine.prefetchNextTrack(nextTrack.metadata.track_id, nextTrack.file_path);
+    }
+  };
+
   const getFastStartEnabled = (): boolean => {
     const envEnabled = (import.meta as any)?.env?.VITE_FAST_START_AUDIO;
     if (envEnabled === 'true') return true;
@@ -532,12 +573,6 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         if (tracksRemaining <= 2) {
           loadMoreTracksForSlotPlaylist();
         }
-
-        // Prefetch next track (Spotify-style) if available
-        const nextTrack = playlist[currentTrackIndex + 1];
-        if (nextTrack?.metadata?.track_id && nextTrack.file_path) {
-          audioEngine.prefetchNextTrack(nextTrack.metadata.track_id, nextTrack.file_path);
-        }
       }
 
       isLoadingTrack.current = true;
@@ -602,6 +637,11 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
           shouldAutoPlayRef.current = false;
           setIsPlaying(true);
           await audioEngine.play();
+
+          // Prefetch next track ONLY after playback starts.
+          // Reason: the streaming engine loads the current track into the "next" pipeline,
+          // so prefetching before load/play can be overwritten by the current track load.
+          requestNextTrackPrefetch();
         }
       } catch (error) {
         console.log('[AUDIO][CELLBUG][CONTEXT] Track load failed:', error);
@@ -677,12 +717,30 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
     if (isPlaying && !currentlyPlaying && hasBuffer) {
       console.log('[SYNC EFFECT] Calling audioEngine.play()');
-      audioEngine.play();
+      audioEngine
+        .play()
+        .then(() => {
+          // After play() resolves, the engine has swapped pipelines (streaming engine),
+          // so it is safe to request next-track prefetch without overwriting the current track load.
+          requestNextTrackPrefetch();
+        })
+        .catch(() => {});
     } else if (!isPlaying && currentlyPlaying) {
       console.log('[SYNC EFFECT] Calling audioEngine.pause()');
       audioEngine.pause();
     }
   }, [isPlaying, audioEngine]);
+
+  // When playback is actually underway, ensure we request next-track prefetch.
+  // This covers all start paths (including fast-start's playPrewarmedTrack) without relying on UI timing.
+  useEffect(() => {
+    if (!audioEngine) return;
+    if (!isPlaying) return;
+    if (!audioMetrics) return;
+    if (audioMetrics.playbackState !== 'playing') return;
+
+    requestNextTrackPrefetch();
+  }, [audioEngine, isPlaying, audioMetrics?.playbackState, audioMetrics?.currentTrackId, playlist, currentTrackIndex]);
 
   // Finalize fast-start timing when the engine first reaches "playing" for the requested track.
   useEffect(() => {
@@ -1737,6 +1795,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
           playbackSessionId: playbackSessionIdRef.current,
           fastStart: fastStartRef.current.last,
           fastStartEnabled: fastStartEnabledRef.current,
+          prefetch: prefetchDebugRef.current,
           // Expose whether the active channel's first-track cache is fully prewarmed (for E2E/diagnostics)
           fastStartCache: activeChannel
             ? {
