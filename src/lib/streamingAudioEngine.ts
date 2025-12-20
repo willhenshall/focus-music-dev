@@ -169,6 +169,8 @@ export class StreamingAudioEngine implements IAudioEngine {
   private hasTriggeredEarlyTransition: boolean = false;
   // Flag to prevent play() calls during crossfade transition
   private isTransitioning: boolean = false;
+  // If play() is requested during a transition, queue it so playback resumes immediately after swap.
+  private pendingPlayAfterTransition: boolean = false;
   
   // Configuration
   private storageAdapter: StorageAdapter;
@@ -205,6 +207,17 @@ export class StreamingAudioEngine implements IAudioEngine {
 
   // [CELLBUG FIX] Track cellular connection status for more lenient handling
   private isCellular: boolean = false;
+  // Remember last good bandwidth estimate so ABR can start at an appropriate level on fast networks.
+  private lastBandwidthEstimateBps: number = 0;
+
+  private shouldForceLowStart(): boolean {
+    // Force low start only when we expect slow/unstable conditions.
+    if (this.isCellular) return true;
+    if (this.metrics.connectionQuality === 'poor' || this.metrics.connectionQuality === 'fair') return true;
+    // On non-cellular connections, do NOT force low by default — it can cause long stretches of low-quality audio
+    // to be buffered even on fast networks.
+    return false;
+  }
   
   // [CELLBUG FIX] Stall recovery for streaming engine (similar to EnterpriseAudioEngine)
   private stallRecoveryTimer: NodeJS.Timeout | null = null;
@@ -495,10 +508,14 @@ export class StreamingAudioEngine implements IAudioEngine {
     const manifestTimeout = this.isCellular ? 30000 : 10000;  // 30s for cell, 10s for WiFi
     
     // [CELLBUG FIX] Lower initial bandwidth estimate on slow networks
-    // This makes HLS start with lower quality (if available) instead of buffering
-    const initialBandwidthEstimate = this.isCellular 
-      ? 150000   // 150 kbps - assume very slow on cellular/throttled
-      : this.hlsConfig.abrEwmaDefaultEstimate;  // 500 kbps default
+    // This makes HLS start with a sensible quality instead of lingering at LOW on a fast network.
+    // If we've already measured bandwidth on this session, reuse it (clamped) so ABR ramps quickly.
+    const remembered = this.lastBandwidthEstimateBps;
+    const initialBandwidthEstimate = this.isCellular
+      ? 150000 // 150 kbps - assume very slow on cellular/throttled
+      : remembered > 0
+        ? Math.max(500000, Math.min(5_000_000, remembered)) // clamp 0.5–5 Mbps
+        : this.hlsConfig.abrEwmaDefaultEstimate; // 500 kbps default
     
     console.log('[AUDIO][CELLBUG][HLS] Creating HLS instance', {
       fragTimeout,
@@ -903,6 +920,10 @@ export class StreamingAudioEngine implements IAudioEngine {
       // Bandwidth
       this.hlsMetrics.bandwidthEstimate = hls.bandwidthEstimate || 0;
       this.metrics.estimatedBandwidth = Math.floor(this.hlsMetrics.bandwidthEstimate / 1000);
+      // Cache a last-known-good bandwidth estimate for subsequent track loads (ABR warm start).
+      if (this.hlsMetrics.bandwidthEstimate > 0) {
+        this.lastBandwidthEstimateBps = this.hlsMetrics.bandwidthEstimate;
+      }
 
       // Keep "current level" in sync even if we miss/lag HLS events.
       // LEVEL_SWITCHED can be inconsistent around cold-start / channel switches; reading from the instance is the source of truth.
@@ -1286,6 +1307,12 @@ export class StreamingAudioEngine implements IAudioEngine {
         await this.waitForHLSReady(nextHls);
       }
     }
+
+    // Safety: prewarm may have left the inactive element muted. Ensure newly loaded track is audible once played.
+    try {
+      this.nextAudio.muted = false;
+      this.nextAudio.volume = this.volume;
+    } catch {}
     
     if (metadata) {
       this.updateMediaSessionMetadata(metadata);
@@ -1317,6 +1344,12 @@ export class StreamingAudioEngine implements IAudioEngine {
     
     this.nextAudio.src = url;
     await this.waitForCanPlay(this.nextAudio);
+
+    // Safety: ensure direct-load target isn't left muted from prewarm.
+    try {
+      this.nextAudio.muted = false;
+      this.nextAudio.volume = this.volume;
+    } catch {}
     
     if (metadata) {
       this.updateMediaSessionMetadata(metadata);
@@ -1398,16 +1431,25 @@ export class StreamingAudioEngine implements IAudioEngine {
   }
 
   private lockFastStartABR(hls: Hls): void {
-    // Force lowest ladder level for startup to minimize time-to-first-audio.
+    // Force lowest ladder level for startup ONLY on slow/unstable conditions.
+    // On fast networks, forcing low can fill the buffer with low-quality segments and keep playback low for many seconds.
     // We'll release this lock on the first "playing" event.
+    if (!this.shouldForceLowStart()) {
+      // Ensure ABR is allowed immediately.
+      this.fastStartLockedHls = null;
+      try {
+        (hls as any).startLevel = -1;
+      } catch {}
+      return;
+    }
+
     this.fastStartLockedHls = hls;
     try {
       // hls.js uses startLevel for initial level selection.
       (hls as any).startLevel = 0;
-      // If levels are already known, also pin the immediate load level.
-      if ((hls as any).levels?.length) {
-        hls.currentLevel = 0;
-      }
+      // IMPORTANT: Do NOT set `currentLevel=0` here.
+      // In hls.js, setting currentLevel forces manual mode (autoLevelEnabled=false) and can cause
+      // repeated level thrashing (L3->L0) and intermittent stalls even on fast networks.
     } catch {
       // Best-effort
     }
@@ -1419,8 +1461,10 @@ export class StreamingAudioEngine implements IAudioEngine {
     try {
       // Restore auto level selection after initial playback begins.
       (hls as any).startLevel = -1;
-      hls.currentLevel = -1;
-      // autoLevelEnabled is read-only; setting currentLevel to -1 returns to ABR.
+      // If we ever ended up in manual mode, return to ABR.
+      if (!hls.autoLevelEnabled) {
+        hls.currentLevel = -1;
+      }
     } catch {
       // Best-effort
     } finally {
@@ -1557,8 +1601,10 @@ export class StreamingAudioEngine implements IAudioEngine {
   }
   
   private async attemptStallRecovery(audio: HTMLAudioElement, maxAttempts: number): Promise<void> {
-    if (!this.isPlayingState || !audio.paused === false) {
-      // Playback resumed on its own or user paused
+    // Cancel recovery if playback state changed, we switched pipelines, or playback resumed.
+    // NOTE: the previous condition `!audio.paused === false` was incorrect and would cancel recovery
+    // exactly when audio was paused (the stalled case).
+    if (!this.isPlayingState || audio !== this.currentAudio || !audio.paused) {
       console.log('[AUDIO][CELLBUG][STALL] Stall recovery cancelled - playback state changed');
       return;
     }
@@ -1674,12 +1720,14 @@ export class StreamingAudioEngine implements IAudioEngine {
   }
   
   private setupTrackEndHandler(): void {
-    // [CELLBUG FIX] Guard against false "ended" events on iOS cellular
-    // iOS Safari can fire "ended" prematurely when buffer runs dry during network stalls
-    this.nextAudio.onended = () => {
-      const audio = this.nextAudio;
-      const currentTime = audio.currentTime;
-      const duration = audio.duration;
+    // [CELLBUG FIX] Guard against false "ended" events on iOS cellular.
+    // IMPORTANT: bind the handler to the actual audio element that ended.
+    // We cannot read `this.nextAudio` inside the handler because pipeline swaps change that reference.
+    const attach = (audioEl: HTMLAudioElement) => {
+      audioEl.onended = () => {
+        const audio = audioEl;
+        const currentTime = audio.currentTime;
+        const duration = audio.duration;
       
       // [CELLBUG FIX] Verify the track actually ended
       // Allow 2 second tolerance for rounding/timing issues
@@ -1737,30 +1785,42 @@ export class StreamingAudioEngine implements IAudioEngine {
         return;  // Don't call onTrackEnd for false ended events
       }
 
-      // Don't trigger during channel switch transitions
-      if (this.isTransitioning) {
-        console.log('[STREAMING AUDIO] Track ended during transition - ignoring');
-        return;
-      }
+        // Only advance when the ENDED element is the currently active element.
+        // During transitions, the old element may end while no longer current.
+        if (audio !== this.currentAudio) {
+          return;
+        }
 
-      // Don't double-trigger if we already triggered early for overlap crossfade
-      if (this.hasTriggeredEarlyTransition) {
-        console.log('[STREAMING AUDIO] Track ended naturally after early crossfade trigger - ignoring');
-        return;
-      }
+        // Don't trigger during channel switch transitions
+        if (this.isTransitioning) {
+          console.log('[STREAMING AUDIO] Track ended during transition - ignoring');
+          return;
+        }
 
-      if (this.isPlayingState && this.onTrackEnd) {
-        console.log('[AUDIO][CELLBUG][ENDED] Track genuinely ended, advancing to next');
-        this.consecutiveStallFailures = 0;  // Reset on successful track completion
-        this.onTrackEnd();
-      }
+        // Don't double-trigger if we already triggered early for overlap crossfade
+        if (this.hasTriggeredEarlyTransition) {
+          console.log('[STREAMING AUDIO] Track ended naturally after early crossfade trigger - ignoring');
+          return;
+        }
+
+        if (this.isPlayingState && this.onTrackEnd) {
+          console.log('[AUDIO][CELLBUG][ENDED] Track genuinely ended, advancing to next');
+          this.consecutiveStallFailures = 0;  // Reset on successful track completion
+          this.onTrackEnd();
+        }
+      };
     };
+
+    // Ensure both audio elements always have a stable ended handler.
+    attach(this.primaryAudio);
+    attach(this.secondaryAudio);
   }
 
   async play(): Promise<void> {
     // Prevent re-entry during crossfade transition
     if (this.isTransitioning) {
       console.log('[STREAMING AUDIO] Ignoring play() call during transition');
+      this.pendingPlayAfterTransition = true;
       return;
     }
 
@@ -1768,9 +1828,10 @@ export class StreamingAudioEngine implements IAudioEngine {
       return;
     }
 
-    const hasNewTrack = this.nextAudio.src &&
-                        this.nextAudio.src !== this.currentAudio.src &&
-                        this.nextAudio !== this.currentAudio;
+    // IMPORTANT: With hls.js, both audio elements may end up with the same blob: URL even when
+    // they represent different pipelines/tracks. Don't compare src strings here; we only care
+    // whether we're switching to the inactive element that has something loaded.
+    const hasNewTrack = this.nextAudio !== this.currentAudio && Boolean(this.nextAudio.src);
 
     // Safety: prewarm may have muted the inactive element. Ensure audible playback when we actually play.
     try {
@@ -1828,6 +1889,8 @@ export class StreamingAudioEngine implements IAudioEngine {
       try {
         this.currentAudio.muted = false;
       } catch {}
+      // Safety: prewarm uses volume=0; ensure a resumed play is audible.
+      this.currentAudio.volume = this.volume;
       await this.currentAudio.play();
       this.isPlayingState = true;
       this.metrics.playbackState = 'playing';
@@ -1955,6 +2018,22 @@ export class StreamingAudioEngine implements IAudioEngine {
         
         this.isTransitioning = false;
         this.updateMetrics();
+
+        // If a play request came in during the transition, honor it now.
+        if (this.pendingPlayAfterTransition) {
+          this.pendingPlayAfterTransition = false;
+          try {
+            this.currentAudio.muted = false;
+          } catch {}
+          try {
+            this.currentAudio.volume = this.volume;
+          } catch {}
+          try {
+            if (this.currentAudio.paused) {
+              this.currentAudio.play().catch(() => {});
+            }
+          } catch {}
+        }
       }
     }, fadeInterval);
   }
@@ -2021,7 +2100,8 @@ export class StreamingAudioEngine implements IAudioEngine {
     this.nextTrackId = trackId;
 
     const preferHLS = options?.preferHLS ?? true;
-    const startLevel = options?.startLevel ?? 0;
+    const requestedStartLevel = options?.startLevel ?? 0;
+    const startLevel = this.shouldForceLowStart() ? requestedStartLevel : -1;
 
     // Prewarm always uses the inactive element (the one we'll play next).
     const prewarmAudio = this.currentAudio === this.primaryAudio ? this.secondaryAudio : this.primaryAudio;

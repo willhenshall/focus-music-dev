@@ -20,11 +20,21 @@ type FastStartSnapshot =
     }
   | null;
 
+type PrefetchSnapshot =
+  | {
+      requestedAt: number | null;
+      source: 'next-track' | null;
+      trackId: string | null;
+      filePath: string | null;
+    }
+  | null;
+
 type PlayerDebugMetricsSnapshot =
   | {
       fastStart?: FastStartSnapshot;
       fastStartEnabled?: boolean;
       fastStartCache?: unknown;
+      prefetch?: PrefetchSnapshot;
       playbackSessionId?: number;
     }
   | null;
@@ -185,6 +195,7 @@ export function AudioEngineDiagnostics({
   const [isMinimized, setIsMinimized] = useState<boolean>(() => sessionStorage.getItem('audioDiagnosticsMinimized') === 'true');
   const [debugFastStart, setDebugFastStart] = useState<FastStartSnapshot>(null);
   const [debugFastStartEnabled, setDebugFastStartEnabled] = useState<boolean | null>(null);
+  const [debugPrefetch, setDebugPrefetch] = useState<PrefetchSnapshot>(null);
   const [fastStartHistory, setFastStartHistory] = useState<Array<{ firstAudioMs: number; timestamp: number; trackId?: string; playbackSessionId?: number; source?: string }>>([]);
   const lastFastStartKeyRef = useRef<string | null>(null);
   const pointerIdRef = useRef<number | null>(null);
@@ -201,8 +212,10 @@ export function AudioEngineDiagnostics({
         const snapshot = dbg?.getMetrics?.() ?? null;
         const fastStart: FastStartSnapshot = snapshot?.fastStart ?? null;
         const enabled: boolean | null = typeof snapshot?.fastStartEnabled === 'boolean' ? snapshot.fastStartEnabled : null;
+        const prefetch: PrefetchSnapshot = snapshot?.prefetch ?? null;
         setDebugFastStart(fastStart);
         setDebugFastStartEnabled(enabled);
+        setDebugPrefetch(prefetch);
 
         if (fastStart && typeof fastStart.firstAudioMs === 'number') {
           const key = `${fastStart.firstPlayingAt}:${fastStart.playbackSessionId ?? ''}:${fastStart.trackId ?? ''}`;
@@ -1199,6 +1212,8 @@ export function AudioEngineDiagnostics({
               </div>
               <div className="bg-white border border-slate-200 rounded p-2.5">
                 <div className="text-[11px] font-bold text-slate-600 uppercase mb-1">Status</div>
+                <StatRow label="Requested ID" value={debugPrefetch?.trackId || '—'} />
+                <StatRow label="Requested" value={debugPrefetch?.requestedAt ? `${Math.round(performance.now() - debugPrefetch.requestedAt)}ms ago` : '—'} />
                 <StatRow label="Prefetched ID" value={metrics.prefetchedTrackId || '—'} />
                 <StatRow label="Progress" value={`${Math.round(metrics.prefetchProgress)}%`} />
                 <StatRow label="Ready state" value={metrics.prefetchReadyState} />
