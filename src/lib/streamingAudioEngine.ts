@@ -207,6 +207,8 @@ export class StreamingAudioEngine implements IAudioEngine {
 
   // [CELLBUG FIX] Track cellular connection status for more lenient handling
   private isCellular: boolean = false;
+  // Remember last good bandwidth estimate so ABR can start at an appropriate level on fast networks.
+  private lastBandwidthEstimateBps: number = 0;
   
   // [CELLBUG FIX] Stall recovery for streaming engine (similar to EnterpriseAudioEngine)
   private stallRecoveryTimer: NodeJS.Timeout | null = null;
@@ -497,10 +499,14 @@ export class StreamingAudioEngine implements IAudioEngine {
     const manifestTimeout = this.isCellular ? 30000 : 10000;  // 30s for cell, 10s for WiFi
     
     // [CELLBUG FIX] Lower initial bandwidth estimate on slow networks
-    // This makes HLS start with lower quality (if available) instead of buffering
-    const initialBandwidthEstimate = this.isCellular 
-      ? 150000   // 150 kbps - assume very slow on cellular/throttled
-      : this.hlsConfig.abrEwmaDefaultEstimate;  // 500 kbps default
+    // This makes HLS start with a sensible quality instead of lingering at LOW on a fast network.
+    // If we've already measured bandwidth on this session, reuse it (clamped) so ABR ramps quickly.
+    const remembered = this.lastBandwidthEstimateBps;
+    const initialBandwidthEstimate = this.isCellular
+      ? 150000 // 150 kbps - assume very slow on cellular/throttled
+      : remembered > 0
+        ? Math.max(500000, Math.min(5_000_000, remembered)) // clamp 0.5–5 Mbps
+        : this.hlsConfig.abrEwmaDefaultEstimate; // 500 kbps default
     
     console.log('[AUDIO][CELLBUG][HLS] Creating HLS instance', {
       fragTimeout,
@@ -905,6 +911,10 @@ export class StreamingAudioEngine implements IAudioEngine {
       // Bandwidth
       this.hlsMetrics.bandwidthEstimate = hls.bandwidthEstimate || 0;
       this.metrics.estimatedBandwidth = Math.floor(this.hlsMetrics.bandwidthEstimate / 1000);
+      // Cache a last-known-good bandwidth estimate for subsequent track loads (ABR warm start).
+      if (this.hlsMetrics.bandwidthEstimate > 0) {
+        this.lastBandwidthEstimateBps = this.hlsMetrics.bandwidthEstimate;
+      }
 
       // Keep "current level" in sync even if we miss/lag HLS events.
       // LEVEL_SWITCHED can be inconsistent around cold-start / channel switches; reading from the instance is the source of truth.
@@ -1560,8 +1570,10 @@ export class StreamingAudioEngine implements IAudioEngine {
   }
   
   private async attemptStallRecovery(audio: HTMLAudioElement, maxAttempts: number): Promise<void> {
-    if (!this.isPlayingState || !audio.paused === false) {
-      // Playback resumed on its own or user paused
+    // Cancel recovery if playback state changed, we switched pipelines, or playback resumed.
+    // NOTE: the previous condition `!audio.paused === false` was incorrect and would cancel recovery
+    // exactly when audio was paused (the stalled case).
+    if (!this.isPlayingState || audio !== this.currentAudio || !audio.paused) {
       console.log('[AUDIO][CELLBUG][STALL] Stall recovery cancelled - playback state changed');
       return;
     }
