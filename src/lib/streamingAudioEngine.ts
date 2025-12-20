@@ -1768,9 +1768,10 @@ export class StreamingAudioEngine implements IAudioEngine {
       return;
     }
 
-    const hasNewTrack = this.nextAudio.src &&
-                        this.nextAudio.src !== this.currentAudio.src &&
-                        this.nextAudio !== this.currentAudio;
+    // IMPORTANT: With hls.js, both audio elements may end up with the same blob: URL even when
+    // they represent different pipelines/tracks. Don't compare src strings here; we only care
+    // whether we're switching to the inactive element that has something loaded.
+    const hasNewTrack = this.nextAudio !== this.currentAudio && Boolean(this.nextAudio.src);
 
     // Safety: prewarm may have muted the inactive element. Ensure audible playback when we actually play.
     try {
@@ -1828,6 +1829,8 @@ export class StreamingAudioEngine implements IAudioEngine {
       try {
         this.currentAudio.muted = false;
       } catch {}
+      // Safety: prewarm uses volume=0; ensure a resumed play is audible.
+      this.currentAudio.volume = this.volume;
       await this.currentAudio.play();
       this.isPlayingState = true;
       this.metrics.playbackState = 'playing';

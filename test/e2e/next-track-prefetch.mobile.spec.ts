@@ -15,6 +15,7 @@ const hasTestCredentials = TEST_USER_EMAIL && TEST_USER_PASSWORD;
 async function forceStreamingEngine(page: Page): Promise<void> {
   await page.addInitScript(() => {
     try {
+      localStorage.setItem("fastStartAudio", "1");
       localStorage.setItem("audioEngineType", "streaming");
     } catch {}
   });
@@ -63,10 +64,14 @@ async function navigateToChannelsIfNeeded(page: Page): Promise<void> {
 }
 
 async function startPlaybackOnFirstChannel(page: Page): Promise<void> {
-  await page.locator("[data-channel-id]").first().tap();
-  const playPauseButton = page.locator('[data-testid="channel-play-pause"]');
-  await expect(playPauseButton).toBeVisible({ timeout: 20000 });
-  await playPauseButton.tap();
+  // Mobile UI: tapping the card itself triggers toggleChannel(channel, true) for inactive channels.
+  await page.locator("[data-channel-id]").first().click({ force: true });
+
+  // Ensure the UI reflects "playing" (state-level, not actual audio output).
+  await page.locator('[data-testid="channel-play-pause"][data-playing="true"]').waitFor({
+    state: "visible",
+    timeout: 30000,
+  });
 }
 
 test.describe("Next Track Prefetch - Mobile", () => {
@@ -83,6 +88,14 @@ test.describe("Next Track Prefetch - Mobile", () => {
 
   test("requests prefetch for upcoming track after playback begins", async ({ page }) => {
     await startPlaybackOnFirstChannel(page);
+
+    // Sanity: playback pipeline should not remain muted after a user gesture.
+    // (Playwright mobile emulation isn't always reliable at reaching playbackState="playing".)
+    await page.waitForFunction(() => {
+      const dbg = (window as any).__playerDebug;
+      const m = dbg?.getMetrics?.();
+      return Boolean(m?.muted === false);
+    }, { timeout: 45000 });
 
     await page.waitForFunction(() => {
       const dbg = (window as any).__playerDebug;

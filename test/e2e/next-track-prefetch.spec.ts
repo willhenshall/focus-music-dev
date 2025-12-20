@@ -19,6 +19,7 @@ const hasTestCredentials = TEST_USER_EMAIL && TEST_USER_PASSWORD;
 async function forceStreamingEngine(page: Page): Promise<void> {
   await page.addInitScript(() => {
     try {
+      localStorage.setItem("fastStartAudio", "1");
       localStorage.setItem("audioEngineType", "streaming");
     } catch {}
   });
@@ -58,6 +59,13 @@ test.describe("Next Track Prefetch - Desktop", () => {
 
   test("requests prefetch for upcoming track after playback begins", async ({ page }) => {
     await startPlaybackOnFirstChannel(page);
+
+    // Sanity: playback should not be muted once playing.
+    await page.waitForFunction(() => {
+      const dbg = (window as any).__playerDebug;
+      const m = dbg?.getMetrics?.();
+      return Boolean(m?.playbackState === "playing" && m?.muted === false);
+    }, { timeout: 30000 });
 
     // Wait for playlist to have a next track.
     await page.waitForFunction(() => {
