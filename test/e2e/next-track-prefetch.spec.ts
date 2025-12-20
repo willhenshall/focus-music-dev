@@ -43,9 +43,15 @@ async function navigateToChannelsIfNeeded(page: Page): Promise<void> {
 async function startPlaybackOnFirstChannel(page: Page): Promise<void> {
   const firstCard = page.locator("[data-channel-id]").first();
   await firstCard.waitFor({ state: "visible", timeout: 20000 });
-  const playPauseButton = firstCard.locator('[data-testid="channel-play-pause"]');
+  await firstCard.click({ force: true });
+
+  // Ensure playback is on (if already playing, don't toggle it off).
+  const playPauseButton = page.locator('[data-testid="channel-play-pause"]').first();
   await expect(playPauseButton).toBeVisible({ timeout: 20000 });
-  await playPauseButton.click({ force: true });
+  const playingAttr = await playPauseButton.getAttribute("data-playing").catch(() => null);
+  if (playingAttr !== "true") {
+    await playPauseButton.click({ force: true });
+  }
 }
 
 test.describe("Next Track Prefetch - Desktop", () => {

@@ -169,6 +169,8 @@ export class StreamingAudioEngine implements IAudioEngine {
   private hasTriggeredEarlyTransition: boolean = false;
   // Flag to prevent play() calls during crossfade transition
   private isTransitioning: boolean = false;
+  // If play() is requested during a transition, queue it so playback resumes immediately after swap.
+  private pendingPlayAfterTransition: boolean = false;
   
   // Configuration
   private storageAdapter: StorageAdapter;
@@ -1404,10 +1406,9 @@ export class StreamingAudioEngine implements IAudioEngine {
     try {
       // hls.js uses startLevel for initial level selection.
       (hls as any).startLevel = 0;
-      // If levels are already known, also pin the immediate load level.
-      if ((hls as any).levels?.length) {
-        hls.currentLevel = 0;
-      }
+      // IMPORTANT: Do NOT set `currentLevel=0` here.
+      // In hls.js, setting currentLevel forces manual mode (autoLevelEnabled=false) and can cause
+      // repeated level thrashing (L3->L0) and intermittent stalls even on fast networks.
     } catch {
       // Best-effort
     }
@@ -1419,8 +1420,10 @@ export class StreamingAudioEngine implements IAudioEngine {
     try {
       // Restore auto level selection after initial playback begins.
       (hls as any).startLevel = -1;
-      hls.currentLevel = -1;
-      // autoLevelEnabled is read-only; setting currentLevel to -1 returns to ABR.
+      // If we ever ended up in manual mode, return to ABR.
+      if (!hls.autoLevelEnabled) {
+        hls.currentLevel = -1;
+      }
     } catch {
       // Best-effort
     } finally {
@@ -1774,6 +1777,7 @@ export class StreamingAudioEngine implements IAudioEngine {
     // Prevent re-entry during crossfade transition
     if (this.isTransitioning) {
       console.log('[STREAMING AUDIO] Ignoring play() call during transition');
+      this.pendingPlayAfterTransition = true;
       return;
     }
 
@@ -1971,6 +1975,22 @@ export class StreamingAudioEngine implements IAudioEngine {
         
         this.isTransitioning = false;
         this.updateMetrics();
+
+        // If a play request came in during the transition, honor it now.
+        if (this.pendingPlayAfterTransition) {
+          this.pendingPlayAfterTransition = false;
+          try {
+            this.currentAudio.muted = false;
+          } catch {}
+          try {
+            this.currentAudio.volume = this.volume;
+          } catch {}
+          try {
+            if (this.currentAudio.paused) {
+              this.currentAudio.play().catch(() => {});
+            }
+          } catch {}
+        }
       }
     }, fadeInterval);
   }
