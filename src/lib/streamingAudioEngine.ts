@@ -209,6 +209,16 @@ export class StreamingAudioEngine implements IAudioEngine {
   private isCellular: boolean = false;
   // Remember last good bandwidth estimate so ABR can start at an appropriate level on fast networks.
   private lastBandwidthEstimateBps: number = 0;
+
+  private shouldForceLowStart(): boolean {
+    // Force low start only when we expect slow/unstable conditions.
+    if (this.isCellular) return true;
+    if (this.metrics.connectionQuality === 'poor' || this.metrics.connectionQuality === 'fair') return true;
+    // If we haven't measured yet, be conservative (fast-start goal).
+    if (!this.lastBandwidthEstimateBps) return true;
+    // < ~1.5 Mbps: safer to start low.
+    return this.lastBandwidthEstimateBps < 1_500_000;
+  }
   
   // [CELLBUG FIX] Stall recovery for streaming engine (similar to EnterpriseAudioEngine)
   private stallRecoveryTimer: NodeJS.Timeout | null = null;
@@ -1410,8 +1420,18 @@ export class StreamingAudioEngine implements IAudioEngine {
   }
 
   private lockFastStartABR(hls: Hls): void {
-    // Force lowest ladder level for startup to minimize time-to-first-audio.
+    // Force lowest ladder level for startup ONLY on slow/unstable conditions.
+    // On fast networks, forcing low can fill the buffer with low-quality segments and keep playback low for many seconds.
     // We'll release this lock on the first "playing" event.
+    if (!this.shouldForceLowStart()) {
+      // Ensure ABR is allowed immediately.
+      this.fastStartLockedHls = null;
+      try {
+        (hls as any).startLevel = -1;
+      } catch {}
+      return;
+    }
+
     this.fastStartLockedHls = hls;
     try {
       // hls.js uses startLevel for initial level selection.
@@ -2069,7 +2089,8 @@ export class StreamingAudioEngine implements IAudioEngine {
     this.nextTrackId = trackId;
 
     const preferHLS = options?.preferHLS ?? true;
-    const startLevel = options?.startLevel ?? 0;
+    const requestedStartLevel = options?.startLevel ?? 0;
+    const startLevel = this.shouldForceLowStart() ? requestedStartLevel : -1;
 
     // Prewarm always uses the inactive element (the one we'll play next).
     const prewarmAudio = this.currentAudio === this.primaryAudio ? this.secondaryAudio : this.primaryAudio;
