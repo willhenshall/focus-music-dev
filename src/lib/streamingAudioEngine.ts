@@ -214,10 +214,9 @@ export class StreamingAudioEngine implements IAudioEngine {
     // Force low start only when we expect slow/unstable conditions.
     if (this.isCellular) return true;
     if (this.metrics.connectionQuality === 'poor' || this.metrics.connectionQuality === 'fair') return true;
-    // If we haven't measured yet, be conservative (fast-start goal).
-    if (!this.lastBandwidthEstimateBps) return true;
-    // < ~1.5 Mbps: safer to start low.
-    return this.lastBandwidthEstimateBps < 1_500_000;
+    // On non-cellular connections, do NOT force low by default — it can cause long stretches of low-quality audio
+    // to be buffered even on fast networks.
+    return false;
   }
   
   // [CELLBUG FIX] Stall recovery for streaming engine (similar to EnterpriseAudioEngine)
@@ -1308,6 +1307,12 @@ export class StreamingAudioEngine implements IAudioEngine {
         await this.waitForHLSReady(nextHls);
       }
     }
+
+    // Safety: prewarm may have left the inactive element muted. Ensure newly loaded track is audible once played.
+    try {
+      this.nextAudio.muted = false;
+      this.nextAudio.volume = this.volume;
+    } catch {}
     
     if (metadata) {
       this.updateMediaSessionMetadata(metadata);
@@ -1339,6 +1344,12 @@ export class StreamingAudioEngine implements IAudioEngine {
     
     this.nextAudio.src = url;
     await this.waitForCanPlay(this.nextAudio);
+
+    // Safety: ensure direct-load target isn't left muted from prewarm.
+    try {
+      this.nextAudio.muted = false;
+      this.nextAudio.volume = this.volume;
+    } catch {}
     
     if (metadata) {
       this.updateMediaSessionMetadata(metadata);
