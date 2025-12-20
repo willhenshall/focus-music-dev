@@ -12,17 +12,6 @@ import { getDeliverySource, calculateHealthScore, formatBitrate } from '../Audio
 // Lightweight mock metric types (match the helper signatures)
 // ============================================================================
 
-interface HLSMetrics {
-  isHLSActive: boolean;
-  bufferLength: number;
-  targetBuffer: number;
-  fragmentStats: {
-    loaded: number;
-    failed: number;
-    retried: number;
-  };
-}
-
 // ============================================================================
 // Tests
 // ============================================================================

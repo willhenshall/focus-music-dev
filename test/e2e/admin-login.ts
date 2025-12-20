@@ -1,158 +1,154 @@
-import { Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
 
-const baseUrl = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
-
-/**
- * Admin login credentials from environment variables.
- * Tests should skip if these are not set.
- */
 export const TEST_ADMIN_EMAIL = process.env.TEST_ADMIN_EMAIL;
 export const TEST_ADMIN_PASSWORD = process.env.TEST_ADMIN_PASSWORD;
 
-/**
- * Returns true if admin credentials are available in environment.
- */
+// Many E2E specs treat this as a boolean constant (not a function).
 export const hasAdminCredentials = Boolean(TEST_ADMIN_EMAIL && TEST_ADMIN_PASSWORD);
 
+type AdminTabId =
+  | "analytics"
+  | "channels"
+  | "library"
+  | "users"
+  | "images"
+  | "quiz"
+  | "settings"
+  | "tests"
+  | "testing";
+
+function escapeRegExp(input: string): string {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function getAdminTabLabel(tabId: AdminTabId): string {
+  switch (tabId) {
+    case "analytics":
+      return "Analytics";
+    case "channels":
+      return "Channels";
+    case "library":
+      return "Music Library";
+    case "users":
+      return "Users";
+    case "images":
+      return "Images";
+    case "quiz":
+      return "Quiz";
+    case "settings":
+      return "Settings";
+    case "tests":
+      return "Tests";
+    case "testing":
+      return "Dev Tools";
+  }
+}
+
 /**
- * Bypasses the password gate if present on the landing page.
+ * Signs in as an admin user via the UI.
+ *
+ * Returns false when:
+ * - TEST_ADMIN_EMAIL / TEST_ADMIN_PASSWORD are not set, or
+ * - the signed-in user does not appear to be an admin (no Admin button)
  */
-async function bypassPasswordGate(page: Page): Promise<void> {
-  const passwordInput = page.locator('input[type="password"]').first();
-  const isPasswordGateVisible = await passwordInput
+export async function signInAsAdmin(page: Page): Promise<boolean> {
+  if (!hasAdminCredentials) return false;
+
+  // Avoid the "site access" password gate during E2E.
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem("site_access_granted", "true");
+    } catch {
+      // ignore
+    }
+  });
+
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+
+  const signOutButton = page.getByRole("button", { name: /sign out/i });
+  const alreadySignedIn = await signOutButton
     .isVisible({ timeout: 2000 })
     .catch(() => false);
 
-  if (isPasswordGateVisible) {
-    await passwordInput.fill("magic");
-    await page.getByRole("button", { name: /continue/i }).click();
-    await page.waitForTimeout(1500);
-  }
-}
+  if (!alreadySignedIn) {
+    // If we're already on the AuthForm, the email field will be visible.
+    const emailAlreadyVisible = await page
+      .locator("#email")
+      .isVisible({ timeout: 500 })
+      .catch(() => false);
 
-/**
- * Signs in as the admin test user.
- * 
- * Prerequisites:
- * - TEST_ADMIN_EMAIL and TEST_ADMIN_PASSWORD must be set in environment
- * - The admin account must exist in the database with admin privileges
- * 
- * @returns true if sign-in succeeded, false otherwise
- */
-export async function signInAsAdmin(page: Page): Promise<boolean> {
-  if (!TEST_ADMIN_EMAIL || !TEST_ADMIN_PASSWORD) {
-    console.log("[ADMIN LOGIN] Skipping: TEST_ADMIN_EMAIL or TEST_ADMIN_PASSWORD not set");
-    return false;
-  }
+    if (!emailAlreadyVisible) {
+      // From the landing page, click "Sign In" to open the AuthForm.
+      // NOTE: There has historically been a header overlap bug that makes only the
+      // bottom portion of header buttons clickable. Click near the bottom to be resilient.
+      const landingSignIn = page.getByRole("button", { name: /^sign in$/i });
+      await landingSignIn.waitFor({ state: "visible", timeout: 15000 });
 
-  try {
-    // Navigate to the app
-    // NOTE: Vite dev server keeps a websocket connection, so "networkidle" can hang.
-    await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
-
-    // Bypass password gate if present
-    await bypassPasswordGate(page);
-
-    // Click Sign In button on landing page to show auth form
-    const signInButton = page.locator("header").getByRole("button", { name: /sign in/i });
-    const signInVisible = await signInButton.isVisible({ timeout: 3000 }).catch(() => false);
-    
-    if (signInVisible) {
-      await signInButton.click();
+      const box = await landingSignIn.boundingBox();
+      if (box) {
+        const x = box.x + box.width / 2;
+        const y = box.y + box.height * 0.85;
+        await page.mouse.click(x, y);
+      } else {
+        await landingSignIn.click({ force: true });
+      }
     }
 
-    // Wait for auth form to appear
-    const emailInput = page.getByLabel(/email/i);
-    await emailInput.waitFor({ state: "visible", timeout: 10000 });
+    await page.locator("#email").waitFor({ state: "visible", timeout: 15000 });
 
-    // Fill credentials
-    await emailInput.fill(TEST_ADMIN_EMAIL);
-    await page.getByLabel(/password/i).fill(TEST_ADMIN_PASSWORD);
+    await page.locator("#email").fill(TEST_ADMIN_EMAIL!);
+    await page.locator("#password").fill(TEST_ADMIN_PASSWORD!);
 
-    // Submit the form
-    await page.locator("form").getByRole("button", { name: /sign in/i }).click();
+    // AuthForm submit button text is also "Sign In".
+    // Scope to the form to avoid strict-mode ambiguity with the (hidden) header placeholder button.
+    await page.locator("form").getByRole("button", { name: /^sign in$/i }).click();
 
-    // Wait for logged-in UI to render.
-    await page.locator("[data-channel-id]").first().waitFor({ state: "visible", timeout: 20000 });
-
-    // Confirm admin-only affordance exists.
-    // Desktop: diagnostics button in header.
-    // Mobile: diagnostics entry in hamburger menu.
-    const mobileMenuButton = page.getByTestId("mobile-menu-button");
-    const isMobile = await mobileMenuButton.isVisible().catch(() => false);
-
-    if (isMobile) {
-      await mobileMenuButton.click();
-      await page.getByTestId("mobile-audio-diagnostics").waitFor({ state: "visible", timeout: 10000 });
-      // Close menu (best-effort)
-      await mobileMenuButton.click().catch(() => {});
-    } else {
-      await page.locator("button[title=\"Audio Engine Diagnostics\"]").waitFor({ state: "visible", timeout: 15000 });
+    // Login can be slow/noisy in E2E; wait longer and gracefully return false if it never completes.
+    try {
+      await signOutButton.waitFor({ state: "visible", timeout: 60000 });
+    } catch {
+      const errorText = await page
+        .locator('[class*="bg-red-50"], [class*="text-red-"]')
+        .first()
+        .textContent()
+        .catch(() => null);
+      if (errorText) {
+        console.log("[ADMIN LOGIN] Sign-in failed:", errorText.trim());
+      } else {
+        console.log("[ADMIN LOGIN] Sign-in did not complete within timeout.");
+      }
+      return false;
     }
-
-    console.log("[ADMIN LOGIN] Successfully signed in as admin");
-    return true;
-  } catch (error) {
-    console.error("[ADMIN LOGIN] Failed to sign in:", error);
-    return false;
   }
+
+  // Confirm admin capabilities (admin users have an "Admin" button in the header).
+  const adminButton = page.getByRole("button", { name: /^admin$/i });
+  const isAdmin = await adminButton.isVisible({ timeout: 15000 }).catch(() => false);
+  return isAdmin;
 }
 
-/**
- * Navigates to the Admin Dashboard from the User Dashboard.
- * Assumes the user is already signed in as an admin.
- */
 export async function navigateToAdminDashboard(page: Page): Promise<void> {
-  const adminButton = page.getByRole("button", { name: /admin/i });
-  await adminButton.waitFor({ state: "visible", timeout: 5000 });
+  const adminButton = page.getByRole("button", { name: /^admin$/i });
+  await adminButton.waitFor({ state: "visible", timeout: 15000 });
   await adminButton.click();
-  
-  // Wait for admin dashboard header to appear
-  await page.locator("text=Admin Dashboard").waitFor({ state: "visible", timeout: 10000 });
+  await page.locator("text=Admin Dashboard").first().waitFor({ state: "visible", timeout: 15000 });
 }
 
-/**
- * Navigates to a specific admin tab.
- * Assumes we're already on the Admin Dashboard.
- * 
- * @param tab - The tab ID to navigate to (analytics, channels, library, users, images, quiz, settings, tests, testing)
- */
-export async function navigateToAdminTab(
-  page: Page,
-  tab: "analytics" | "channels" | "library" | "users" | "images" | "quiz" | "settings" | "tests" | "testing"
-): Promise<void> {
-  // Map tab IDs to their display labels
-  const tabLabels: Record<typeof tab, string> = {
-    analytics: "Analytics",
-    channels: "Channels",
-    library: "Music Library",
-    users: "Users",
-    images: "Images",
-    quiz: "Quiz",
-    settings: "Settings",
-    tests: "Tests",
-    testing: "Dev Tools",
-  };
-
-  const tabLabel = tabLabels[tab];
-  const tabButton = page.getByRole("button", { name: tabLabel });
-  
-  await tabButton.waitFor({ state: "visible", timeout: 5000 });
-  await tabButton.click();
-  
-  // Wait for tab content to load
-  await page.waitForTimeout(1000);
-}
-
-/**
- * Navigates back to the User View (Channels) from Admin Dashboard.
- */
 export async function navigateToUserView(page: Page): Promise<void> {
   const userViewButton = page.getByRole("button", { name: /user view/i });
-  await userViewButton.waitFor({ state: "visible", timeout: 5000 });
+  await userViewButton.waitFor({ state: "visible", timeout: 15000 });
   await userViewButton.click();
-  
-  // Wait for user dashboard to load - Channels button indicates we're back
-  await page.getByRole("button", { name: /channels/i }).waitFor({ state: "visible", timeout: 10000 });
+  await page.getByRole("button", { name: /channels/i }).waitFor({ state: "visible", timeout: 15000 });
 }
 
+export async function navigateToAdminTab(page: Page, tabId: AdminTabId): Promise<void> {
+  const label = getAdminTabLabel(tabId);
+  const tabButton = page.getByRole("button", {
+    name: new RegExp(`^${escapeRegExp(label)}$`, "i"),
+  });
+  await tabButton.waitFor({ state: "visible", timeout: 15000 });
+  await tabButton.click();
+
+  // Let the tab content render before the calling test starts asserting.
+  await page.waitForTimeout(250);
+}

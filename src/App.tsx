@@ -18,11 +18,11 @@ import { useMusicPlayer } from './contexts/MusicPlayerContext';
 
 function AppContent() {
   const { user, profile, loading, signOut } = useAuth();
-  const { audioMetrics, engineType, isStreamingEngine, currentTrack, playlist, currentTrackIndex } = useMusicPlayer();
+  const { audioMetrics, isStreamingEngine, currentTrack, playlist, currentTrackIndex } = useMusicPlayer();
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
   const [showAuth, setShowAuth] = useState(false);
   const [viewMode, setViewMode] = useState<'user' | 'admin'>('user');
-  const [initialTab, setInitialTab] = useState<'channels' | 'focus-profile' | 'images' | 'settings'>('channels');
+  const [initialTab, setInitialTab] = useState<'channels' | 'focus-profile' | 'slideshow' | 'settings'>('channels');
   const [isAccessGranted, setIsAccessGranted] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
   const [passwordError, setPasswordError] = useState('');
@@ -32,7 +32,6 @@ function AppContent() {
   const [quizCognitiveProfile, setQuizCognitiveProfile] = useState<{ adhdIndicator: number; asdScore: number; stimulantLevel: string } | null>(null);
   const [quizResponses, setQuizResponses] = useState<Record<string, number | string> | null>(null);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
-  const [showQueue, setShowQueue] = useState(true);
   const [isRetakingQuiz, setIsRetakingQuiz] = useState(false);
   const [showSlideshow, setShowSlideshow] = useState(false);
 
@@ -93,7 +92,6 @@ function AppContent() {
       setShowDiagnostics(diagnosticsValue);
       // Persist diagnostics modal state across tab switches
       sessionStorage.setItem('showDiagnostics', String(diagnosticsValue));
-      setShowQueue(event.detail.show_queue);
     };
 
     window.addEventListener('audioPreferencesChanged', handlePreferencesChanged as EventListener);
@@ -106,7 +104,7 @@ function AppContent() {
   const loadAudioPreferences = async () => {
     const { data } = await supabase
       .from('system_preferences')
-      .select('show_audio_diagnostics, show_queue')
+      .select('show_audio_diagnostics')
       .eq('id', 1)
       .maybeSingle();
 
@@ -118,7 +116,6 @@ function AppContent() {
         : (profile?.is_admin && data.show_audio_diagnostics ? true : false);
 
       setShowDiagnostics(diagnosticsValue);
-      setShowQueue(data.show_queue ?? true);
     }
   };
 
@@ -248,7 +245,6 @@ function AppContent() {
               setQuizCognitiveProfile(cognitiveProfile || null);
               setQuizResponses(responses || null);
               setShowQuiz(false);
-            } else {
             }
           }}
           onLogoClick={handleLogoClick}
@@ -294,7 +290,7 @@ function AppContent() {
           <SlotStrategyEditor channelId={channelId} energyTier={energyTier} />
           <NowPlayingFooter onOpenSlideshow={() => setShowSlideshow(true)} />
           {showSlideshow && <SlideshowOverlay onClose={() => setShowSlideshow(false)} />}
-          {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} engineType={engineType} isStreamingEngine={isStreamingEngine} currentTrackInfo={{ trackName: currentTrack?.track_name, artistName: currentTrack?.artist_name }} prefetchTrackInfo={{ trackName: playlist[currentTrackIndex + 1]?.track_name, artistName: playlist[currentTrackIndex + 1]?.artist_name }} currentTrackFilePath={currentTrack?.file_path ?? null} prefetchTrackFilePath={playlist[currentTrackIndex + 1]?.file_path ?? null} />}
+          {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} isStreamingEngine={isStreamingEngine} currentTrackInfo={{ trackName: currentTrack?.track_name, artistName: currentTrack?.artist_name }} prefetchTrackInfo={{ trackName: playlist[currentTrackIndex + 1]?.track_name, artistName: playlist[currentTrackIndex + 1]?.artist_name }} currentTrackFilePath={currentTrack?.file_path ?? null} prefetchTrackFilePath={playlist[currentTrackIndex + 1]?.file_path ?? null} />}
         </>
       );
     }
@@ -313,7 +309,7 @@ function AppContent() {
           />
           <NowPlayingFooter onOpenSlideshow={() => setShowSlideshow(true)} />
           {showSlideshow && <SlideshowOverlay onClose={() => setShowSlideshow(false)} />}
-          {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} engineType={engineType} isStreamingEngine={isStreamingEngine} currentTrackInfo={{ trackName: currentTrack?.track_name, artistName: currentTrack?.artist_name }} prefetchTrackInfo={{ trackName: playlist[currentTrackIndex + 1]?.track_name, artistName: playlist[currentTrackIndex + 1]?.artist_name }} currentTrackFilePath={currentTrack?.file_path ?? null} prefetchTrackFilePath={playlist[currentTrackIndex + 1]?.file_path ?? null} />}
+          {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} isStreamingEngine={isStreamingEngine} currentTrackInfo={{ trackName: currentTrack?.track_name, artistName: currentTrack?.artist_name }} prefetchTrackInfo={{ trackName: playlist[currentTrackIndex + 1]?.track_name, artistName: playlist[currentTrackIndex + 1]?.artist_name }} currentTrackFilePath={currentTrack?.file_path ?? null} prefetchTrackFilePath={playlist[currentTrackIndex + 1]?.file_path ?? null} />}
         </>
       );
     }
@@ -332,7 +328,7 @@ function AppContent() {
         />
         <NowPlayingFooter onOpenSlideshow={() => setShowSlideshow(true)} />
         {showSlideshow && <SlideshowOverlay onClose={() => setShowSlideshow(false)} />}
-        {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} engineType={engineType} isStreamingEngine={isStreamingEngine} currentTrackInfo={{ trackName: currentTrack?.track_name, artistName: currentTrack?.artist_name }} prefetchTrackInfo={{ trackName: playlist[currentTrackIndex + 1]?.track_name, artistName: playlist[currentTrackIndex + 1]?.artist_name }} currentTrackFilePath={currentTrack?.file_path ?? null} prefetchTrackFilePath={playlist[currentTrackIndex + 1]?.file_path ?? null} />}
+        {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} isStreamingEngine={isStreamingEngine} currentTrackInfo={{ trackName: currentTrack?.track_name, artistName: currentTrack?.artist_name }} prefetchTrackInfo={{ trackName: playlist[currentTrackIndex + 1]?.track_name, artistName: playlist[currentTrackIndex + 1]?.artist_name }} currentTrackFilePath={currentTrack?.file_path ?? null} prefetchTrackFilePath={playlist[currentTrackIndex + 1]?.file_path ?? null} />}
       </>
     );
   }
@@ -347,7 +343,7 @@ function AppContent() {
       <UserDashboard initialTab={initialTab} />
       <NowPlayingFooter onOpenSlideshow={() => setShowSlideshow(true)} />
       {showSlideshow && <SlideshowOverlay onClose={() => setShowSlideshow(false)} />}
-      {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} engineType={engineType} isStreamingEngine={isStreamingEngine} currentTrackInfo={{ trackName: currentTrack?.track_name, artistName: currentTrack?.artist_name }} prefetchTrackInfo={{ trackName: playlist[currentTrackIndex + 1]?.track_name, artistName: playlist[currentTrackIndex + 1]?.artist_name }} currentTrackFilePath={currentTrack?.file_path ?? null} prefetchTrackFilePath={playlist[currentTrackIndex + 1]?.file_path ?? null} />}
+      {showDiagnostics && <AudioEngineDiagnostics metrics={audioMetrics} onClose={() => { setShowDiagnostics(false); sessionStorage.setItem('showDiagnostics', 'false'); }} isStreamingEngine={isStreamingEngine} currentTrackInfo={{ trackName: currentTrack?.track_name, artistName: currentTrack?.artist_name }} prefetchTrackInfo={{ trackName: playlist[currentTrackIndex + 1]?.track_name, artistName: playlist[currentTrackIndex + 1]?.artist_name }} currentTrackFilePath={currentTrack?.file_path ?? null} prefetchTrackFilePath={playlist[currentTrackIndex + 1]?.file_path ?? null} />}
     </>
   );
 }

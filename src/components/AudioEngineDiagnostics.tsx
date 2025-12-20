@@ -1,6 +1,5 @@
 import { X, Activity, Radio, AlertCircle, CheckCircle, Clock, TrendingUp, Zap, Move, Link, Layers, PlayCircle, Server, Gauge, Heart, Copy, Check, Music, Minus, Maximize2, FileJson, RefreshCw } from 'lucide-react';
 import type { AudioMetrics } from '../lib/types/audioEngine';
-import type { AudioEngineType } from '../contexts/MusicPlayerContext';
 import { useState, useEffect, useMemo, useRef, type ComponentType } from 'react';
 
 type TrackInfo = {
@@ -21,10 +20,27 @@ type FastStartSnapshot =
     }
   | null;
 
+type PlayerDebugMetricsSnapshot =
+  | {
+      fastStart?: FastStartSnapshot;
+      fastStartEnabled?: boolean;
+      fastStartCache?: unknown;
+      playbackSessionId?: number;
+    }
+  | null;
+
+type PlayerDebug = {
+  getMetrics?: () => PlayerDebugMetricsSnapshot;
+};
+
+function getPlayerDebug(): PlayerDebug | null {
+  if (typeof window === 'undefined') return null;
+  return (window as unknown as { __playerDebug?: PlayerDebug }).__playerDebug ?? null;
+}
+
 type AudioEngineDiagnosticsProps = {
   metrics: AudioMetrics | null;
   onClose: () => void;
-  engineType?: AudioEngineType;
   isStreamingEngine?: boolean;
   currentTrackInfo?: TrackInfo;
   prefetchTrackInfo?: TrackInfo;
@@ -140,10 +156,20 @@ function fileNameFromPath(path: string | null | undefined): string | null {
 
 type TabId = 'summary' | 'fast-start' | 'streaming' | 'prefetch' | 'tracks' | 'benchmarks' | 'raw';
 
+type TabIcon = ComponentType<{ className?: string }>;
+const DIAGNOSTICS_TABS: Array<{ id: TabId; label: string; icon: TabIcon }> = [
+  { id: 'summary', label: 'Summary', icon: Activity },
+  { id: 'fast-start', label: 'Fast start', icon: Zap },
+  { id: 'streaming', label: 'Streaming / HLS', icon: Layers },
+  { id: 'prefetch', label: 'Prefetch', icon: TrendingUp },
+  { id: 'tracks', label: 'Tracks & URLs', icon: Link },
+  { id: 'benchmarks', label: 'Benchmarks', icon: Gauge },
+  { id: 'raw', label: 'Raw', icon: FileJson },
+];
+
 export function AudioEngineDiagnostics({
   metrics,
   onClose,
-  engineType: _engineType = 'auto',
   isStreamingEngine = false,
   currentTrackInfo,
   prefetchTrackInfo,
@@ -171,7 +197,7 @@ export function AudioEngineDiagnostics({
       // Pull extra diagnostics from the existing debug interface (admin/dev only).
       // This avoids touching the protected audio engine while still showing fast-start and cache state.
       try {
-        const dbg = (window as any).__playerDebug;
+        const dbg = getPlayerDebug();
         const snapshot = dbg?.getMetrics?.() ?? null;
         const fastStart: FastStartSnapshot = snapshot?.fastStart ?? null;
         const enabled: boolean | null = typeof snapshot?.fastStartEnabled === 'boolean' ? snapshot.fastStartEnabled : null;
@@ -364,11 +390,22 @@ export function AudioEngineDiagnostics({
   };
 
   const deliveryInfo = getDeliverySource(metrics?.currentTrackUrl || null);
-  const healthInfo = calculateHealthScore(metrics as any);
+  const healthInfo = calculateHealthScore(metrics ? {
+    failureCount: metrics.failureCount,
+    stallCount: metrics.stallCount,
+    connectionQuality: metrics.connectionQuality,
+    circuitBreakerState: metrics.circuitBreakerState,
+    hls: metrics.hls ? {
+      isHLSActive: metrics.hls.isHLSActive,
+      bufferLength: metrics.hls.bufferLength,
+      targetBuffer: metrics.hls.targetBuffer,
+      fragmentStats: metrics.hls.fragmentStats,
+    } : undefined,
+  } : null);
   const hlsMetrics = metrics?.hls;
 
   const exportDiagnostics = () => {
-    const dbg = (window as any).__playerDebug;
+    const dbg = getPlayerDebug();
     const snapshot = dbg?.getMetrics?.() ?? null;
     const combined = { ...metrics, _debug: snapshot ? { fastStart: snapshot.fastStart, fastStartEnabled: snapshot.fastStartEnabled, fastStartCache: snapshot.fastStartCache, playbackSessionId: snapshot.playbackSessionId } : null };
     const data = JSON.stringify(combined, null, 2);
@@ -388,16 +425,6 @@ export function AudioEngineDiagnostics({
       <span className={`text-[13px] font-semibold ${valueClass || 'text-slate-900'}`}>{value}</span>
     </div>
   );
-
-  const tabs: Array<{ id: TabId; label: string; icon: ComponentType<any> }> = useMemo(() => ([
-    { id: 'summary', label: 'Summary', icon: Activity },
-    { id: 'fast-start', label: 'Fast start', icon: Zap },
-    { id: 'streaming', label: 'Streaming / HLS', icon: Layers },
-    { id: 'prefetch', label: 'Prefetch', icon: TrendingUp },
-    { id: 'tracks', label: 'Tracks & URLs', icon: Link },
-    { id: 'benchmarks', label: 'Benchmarks', icon: Gauge },
-    { id: 'raw', label: 'Raw', icon: FileJson },
-  ]), []);
 
   const resetPosition = () => {
     setPosition(safeInitialPosition());
@@ -534,7 +561,7 @@ export function AudioEngineDiagnostics({
       {/* Tabs */}
       <div className="px-2 py-2 border-b border-slate-200 bg-white">
         <div className="flex gap-1 overflow-x-auto">
-          {tabs.map((t) => {
+          {DIAGNOSTICS_TABS.map((t) => {
             const Icon = t.icon;
             const isActive = activeTab === t.id;
             return (
