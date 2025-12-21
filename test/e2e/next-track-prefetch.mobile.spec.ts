@@ -103,12 +103,28 @@ test.describe("Next Track Prefetch - Mobile", () => {
         const m = dbg?.getMetrics?.() ?? null;
         const list = dbg?.getPlaylist?.() ?? [];
         const idx = dbg?.getPlaylistIndex?.() ?? 0;
+        const ch = dbg?.getActiveChannel?.() ?? null;
+        const channelLabel =
+          ch?.channel_name ??
+          ch?.name ??
+          ch?.title ??
+          ch?.display_name ??
+          ch?.displayName ??
+          null;
         return {
           playlistIndex: idx,
           playlistLength: list?.length ?? 0,
           nextTrackId: list?.[idx + 1]?.metadata?.track_id ?? null,
+          nextTrackFilePath: list?.[idx + 1]?.file_path ?? null,
           prefetch: m?.prefetch ?? null,
           playbackSessionId: m?.playbackSessionId ?? null,
+          playbackState: m?.playbackState ?? null,
+          muted: m?.muted ?? null,
+          loadStartTime: m?.loadStartTime ?? null,
+          currentTrackId: m?.currentTrackId ?? null,
+          currentTime: dbg?.getCurrentTime?.() ?? null,
+          activeChannel: channelLabel,
+          prefetchScheduler: m?.prefetchScheduler ?? null,
         };
       });
     }

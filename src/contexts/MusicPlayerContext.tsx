@@ -10,6 +10,7 @@ import { createStorageAdapter } from '../lib/storageAdapters';
 import { selectNextTrackCached, getCurrentSlotIndex } from '../lib/slotStrategyEngine';
 import { getIosWebkitInfo } from '../lib/iosWebkitDetection';
 import type { IAudioEngine, AudioMetrics as StreamingAudioMetrics } from '../lib/types/audioEngine';
+import { shouldDisableNextTrackPrefetch } from '../lib/prefetchPolicy';
 
 // Re-export for consistency - both engines produce compatible metrics
 type EngineAudioMetrics = AudioMetrics | StreamingAudioMetrics;
@@ -180,6 +181,11 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     filePath: string | null;
   }>({ requestedAt: null, source: null, trackId: null, filePath: null });
 
+  // Next-track prefetch scheduling (prevents slot playlist growth from racing prefetch while buffering)
+  const prefetchScheduledForTrackIdRef = useRef<string | null>(null);
+  const prefetchCompletedForTrackIdRef = useRef<string | null>(null);
+  const prefetchTimerRef = useRef<number | null>(null);
+
   // Keep latest state for async callbacks (avoid stale-closure bugs in effects/promises).
   const prefetchInputsRef = useRef<{
     isAdminMode: boolean;
@@ -189,17 +195,19 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   }>({ isAdminMode: false, activeChannelId: null, playlist: [], currentTrackIndex: 0 });
   prefetchInputsRef.current = {
     isAdminMode,
-    activeChannelId: activeChannel?.id ?? null,
+    // Use playlistChannelId when available (it is set immediately after playlist generation),
+    // as activeChannel can briefly be null/stale during mobile navigation and channel switches.
+    activeChannelId: playlistChannelId ?? activeChannel?.id ?? null,
     playlist,
     currentTrackIndex,
   };
 
-  const requestNextTrackPrefetch = () => {
-    if (!audioEngine) return;
+  const requestNextTrackPrefetch = (): boolean => {
+    if (!audioEngine) return false;
     const snap = prefetchInputsRef.current;
-    if (snap.isAdminMode) return;
-    if (!snap.activeChannelId) return;
-    if (snap.playlist.length === 0) return;
+    if (snap.isAdminMode) return false;
+    if (!snap.activeChannelId) return false;
+    if (snap.playlist.length === 0) return false;
 
     const nextTrack = snap.playlist[snap.currentTrackIndex + 1];
     if (nextTrack?.metadata?.track_id && nextTrack.file_path) {
@@ -210,7 +218,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         filePath: nextTrack.file_path,
       };
       audioEngine.prefetchNextTrack(nextTrack.metadata.track_id, nextTrack.file_path);
+      return true;
     }
+    return false;
   };
 
   const getFastStartEnabled = (): boolean => {
@@ -637,11 +647,6 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
           shouldAutoPlayRef.current = false;
           setIsPlaying(true);
           await audioEngine.play();
-
-          // Prefetch next track ONLY after playback starts.
-          // Reason: the streaming engine loads the current track into the "next" pipeline,
-          // so prefetching before load/play can be overwritten by the current track load.
-          requestNextTrackPrefetch();
         }
       } catch (error) {
         console.log('[AUDIO][CELLBUG][CONTEXT] Track load failed:', error);
@@ -719,11 +724,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       console.log('[SYNC EFFECT] Calling audioEngine.play()');
       audioEngine
         .play()
-        .then(() => {
-          // After play() resolves, the engine has swapped pipelines (streaming engine),
-          // so it is safe to request next-track prefetch without overwriting the current track load.
-          requestNextTrackPrefetch();
-        })
+        .then(() => {})
         .catch(() => {});
     } else if (!isPlaying && currentlyPlaying) {
       console.log('[SYNC EFFECT] Calling audioEngine.pause()');
@@ -737,14 +738,69 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     if (!audioEngine) return;
     if (!isPlaying) return;
     if (!audioMetrics) return;
-    // Prefetch must only happen after the engine has switched to the active pipeline for the current track.
-    // Use the engine's own playing state (most reliable), but also allow "buffering" which can occur
-    // immediately after play begins on slow networks.
-    const enginePlaying = audioEngine.isPlaying?.() ?? false;
-    if (!enginePlaying && audioMetrics.playbackState !== 'buffering' && audioMetrics.playbackState !== 'playing') return;
+    // Prefetch must not run while the current track is genuinely stalled.
+    // However, on mobile emulation + some slow starts, metrics can stay at "buffering"
+    // even though audio is already progressing. We allow prefetch once playback is actually advancing.
+    const muted = Boolean((audioMetrics as any)?.muted);
+    const engineTime = (() => {
+      try {
+        return audioEngine.getCurrentTime?.() ?? 0;
+      } catch {
+        return 0;
+      }
+    })();
+    const hasAudioProgress = engineTime > 0.5;
+    const canPrefetchNow =
+      audioMetrics.playbackState === 'playing' ||
+      // Metrics can remain "buffering" even while audio is actually progressing (especially in mobile emulation).
+      // Use "audio time is advancing" as the reliable indicator that we aren't stalled.
+      (muted === false && hasAudioProgress);
+    if (!canPrefetchNow) {
+      if (prefetchTimerRef.current) {
+        clearTimeout(prefetchTimerRef.current);
+        prefetchTimerRef.current = null;
+      }
+      prefetchScheduledForTrackIdRef.current = null;
+      return;
+    }
 
-    requestNextTrackPrefetch();
-  }, [audioEngine, isPlaying, audioMetrics?.playbackState, audioMetrics?.currentTrackId, playlist, currentTrackIndex]);
+    const currentTrackId = audioMetrics.currentTrackId ?? null;
+    if (!currentTrackId) return;
+    if (prefetchCompletedForTrackIdRef.current === currentTrackId) return;
+    if (prefetchScheduledForTrackIdRef.current === currentTrackId) return;
+
+    prefetchScheduledForTrackIdRef.current = currentTrackId;
+    prefetchTimerRef.current = window.setTimeout(() => {
+      const issued = requestNextTrackPrefetch();
+      if (issued) {
+        prefetchCompletedForTrackIdRef.current = currentTrackId;
+      } else {
+        // No next track yet (common for slot-based playlists at startup) — allow retry on subsequent renders.
+        prefetchScheduledForTrackIdRef.current = null;
+      }
+      prefetchTimerRef.current = null;
+    }, 1200);
+  }, [
+    audioEngine,
+    isPlaying,
+    audioMetrics?.playbackState,
+    (audioMetrics as any)?.muted,
+    // Re-run when time advances so we can schedule prefetch even if playbackState stays "buffering" on mobile.
+    (audioMetrics as any)?.currentTime,
+    audioMetrics?.currentTrackId,
+    playlist,
+    currentTrackIndex,
+  ]);
+
+  // Cleanup scheduled prefetch timer on unmount.
+  useEffect(() => {
+    return () => {
+      if (prefetchTimerRef.current) {
+        clearTimeout(prefetchTimerRef.current);
+        prefetchTimerRef.current = null;
+      }
+    };
+  }, []);
 
   // Finalize fast-start timing when the engine first reaches "playing" for the requested track.
   useEffect(() => {
