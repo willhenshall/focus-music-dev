@@ -1203,6 +1203,22 @@ export class StreamingAudioEngine implements IAudioEngine {
       throw new Error('Circuit breaker is open - too many recent failures');
     }
     
+    // CRITICAL FIX: Force unmute BOTH elements at the start of loadTrack
+    // Prewarm may have muted an element, and if the fast-start cache is not used,
+    // we fall back to this path without ever unmuting
+    try {
+      console.log('[STREAMING AUDIO] loadTrack - ensuring both elements unmuted', {
+        trackId,
+        primaryMuted: this.primaryAudio.muted,
+        secondaryMuted: this.secondaryAudio.muted
+      });
+      this.primaryAudio.muted = false;
+      this.secondaryAudio.muted = false;
+      console.log('[STREAMING AUDIO] loadTrack - both elements unmuted');
+    } catch (e) {
+      console.error('[STREAMING AUDIO] loadTrack - failed to unmute:', e);
+    }
+    
     this.metrics.loadStartTime = performance.now();
     this.metrics.playbackState = 'loading';
     this.metrics.error = null;
