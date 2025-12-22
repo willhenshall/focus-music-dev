@@ -2180,23 +2180,27 @@ export class StreamingAudioEngine implements IAudioEngine {
             // SAFETY: Only mute if the element is NOT currently playing audible content
             try {
               // Double-check we're prewarming the correct (inactive) element
-              const isActuallyInactive = prewarmAudio.paused || prewarmAudio.currentTime === 0 || prewarmAudio.ended;
+              // An element is ACTIVE if it's playing (not paused) AND not ended
+              const isActuallyPlaying = !prewarmAudio.paused && !prewarmAudio.ended;
               
-              if (isActuallyInactive) {
+              if (!isActuallyPlaying) {
                 prewarmAudio.muted = true;
                 prewarmAudio.volume = 0;
                 // Fire-and-forget: if blocked, we still keep the manifest/connection warm.
                 prewarmAudio.play().catch(() => {});
                 console.log('[STREAMING AUDIO] Prewarming - muted inactive audio element', {
                   element: prewarmAudio === this.primaryAudio ? 'primary' : 'secondary',
-                  trackId
+                  trackId,
+                  wasPaused: prewarmAudio.paused,
+                  wasEnded: prewarmAudio.ended
                 });
               } else {
-                console.warn('[STREAMING AUDIO] SKIPPED prewarm mute - element appears to be actively playing!', {
+                console.warn('[STREAMING AUDIO] SKIPPED prewarm mute - element is actively playing!', {
                   element: prewarmAudio === this.primaryAudio ? 'primary' : 'secondary',
                   paused: prewarmAudio.paused,
                   currentTime: prewarmAudio.currentTime,
                   ended: prewarmAudio.ended,
+                  muted: prewarmAudio.muted,
                   trackId
                 });
               }
