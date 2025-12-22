@@ -2177,11 +2177,29 @@ export class StreamingAudioEngine implements IAudioEngine {
 
             // Critical: On Chrome/Android, hls.js may not append media data while the element is paused.
             // Muted autoplay is generally permitted, and forces the media pipeline to start consuming buffer.
+            // SAFETY: Only mute if the element is NOT currently playing audible content
             try {
-              prewarmAudio.muted = true;
-              prewarmAudio.volume = 0;
-              // Fire-and-forget: if blocked, we still keep the manifest/connection warm.
-              prewarmAudio.play().catch(() => {});
+              // Double-check we're prewarming the correct (inactive) element
+              const isActuallyInactive = prewarmAudio.paused || prewarmAudio.currentTime === 0 || prewarmAudio.ended;
+              
+              if (isActuallyInactive) {
+                prewarmAudio.muted = true;
+                prewarmAudio.volume = 0;
+                // Fire-and-forget: if blocked, we still keep the manifest/connection warm.
+                prewarmAudio.play().catch(() => {});
+                console.log('[STREAMING AUDIO] Prewarming - muted inactive audio element', {
+                  element: prewarmAudio === this.primaryAudio ? 'primary' : 'secondary',
+                  trackId
+                });
+              } else {
+                console.warn('[STREAMING AUDIO] SKIPPED prewarm mute - element appears to be actively playing!', {
+                  element: prewarmAudio === this.primaryAudio ? 'primary' : 'secondary',
+                  paused: prewarmAudio.paused,
+                  currentTime: prewarmAudio.currentTime,
+                  ended: prewarmAudio.ended,
+                  trackId
+                });
+              }
             } catch {}
 
             // Prewarm should be best-effort and must not stall indefinitely while paused.
