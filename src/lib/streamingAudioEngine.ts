@@ -1834,17 +1834,23 @@ export class StreamingAudioEngine implements IAudioEngine {
     const hasNewTrack = this.nextAudio !== this.currentAudio && Boolean(this.nextAudio.src);
 
     // Safety: prewarm may have muted the inactive element. Ensure audible playback when we actually play.
+    // CRITICAL FIX: Unmute BOTH audio elements to handle pointer confusion during energy transitions
     try {
-      const targetAudio = hasNewTrack ? this.nextAudio : this.currentAudio;
       console.log('[STREAMING AUDIO] Unmuting before play', {
         hasNewTrack,
-        audioElement: targetAudio === this.primaryAudio ? 'primary' : 'secondary',
-        wasMuted: targetAudio.muted,
-        currentVolume: targetAudio.volume
+        primaryMuted: this.primaryAudio.muted,
+        secondaryMuted: this.secondaryAudio.muted,
+        currentAudioElement: this.currentAudio === this.primaryAudio ? 'primary' : 'secondary',
+        nextAudioElement: this.nextAudio === this.primaryAudio ? 'primary' : 'secondary'
       });
-      targetAudio.muted = false;
-      console.log('[STREAMING AUDIO] Audio unmuted', {
-        isMuted: targetAudio.muted
+      
+      // Force unmute BOTH elements to prevent audio element pointer confusion
+      this.primaryAudio.muted = false;
+      this.secondaryAudio.muted = false;
+      
+      console.log('[STREAMING AUDIO] Both audio elements unmuted', {
+        primaryMuted: this.primaryAudio.muted,
+        secondaryMuted: this.secondaryAudio.muted
       });
     } catch (e) {
       console.error('[STREAMING AUDIO] Failed to unmute before play:', e);
@@ -2256,16 +2262,23 @@ export class StreamingAudioEngine implements IAudioEngine {
       this.updateMetrics();
 
       // Restore normal audio output before starting real playback.
+      // CRITICAL FIX: Unmute BOTH elements to handle pointer confusion during energy transitions
       try {
         console.log('[STREAMING AUDIO] Unmuting prewarmed audio', {
-          wasMuted: this.nextAudio.muted,
-          currentVolume: this.nextAudio.volume,
+          primaryMuted: this.primaryAudio.muted,
+          secondaryMuted: this.secondaryAudio.muted,
+          nextAudioElement: this.nextAudio === this.primaryAudio ? 'primary' : 'secondary',
           targetVolume: this.volume
         });
-        this.nextAudio.muted = false;
+        
+        // Force unmute BOTH elements to prevent audio element pointer confusion
+        this.primaryAudio.muted = false;
+        this.secondaryAudio.muted = false;
         this.nextAudio.volume = this.volume;
-        console.log('[STREAMING AUDIO] Audio unmuted successfully', {
-          isMuted: this.nextAudio.muted,
+        
+        console.log('[STREAMING AUDIO] Both audio elements unmuted', {
+          primaryMuted: this.primaryAudio.muted,
+          secondaryMuted: this.secondaryAudio.muted,
           volume: this.nextAudio.volume
         });
       } catch (e) {
