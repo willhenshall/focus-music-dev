@@ -2181,7 +2181,11 @@ export class StreamingAudioEngine implements IAudioEngine {
             try {
               // Double-check we're prewarming the correct (inactive) element
               // An element is ACTIVE if it's playing (not paused) AND not ended
-              const isActuallyPlaying = !prewarmAudio.paused && !prewarmAudio.ended;
+              const wasPaused = prewarmAudio.paused;
+              const wasEnded = prewarmAudio.ended;
+              const wasMuted = prewarmAudio.muted;
+              const wasCurrentTime = prewarmAudio.currentTime;
+              const isActuallyPlaying = !wasPaused && !wasEnded;
               
               if (!isActuallyPlaying) {
                 prewarmAudio.muted = true;
@@ -2191,16 +2195,18 @@ export class StreamingAudioEngine implements IAudioEngine {
                 console.log('[STREAMING AUDIO] Prewarming - muted inactive audio element', {
                   element: prewarmAudio === this.primaryAudio ? 'primary' : 'secondary',
                   trackId,
-                  wasPaused: prewarmAudio.paused,
-                  wasEnded: prewarmAudio.ended
+                  wasPaused,
+                  wasEnded,
+                  wasMuted,
+                  wasCurrentTime
                 });
               } else {
                 console.warn('[STREAMING AUDIO] SKIPPED prewarm mute - element is actively playing!', {
                   element: prewarmAudio === this.primaryAudio ? 'primary' : 'secondary',
-                  paused: prewarmAudio.paused,
-                  currentTime: prewarmAudio.currentTime,
-                  ended: prewarmAudio.ended,
-                  muted: prewarmAudio.muted,
+                  wasPaused,
+                  wasEnded,
+                  wasMuted,
+                  currentTime: wasCurrentTime,
                   trackId
                 });
               }
