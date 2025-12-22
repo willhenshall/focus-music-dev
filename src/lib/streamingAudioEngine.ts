@@ -1835,12 +1835,20 @@ export class StreamingAudioEngine implements IAudioEngine {
 
     // Safety: prewarm may have muted the inactive element. Ensure audible playback when we actually play.
     try {
-      if (hasNewTrack) {
-        this.nextAudio.muted = false;
-      } else {
-        this.currentAudio.muted = false;
-      }
-    } catch {}
+      const targetAudio = hasNewTrack ? this.nextAudio : this.currentAudio;
+      console.log('[STREAMING AUDIO] Unmuting before play', {
+        hasNewTrack,
+        audioElement: targetAudio === this.primaryAudio ? 'primary' : 'secondary',
+        wasMuted: targetAudio.muted,
+        currentVolume: targetAudio.volume
+      });
+      targetAudio.muted = false;
+      console.log('[STREAMING AUDIO] Audio unmuted', {
+        isMuted: targetAudio.muted
+      });
+    } catch (e) {
+      console.error('[STREAMING AUDIO] Failed to unmute before play:', e);
+    }
 
     // [iOS FIX] On iOS, the FIRST play() must be called directly from user gesture
     // Crossfade uses async callbacks which iOS blocks on first interaction
@@ -1921,8 +1929,16 @@ export class StreamingAudioEngine implements IAudioEngine {
       
       // Always start at volume 0 and fade in to eliminate clicks
       try {
+        console.log('[STREAMING AUDIO] Unmuting for non-crossfade play', {
+          wasMuted: newAudio.muted
+        });
         newAudio.muted = false;
-      } catch {}
+        console.log('[STREAMING AUDIO] Unmuted successfully', {
+          isMuted: newAudio.muted
+        });
+      } catch (e) {
+        console.error('[STREAMING AUDIO] Failed to unmute for non-crossfade play:', e);
+      }
       newAudio.volume = 0;
       await newAudio.play();
       this.currentAudio = newAudio;
@@ -1951,8 +1967,16 @@ export class StreamingAudioEngine implements IAudioEngine {
     newAudio.volume = 0;
     try {
       try {
+        console.log('[STREAMING AUDIO] Unmuting for crossfade', {
+          wasMuted: newAudio.muted
+        });
         newAudio.muted = false;
-      } catch {}
+        console.log('[STREAMING AUDIO] Unmuted for crossfade', {
+          isMuted: newAudio.muted
+        });
+      } catch (e) {
+        console.error('[STREAMING AUDIO] Failed to unmute for crossfade:', e);
+      }
       await newAudio.play();
       console.log('[STREAMING AUDIO] New track play() succeeded');
     } catch (err) {
@@ -2233,9 +2257,20 @@ export class StreamingAudioEngine implements IAudioEngine {
 
       // Restore normal audio output before starting real playback.
       try {
+        console.log('[STREAMING AUDIO] Unmuting prewarmed audio', {
+          wasMuted: this.nextAudio.muted,
+          currentVolume: this.nextAudio.volume,
+          targetVolume: this.volume
+        });
         this.nextAudio.muted = false;
         this.nextAudio.volume = this.volume;
-      } catch {}
+        console.log('[STREAMING AUDIO] Audio unmuted successfully', {
+          isMuted: this.nextAudio.muted,
+          volume: this.nextAudio.volume
+        });
+      } catch (e) {
+        console.error('[STREAMING AUDIO] Failed to unmute prewarmed audio:', e);
+      }
 
       if (metadata) {
         this.updateMediaSessionMetadata(metadata);
