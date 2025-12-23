@@ -931,6 +931,21 @@ export class StreamingAudioEngine implements IAudioEngine {
       this.metrics.buffered = bufferedEnd;
       this.metrics.bufferPercentage = (bufferedEnd / audio.duration) * 100;
     }
+
+    // If we're marked buffering but already have data buffered and the element is ready, nudge playback.
+    if (this.metrics.playbackState === 'buffering' && audio.buffered.length > 0 && audio.readyState >= 3) {
+      const bufferEnd = audio.buffered.end(audio.buffered.length - 1);
+      const bufferAhead = bufferEnd - audio.currentTime;
+      if (bufferAhead > 1) {
+        try {
+          audio.muted = false;
+          audio.volume = this.volume;
+          audio.play().catch(() => {});
+        } catch {
+          // best effort
+        }
+      }
+    }
     
     // HLS metrics
     if (this.currentHls && this.hlsMetrics.isHLSActive) {

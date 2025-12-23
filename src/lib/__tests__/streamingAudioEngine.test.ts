@@ -251,6 +251,33 @@ describe('StreamingAudioEngine', () => {
       expect(primary.play).toHaveBeenCalled();
       engine.destroy();
     });
+
+    it('nudges playback during metrics update when buffering but already buffered', () => {
+      const adapter = createMockStorageAdapter();
+      const engine = new StreamingAudioEngine(adapter as any);
+
+      const [primary] = Array.from(document.querySelectorAll('audio')) as HTMLAudioElement[];
+
+      // Simulate buffered media while still marked buffering
+      (engine as any).metrics.playbackState = 'buffering';
+      Object.defineProperty(primary, 'buffered', {
+        configurable: true,
+        get: () => ({
+          length: 1,
+          end: () => 5,
+        }),
+      });
+      Object.defineProperty(primary, 'readyState', { configurable: true, get: () => 3 });
+      primary.currentTime = 0;
+      primary.play = vi.fn().mockResolvedValue(undefined);
+      primary.muted = true;
+
+      (engine as any).updateMetrics();
+
+      expect(primary.muted).toBe(false);
+      expect(primary.play).toHaveBeenCalled();
+      engine.destroy();
+    });
   });
 
   describe('Error Handling', () => {
