@@ -223,6 +223,34 @@ describe('StreamingAudioEngine', () => {
       expect(primary.play).toHaveBeenCalled();
       engine.destroy();
     });
+
+    it('retries play on waiting even if isPlayingState is false when buffer is ready', async () => {
+      const adapter = createMockStorageAdapter();
+      const engine = new StreamingAudioEngine(adapter as any);
+
+      const [primary] = Array.from(document.querySelectorAll('audio')) as HTMLAudioElement[];
+
+      // Simulate ready buffer while bookkeeping temporarily marks not playing
+      (engine as any).isPlayingState = false;
+      Object.defineProperty(primary, 'buffered', {
+        configurable: true,
+        get: () => ({
+          length: 1,
+          end: () => 5,
+        }),
+      });
+      Object.defineProperty(primary, 'readyState', { configurable: true, get: () => 3 });
+      Object.defineProperty(primary, 'paused', { configurable: true, get: () => true });
+      primary.currentTime = 0;
+      primary.play = vi.fn().mockResolvedValue(undefined);
+
+      primary.dispatchEvent(new Event('waiting'));
+
+      await Promise.resolve();
+
+      expect(primary.play).toHaveBeenCalled();
+      engine.destroy();
+    });
   });
 
   describe('Error Handling', () => {

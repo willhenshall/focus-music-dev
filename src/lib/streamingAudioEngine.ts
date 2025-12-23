@@ -439,7 +439,8 @@ export class StreamingAudioEngine implements IAudioEngine {
 
       // Fast-start regression guard: if we already have buffered media but receive a waiting event,
       // immediately unmute and nudge play() to avoid silent stalls after energy/quality switches.
-      if (audio === this.currentAudio && this.isPlayingState) {
+      // Allow this even if isPlayingState temporarily flipped false (e.g., during crossfade bookkeeping).
+      if (audio === this.currentAudio && (this.isPlayingState || audio.readyState >= 3)) {
         const hasBuffer =
           audio.buffered.length > 0
             ? audio.buffered.end(audio.buffered.length - 1) - audio.currentTime
