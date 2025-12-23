@@ -443,7 +443,7 @@ export class StreamingAudioEngine implements IAudioEngine {
       if (
         audio === this.currentAudio &&
         (this.isPlayingState || audio.readyState >= 3) &&
-        audio.src
+        this.hasPlayableSource(audio)
       ) {
         const hasBuffer =
           audio.buffered.length > 0
@@ -736,6 +736,12 @@ export class StreamingAudioEngine implements IAudioEngine {
     return hls;
   }
 
+  private hasPlayableSource(audio: HTMLAudioElement): boolean {
+    if (!audio.src) return false;
+    const NETWORK_NO_SOURCE = (audio as any).NETWORK_NO_SOURCE ?? 3;
+    return audio.networkState !== NETWORK_NO_SOURCE && audio.readyState >= 2;
+  }
+
   private setupNetworkMonitoring(): void {
     window.addEventListener('online', () => {
       console.log('[AUDIO][CELLBUG][NETWORK] Online event - connection restored');
@@ -941,7 +947,7 @@ export class StreamingAudioEngine implements IAudioEngine {
       this.metrics.playbackState === 'buffering' &&
       audio.buffered.length > 0 &&
       audio.readyState >= 3 &&
-      audio.src
+      this.hasPlayableSource(audio)
     ) {
       const bufferEnd = audio.buffered.end(audio.buffered.length - 1);
       const bufferAhead = bufferEnd - audio.currentTime;

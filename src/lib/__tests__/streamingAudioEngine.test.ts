@@ -202,6 +202,7 @@ describe('StreamingAudioEngine', () => {
 
       const [primary] = Array.from(document.querySelectorAll('audio')) as HTMLAudioElement[];
       primary.src = 'https://example.com/audio.m3u8';
+      Object.defineProperty(primary, 'networkState', { configurable: true, get: () => 2 });
 
       // Simulate active playback with buffered media already available
       (engine as any).isPlayingState = true;
@@ -231,6 +232,7 @@ describe('StreamingAudioEngine', () => {
 
       const [primary] = Array.from(document.querySelectorAll('audio')) as HTMLAudioElement[];
       primary.src = 'https://example.com/audio.m3u8';
+      Object.defineProperty(primary, 'networkState', { configurable: true, get: () => 2 });
 
       // Simulate ready buffer while bookkeeping temporarily marks not playing
       (engine as any).isPlayingState = false;
@@ -260,6 +262,7 @@ describe('StreamingAudioEngine', () => {
 
       const [primary] = Array.from(document.querySelectorAll('audio')) as HTMLAudioElement[];
       primary.src = 'https://example.com/audio.m3u8';
+      Object.defineProperty(primary, 'networkState', { configurable: true, get: () => 2 });
 
       // Simulate buffered media while still marked buffering
       (engine as any).metrics.playbackState = 'buffering';
