@@ -436,6 +436,29 @@ export class StreamingAudioEngine implements IAudioEngine {
       if (this.isPlayingState && audio === this.currentAudio) {
         this.startStallRecovery(audio);
       }
+
+      // Fast-start regression guard: if we already have buffered media but receive a waiting event,
+      // immediately unmute and nudge play() to avoid silent stalls after energy/quality switches.
+      // Allow this even if isPlayingState temporarily flipped false (e.g., during crossfade bookkeeping).
+      if (
+        audio === this.currentAudio &&
+        (this.isPlayingState || audio.readyState >= 3) &&
+        this.hasPlayableSource(audio)
+      ) {
+        const hasBuffer =
+          audio.buffered.length > 0
+            ? audio.buffered.end(audio.buffered.length - 1) - audio.currentTime
+            : 0;
+        const isReady = audio.readyState >= 3;
+        if (hasBuffer > 1 && isReady) {
+          try {
+            audio.muted = false;
+            audio.play().catch(() => {});
+          } catch {
+            // best effort
+          }
+        }
+      }
     });
     
     audio.addEventListener('playing', () => {
@@ -713,6 +736,12 @@ export class StreamingAudioEngine implements IAudioEngine {
     return hls;
   }
 
+  private hasPlayableSource(audio: HTMLAudioElement): boolean {
+    if (!audio.src) return false;
+    const NETWORK_NO_SOURCE = (audio as any).NETWORK_NO_SOURCE ?? 3;
+    return audio.networkState !== NETWORK_NO_SOURCE && audio.readyState >= 2;
+  }
+
   private setupNetworkMonitoring(): void {
     window.addEventListener('online', () => {
       console.log('[AUDIO][CELLBUG][NETWORK] Online event - connection restored');
@@ -911,6 +940,26 @@ export class StreamingAudioEngine implements IAudioEngine {
       const bufferedEnd = audio.buffered.end(audio.buffered.length - 1);
       this.metrics.buffered = bufferedEnd;
       this.metrics.bufferPercentage = (bufferedEnd / audio.duration) * 100;
+    }
+
+    // If we're marked buffering but already have data buffered and the element is ready, nudge playback.
+    if (
+      this.metrics.playbackState === 'buffering' &&
+      audio.buffered.length > 0 &&
+      audio.readyState >= 3 &&
+      this.hasPlayableSource(audio)
+    ) {
+      const bufferEnd = audio.buffered.end(audio.buffered.length - 1);
+      const bufferAhead = bufferEnd - audio.currentTime;
+      if (bufferAhead > 1) {
+        try {
+          audio.muted = false;
+          audio.volume = this.volume;
+          audio.play().catch(() => {});
+        } catch {
+          // best effort
+        }
+      }
     }
     
     // HLS metrics

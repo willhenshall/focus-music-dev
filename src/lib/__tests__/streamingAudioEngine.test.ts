@@ -195,6 +195,95 @@ describe('StreamingAudioEngine', () => {
       
       expect(percentage).toBe(50);
     });
+
+    it('retries play immediately when waiting with buffered media', async () => {
+      const adapter = createMockStorageAdapter();
+      const engine = new StreamingAudioEngine(adapter as any);
+
+      const [primary] = Array.from(document.querySelectorAll('audio')) as HTMLAudioElement[];
+      primary.src = 'https://example.com/audio.m3u8';
+      Object.defineProperty(primary, 'networkState', { configurable: true, get: () => 2 });
+
+      // Simulate active playback with buffered media already available
+      (engine as any).isPlayingState = true;
+      Object.defineProperty(primary, 'buffered', {
+        configurable: true,
+        get: () => ({
+          length: 1,
+          end: () => 5,
+        }),
+      });
+      Object.defineProperty(primary, 'readyState', { configurable: true, get: () => 4 });
+      Object.defineProperty(primary, 'paused', { configurable: true, get: () => true });
+      primary.currentTime = 0;
+      primary.play = vi.fn().mockResolvedValue(undefined);
+
+      primary.dispatchEvent(new Event('waiting'));
+
+      await Promise.resolve();
+
+      expect(primary.play).toHaveBeenCalled();
+      engine.destroy();
+    });
+
+    it('retries play on waiting even if isPlayingState is false when buffer is ready', async () => {
+      const adapter = createMockStorageAdapter();
+      const engine = new StreamingAudioEngine(adapter as any);
+
+      const [primary] = Array.from(document.querySelectorAll('audio')) as HTMLAudioElement[];
+      primary.src = 'https://example.com/audio.m3u8';
+      Object.defineProperty(primary, 'networkState', { configurable: true, get: () => 2 });
+
+      // Simulate ready buffer while bookkeeping temporarily marks not playing
+      (engine as any).isPlayingState = false;
+      Object.defineProperty(primary, 'buffered', {
+        configurable: true,
+        get: () => ({
+          length: 1,
+          end: () => 5,
+        }),
+      });
+      Object.defineProperty(primary, 'readyState', { configurable: true, get: () => 3 });
+      Object.defineProperty(primary, 'paused', { configurable: true, get: () => true });
+      primary.currentTime = 0;
+      primary.play = vi.fn().mockResolvedValue(undefined);
+
+      primary.dispatchEvent(new Event('waiting'));
+
+      await Promise.resolve();
+
+      expect(primary.play).toHaveBeenCalled();
+      engine.destroy();
+    });
+
+    it('nudges playback during metrics update when buffering but already buffered', () => {
+      const adapter = createMockStorageAdapter();
+      const engine = new StreamingAudioEngine(adapter as any);
+
+      const [primary] = Array.from(document.querySelectorAll('audio')) as HTMLAudioElement[];
+      primary.src = 'https://example.com/audio.m3u8';
+      Object.defineProperty(primary, 'networkState', { configurable: true, get: () => 2 });
+
+      // Simulate buffered media while still marked buffering
+      (engine as any).metrics.playbackState = 'buffering';
+      Object.defineProperty(primary, 'buffered', {
+        configurable: true,
+        get: () => ({
+          length: 1,
+          end: () => 5,
+        }),
+      });
+      Object.defineProperty(primary, 'readyState', { configurable: true, get: () => 3 });
+      primary.currentTime = 0;
+      primary.play = vi.fn().mockResolvedValue(undefined);
+      primary.muted = true;
+
+      (engine as any).updateMetrics();
+
+      expect(primary.muted).toBe(false);
+      expect(primary.play).toHaveBeenCalled();
+      engine.destroy();
+    });
   });
 
   describe('Error Handling', () => {
@@ -507,6 +596,9 @@ describe('StreamingAudioEngine Integration', () => {
       const engine = new StreamingAudioEngine(adapter as any);
       const [, secondaryHls] = (Hls as any).__instances;
 
+      // Force "slow/uncertain" conditions so the fast-start lock is engaged deterministically.
+      (engine as any).metrics.connectionQuality = 'poor';
+
       const prewarmPromise = engine.prewarmTrack('track-3', 'file/path.mp3', {
         preferHLS: true,
         startLevel: 0,
@@ -540,7 +632,7 @@ describe('StreamingAudioEngine Integration', () => {
 
       // ABR lock should be released (auto)
       expect(secondaryHls.startLevel).toBe(-1);
-      expect(secondaryHls.currentLevel).toBe(-1);
+      expect(secondaryHls.autoLevelEnabled).toBe(true);
 
       engine.destroy();
     });
