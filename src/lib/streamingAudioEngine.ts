@@ -436,6 +436,24 @@ export class StreamingAudioEngine implements IAudioEngine {
       if (this.isPlayingState && audio === this.currentAudio) {
         this.startStallRecovery(audio);
       }
+
+      // Fast-start regression guard: if we already have buffered media but receive a waiting event,
+      // immediately unmute and nudge play() to avoid silent stalls after energy/quality switches.
+      if (audio === this.currentAudio && this.isPlayingState) {
+        const hasBuffer =
+          audio.buffered.length > 0
+            ? audio.buffered.end(audio.buffered.length - 1) - audio.currentTime
+            : 0;
+        const isReady = audio.readyState >= 3;
+        if (hasBuffer > 1 && isReady) {
+          try {
+            audio.muted = false;
+            audio.play().catch(() => {});
+          } catch {
+            // best effort
+          }
+        }
+      }
     });
     
     audio.addEventListener('playing', () => {
