@@ -66,6 +66,201 @@ interface DuplicateCheckResult {
   };
 }
 
+// ============================================================================
+// HLS UPLOAD CONFIGURATION - Improved reliability settings
+// ============================================================================
+const HLS_UPLOAD_CONFIG = {
+  /** Number of files to upload in parallel (reduced from 10 for stability) */
+  BATCH_SIZE: 5,
+  /** Maximum retry attempts per file */
+  MAX_RETRIES: 3,
+  /** Base delay for exponential backoff (ms) */
+  RETRY_BASE_DELAY_MS: 1000,
+  /** Maximum timeout per file upload (ms) */
+  UPLOAD_TIMEOUT_MS: 30000,
+};
+
+interface HLSFileUploadResult {
+  success: boolean;
+  fileName: string;
+  error?: string;
+  cdnUploaded: boolean;
+  supabaseUploaded: boolean;
+  retryCount: number;
+}
+
+/**
+ * Upload a single HLS file with retry logic, timeout, and separated CDN/Supabase uploads
+ */
+async function uploadHLSFileWithRetry(
+  trackId: string,
+  hlsFile: { name: string; data: string; contentType: string; size: number },
+  supabaseClient: typeof supabase
+): Promise<HLSFileUploadResult> {
+  const result: HLSFileUploadResult = {
+    success: false,
+    fileName: hlsFile.name,
+    cdnUploaded: false,
+    supabaseUploaded: false,
+    retryCount: 0,
+  };
+
+  // Helper for fetch with timeout
+  const fetchWithTimeout = async (url: string, options: RequestInit, timeoutMs: number): Promise<Response> => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timeoutId);
+      return response;
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      if (error.name === 'AbortError') {
+        throw new Error(`Upload timed out after ${timeoutMs / 1000}s`);
+      }
+      throw error;
+    }
+  };
+
+  // Helper for delay
+  const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+  // CDN Upload with retries
+  for (let attempt = 1; attempt <= HLS_UPLOAD_CONFIG.MAX_RETRIES; attempt++) {
+    result.retryCount = attempt - 1;
+    try {
+      const cdnResponse = await fetchWithTimeout(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/sync-to-cdn`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            trackId,
+            operation: 'upload-hls-file',
+            hlsFileName: hlsFile.name,
+            hlsFileData: hlsFile.data,
+          }),
+        },
+        HLS_UPLOAD_CONFIG.UPLOAD_TIMEOUT_MS
+      );
+
+      if (cdnResponse.ok) {
+        result.cdnUploaded = true;
+        break;
+      } else {
+        const errorData = await cdnResponse.json().catch(() => ({}));
+        throw new Error(errorData.error || `CDN upload failed (${cdnResponse.status})`);
+      }
+    } catch (error: any) {
+      console.warn(`CDN upload attempt ${attempt}/${HLS_UPLOAD_CONFIG.MAX_RETRIES} failed for ${hlsFile.name}:`, error.message);
+      
+      if (attempt < HLS_UPLOAD_CONFIG.MAX_RETRIES) {
+        // Exponential backoff: 1s, 2s, 4s
+        const backoffDelay = HLS_UPLOAD_CONFIG.RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1);
+        await delay(backoffDelay);
+      } else {
+        result.error = `CDN: ${error.message}`;
+      }
+    }
+  }
+
+  // Supabase Storage Upload (separate from CDN, always try even if CDN failed)
+  try {
+    const binaryData = atob(hlsFile.data);
+    const bytes = new Uint8Array(binaryData.length);
+    for (let j = 0; j < binaryData.length; j++) {
+      bytes[j] = binaryData.charCodeAt(j);
+    }
+    const blob = new Blob([bytes], { type: hlsFile.contentType });
+
+    const { error: storageError } = await supabaseClient.storage
+      .from('audio-hls')
+      .upload(`${trackId}/${hlsFile.name}`, blob, {
+        contentType: hlsFile.contentType,
+        upsert: true,
+      });
+
+    if (!storageError) {
+      result.supabaseUploaded = true;
+    } else {
+      console.warn(`Supabase storage upload failed for ${hlsFile.name}:`, storageError.message);
+      if (!result.error) {
+        result.error = `Supabase: ${storageError.message}`;
+      }
+    }
+  } catch (error: any) {
+    console.warn(`Supabase storage upload exception for ${hlsFile.name}:`, error.message);
+    if (!result.error) {
+      result.error = `Supabase: ${error.message}`;
+    }
+  }
+
+  // Consider success if CDN upload succeeded (Supabase is backup)
+  result.success = result.cdnUploaded;
+  
+  return result;
+}
+
+/**
+ * Upload all HLS files for a track with batched parallel uploads
+ */
+async function uploadHLSFilesWithReliability(
+  trackId: string,
+  hlsFiles: Array<{ name: string; data: string; contentType: string; size: number }>,
+  supabaseClient: typeof supabase,
+  onProgress?: (completed: number, total: number) => void
+): Promise<{
+  totalFiles: number;
+  successCount: number;
+  failedCount: number;
+  errors: string[];
+  retryStats: { totalRetries: number; filesWithRetries: number };
+}> {
+  const results: HLSFileUploadResult[] = [];
+  const errors: string[] = [];
+  let retryStats = { totalRetries: 0, filesWithRetries: 0 };
+
+  // Process in batches of BATCH_SIZE
+  for (let batchStart = 0; batchStart < hlsFiles.length; batchStart += HLS_UPLOAD_CONFIG.BATCH_SIZE) {
+    const batch = hlsFiles.slice(batchStart, batchStart + HLS_UPLOAD_CONFIG.BATCH_SIZE);
+    
+    const batchResults = await Promise.all(
+      batch.map(hlsFile => uploadHLSFileWithRetry(trackId, hlsFile, supabaseClient))
+    );
+    
+    results.push(...batchResults);
+    
+    // Collect errors and retry stats
+    for (const r of batchResults) {
+      if (!r.success && r.error) {
+        errors.push(`${r.fileName}: ${r.error}`);
+      }
+      if (r.retryCount > 0) {
+        retryStats.totalRetries += r.retryCount;
+        retryStats.filesWithRetries++;
+      }
+    }
+    
+    // Report progress
+    if (onProgress) {
+      onProgress(batchStart + batch.length, hlsFiles.length);
+    }
+  }
+
+  const successCount = results.filter(r => r.success).length;
+  
+  return {
+    totalFiles: hlsFiles.length,
+    successCount,
+    failedCount: hlsFiles.length - successCount,
+    errors,
+    retryStats,
+  };
+}
+
 export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadModalProps) {
   const [bulkMode, setBulkMode] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -695,89 +890,32 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
               updateTrackStep(tempId, 'transcoding', 'completed', trackInfo.trackId);
               addLogEntry('success', `HLS transcoding complete (${hlsResult.segmentCount} segments, ${hlsResult.transcodeDurationMs}ms)`);
 
-              // STEP 6 & 7 COMBINED: Upload HLS files directly to CDN AND storage in parallel
-              // Each file is uploaded via a separate edge function call (no timeout risk)
+              // STEP 6 & 7 COMBINED: Upload HLS files with improved reliability
+              // Uses retry logic, timeout handling, and separated CDN/Supabase uploads
               updateTrackStep(tempId, 'hls-storage', 'in-progress', trackInfo.trackId);
               updateTrackStep(tempId, 'hls-cdn', 'in-progress', trackInfo.trackId);
-              addLogEntry('info', `Uploading ${hlsResult.files.length} HLS files to CDN and storage...`);
+              addLogEntry('info', `Uploading ${hlsResult.files.length} HLS files (batch size: ${HLS_UPLOAD_CONFIG.BATCH_SIZE}, max retries: ${HLS_UPLOAD_CONFIG.MAX_RETRIES})...`);
               
-              let completedUploads = 0;
-              let failedUploads = 0;
-              const uploadErrors: string[] = [];
-              const UPLOAD_BATCH_SIZE = 10; // Upload 10 files in parallel at a time
+              const hlsUploadResult = await uploadHLSFilesWithReliability(
+                trackInfo.trackId,
+                hlsResult.files,
+                supabase,
+                (completed, total) => {
+                  const progress = (completed / total) * 100;
+                  updateStepProgress(tempId, 'hls-storage', progress);
+                  updateStepProgress(tempId, 'hls-cdn', progress);
+                }
+              );
               
-              // Process files in batches
-              for (let batchStart = 0; batchStart < hlsResult.files.length; batchStart += UPLOAD_BATCH_SIZE) {
-                const batch = hlsResult.files.slice(batchStart, batchStart + UPLOAD_BATCH_SIZE);
-                
-                const batchPromises = batch.map(async (hlsFile) => {
-                  try {
-                    // Upload directly to CDN via edge function (single file, fast)
-                    const cdnResponse = await fetch(
-                      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/sync-to-cdn`,
-                      {
-                        method: 'POST',
-                        headers: {
-                          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-                          'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                          trackId: trackInfo.trackId,
-                          operation: 'upload-hls-file',
-                          hlsFileName: hlsFile.name,
-                          hlsFileData: hlsFile.data, // Already base64
-                        }),
-                      }
-                    );
-                    
-                    if (!cdnResponse.ok) {
-                      const errorData = await cdnResponse.json().catch(() => ({}));
-                      throw new Error(errorData.error || `CDN upload failed (${cdnResponse.status})`);
-                    }
-                    
-                    // Also upload to Supabase storage as backup
-                const binaryData = atob(hlsFile.data);
-                const bytes = new Uint8Array(binaryData.length);
-                for (let j = 0; j < binaryData.length; j++) {
-                  bytes[j] = binaryData.charCodeAt(j);
-                }
-                const blob = new Blob([bytes], { type: hlsFile.contentType });
-
-                    await supabase.storage
-                  .from('audio-hls')
-                      .upload(`${trackInfo.trackId}/${hlsFile.name}`, blob, {
-                    contentType: hlsFile.contentType,
-                    upsert: true,
-                  });
-
-                    return { success: true };
-                  } catch (error: any) {
-                    console.error(`Failed to upload HLS file ${hlsFile.name}:`, error);
-                    return { success: false, error: `${hlsFile.name}: ${error.message}` };
-                  }
-                });
-                
-                const results = await Promise.all(batchPromises);
-                
-                for (const result of results) {
-                  if (result.success) {
-                    completedUploads++;
-                  } else {
-                    failedUploads++;
-                    if (result.error) uploadErrors.push(result.error);
-                  }
-                }
-                
-                // Update progress
-                const progress = ((batchStart + batch.length) / hlsResult.files.length) * 100;
-                updateStepProgress(tempId, 'hls-storage', progress);
-                updateStepProgress(tempId, 'hls-cdn', progress);
+              // Log retry statistics if any retries occurred
+              if (hlsUploadResult.retryStats.filesWithRetries > 0) {
+                addLogEntry('info', `Retry stats: ${hlsUploadResult.retryStats.filesWithRetries} files needed retries (${hlsUploadResult.retryStats.totalRetries} total retries)`);
               }
               
               // Check results
-              if (failedUploads > 0) {
-                const errorMsg = `${failedUploads} of ${hlsResult.files.length} HLS files failed to upload`;
-                console.error(errorMsg, uploadErrors);
+              if (hlsUploadResult.failedCount > 0) {
+                const errorMsg = `${hlsUploadResult.failedCount} of ${hlsUploadResult.totalFiles} HLS files failed to upload`;
+                console.error(errorMsg, hlsUploadResult.errors);
                 updateTrackStep(tempId, 'hls-storage', 'failed', trackInfo.trackId, errorMsg);
                 updateTrackStep(tempId, 'hls-cdn', 'failed', trackInfo.trackId, errorMsg);
                 addLogEntry('error', `HLS upload failed: ${errorMsg}`);
@@ -785,7 +923,7 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
               } else {
                 updateTrackStep(tempId, 'hls-storage', 'completed', trackInfo.trackId);
                 updateTrackStep(tempId, 'hls-cdn', 'completed', trackInfo.trackId);
-                addLogEntry('success', `All ${completedUploads} HLS files uploaded to CDN`);
+                addLogEntry('success', `All ${hlsUploadResult.successCount} HLS files uploaded to CDN`);
 
                 // Update database with HLS info
                 const hlsPath = `${trackInfo.trackId}/master.m3u8`;
@@ -900,89 +1038,32 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
           updateTrackStep(tempId, 'transcoding', 'completed', trackInfo.trackId);
           addLogEntry('success', `HLS transcoding complete (${hlsResult.segmentCount} segments)`);
 
-          // STEP 6 & 7 COMBINED: Upload HLS files directly to CDN AND storage in parallel
-          // Each file is uploaded via a separate edge function call (no timeout risk)
+          // STEP 6 & 7 COMBINED: Upload HLS files with improved reliability
+          // Uses retry logic, timeout handling, and separated CDN/Supabase uploads
           updateTrackStep(tempId, 'hls-storage', 'in-progress', trackInfo.trackId);
           updateTrackStep(tempId, 'hls-cdn', 'in-progress', trackInfo.trackId);
-          addLogEntry('info', `Uploading ${hlsResult.files.length} HLS files to CDN and storage...`);
+          addLogEntry('info', `Uploading ${hlsResult.files.length} HLS files (batch size: ${HLS_UPLOAD_CONFIG.BATCH_SIZE}, max retries: ${HLS_UPLOAD_CONFIG.MAX_RETRIES})...`);
           
-          let completedUploads = 0;
-          let failedUploads = 0;
-          const uploadErrors: string[] = [];
-          const UPLOAD_BATCH_SIZE = 10; // Upload 10 files in parallel at a time
+          const hlsUploadResult = await uploadHLSFilesWithReliability(
+            trackInfo.trackId,
+            hlsResult.files,
+            supabase,
+            (completed, total) => {
+              const progress = (completed / total) * 100;
+              updateStepProgress(tempId, 'hls-storage', progress);
+              updateStepProgress(tempId, 'hls-cdn', progress);
+            }
+          );
           
-          // Process files in batches
-          for (let batchStart = 0; batchStart < hlsResult.files.length; batchStart += UPLOAD_BATCH_SIZE) {
-            const batch = hlsResult.files.slice(batchStart, batchStart + UPLOAD_BATCH_SIZE);
-            
-            const batchPromises = batch.map(async (hlsFile) => {
-              try {
-                // Upload directly to CDN via edge function (single file, fast)
-                const cdnResponse = await fetch(
-                  `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/sync-to-cdn`,
-                  {
-                    method: 'POST',
-                    headers: {
-                      'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-                      'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                      trackId: trackInfo.trackId,
-                      operation: 'upload-hls-file',
-                      hlsFileName: hlsFile.name,
-                      hlsFileData: hlsFile.data, // Already base64
-                    }),
-                  }
-                );
-                
-                if (!cdnResponse.ok) {
-                  const errorData = await cdnResponse.json().catch(() => ({}));
-                  throw new Error(errorData.error || `CDN upload failed (${cdnResponse.status})`);
-                }
-                
-                // Also upload to Supabase storage as backup
-            const binaryData = atob(hlsFile.data);
-            const bytes = new Uint8Array(binaryData.length);
-            for (let j = 0; j < binaryData.length; j++) {
-              bytes[j] = binaryData.charCodeAt(j);
-            }
-            const blob = new Blob([bytes], { type: hlsFile.contentType });
-
-                await supabase.storage
-              .from('audio-hls')
-                  .upload(`${trackInfo.trackId}/${hlsFile.name}`, blob, {
-                contentType: hlsFile.contentType,
-                upsert: true,
-              });
-
-                return { success: true };
-              } catch (error: any) {
-                console.error(`Failed to upload HLS file ${hlsFile.name}:`, error);
-                return { success: false, error: `${hlsFile.name}: ${error.message}` };
-              }
-            });
-            
-            const results = await Promise.all(batchPromises);
-            
-            for (const result of results) {
-              if (result.success) {
-                completedUploads++;
-              } else {
-                failedUploads++;
-                if (result.error) uploadErrors.push(result.error);
-              }
-            }
-            
-            // Update progress
-            const progress = ((batchStart + batch.length) / hlsResult.files.length) * 100;
-            updateStepProgress(tempId, 'hls-storage', progress);
-            updateStepProgress(tempId, 'hls-cdn', progress);
+          // Log retry statistics if any retries occurred
+          if (hlsUploadResult.retryStats.filesWithRetries > 0) {
+            addLogEntry('info', `Retry stats: ${hlsUploadResult.retryStats.filesWithRetries} files needed retries (${hlsUploadResult.retryStats.totalRetries} total retries)`);
           }
           
           // Check results
-          if (failedUploads > 0) {
-            const errorMsg = `${failedUploads} of ${hlsResult.files.length} HLS files failed to upload`;
-            console.error(errorMsg, uploadErrors);
+          if (hlsUploadResult.failedCount > 0) {
+            const errorMsg = `${hlsUploadResult.failedCount} of ${hlsUploadResult.totalFiles} HLS files failed to upload`;
+            console.error(errorMsg, hlsUploadResult.errors);
             updateTrackStep(tempId, 'hls-storage', 'failed', trackInfo.trackId, errorMsg);
             updateTrackStep(tempId, 'hls-cdn', 'failed', trackInfo.trackId, errorMsg);
             addLogEntry('error', `HLS upload failed: ${errorMsg}`);
@@ -990,7 +1071,7 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
           } else {
             updateTrackStep(tempId, 'hls-storage', 'completed', trackInfo.trackId);
             updateTrackStep(tempId, 'hls-cdn', 'completed', trackInfo.trackId);
-            addLogEntry('success', `All ${completedUploads} HLS files uploaded to CDN`);
+            addLogEntry('success', `All ${hlsUploadResult.successCount} HLS files uploaded to CDN`);
 
             // Update database with HLS info
             const hlsPath = `${trackInfo.trackId}/master.m3u8`;
@@ -1138,81 +1219,30 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
             updateTrackStep(tempId, 'transcoding', 'completed', trackInfo.trackId);
             addLogEntry('success', `HLS transcoding complete (${hlsResult.segmentCount} segments)`);
 
-            // STEP 6 & 7: Upload HLS to CDN and storage
+            // STEP 6 & 7: Upload HLS with improved reliability
+            // Uses retry logic, timeout handling, and separated CDN/Supabase uploads
             updateTrackStep(tempId, 'hls-storage', 'in-progress', trackInfo.trackId);
             updateTrackStep(tempId, 'hls-cdn', 'in-progress', trackInfo.trackId);
-            addLogEntry('info', `Uploading ${hlsResult.files.length} HLS files to CDN and storage...`);
+            addLogEntry('info', `Uploading ${hlsResult.files.length} HLS files (batch size: ${HLS_UPLOAD_CONFIG.BATCH_SIZE}, max retries: ${HLS_UPLOAD_CONFIG.MAX_RETRIES})...`);
             
-            let completedUploads = 0;
-            let failedUploads = 0;
-            const uploadErrors: string[] = [];
-            const UPLOAD_BATCH_SIZE = 10;
-            
-            for (let batchStart = 0; batchStart < hlsResult.files.length; batchStart += UPLOAD_BATCH_SIZE) {
-              const batch = hlsResult.files.slice(batchStart, batchStart + UPLOAD_BATCH_SIZE);
-              
-              const batchPromises = batch.map(async (hlsFile) => {
-                try {
-                  const cdnResponse = await fetch(
-                    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/sync-to-cdn`,
-                    {
-                      method: 'POST',
-                      headers: {
-                        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-                        'Content-Type': 'application/json',
-                      },
-                      body: JSON.stringify({
-                        trackId: trackInfo.trackId,
-                        operation: 'upload-hls-file',
-                        hlsFileName: hlsFile.name,
-                        hlsFileData: hlsFile.data,
-                      }),
-                    }
-                  );
-                  
-                  if (!cdnResponse.ok) {
-                    const errorData = await cdnResponse.json().catch(() => ({}));
-                    throw new Error(errorData.error || `CDN upload failed (${cdnResponse.status})`);
-                  }
-                  
-                  const binaryData = atob(hlsFile.data);
-                  const bytes = new Uint8Array(binaryData.length);
-                  for (let j = 0; j < binaryData.length; j++) {
-                    bytes[j] = binaryData.charCodeAt(j);
-                  }
-                  const blob = new Blob([bytes], { type: hlsFile.contentType });
-                  
-                  await supabase.storage
-                    .from('audio-hls')
-                    .upload(`${trackInfo.trackId}/${hlsFile.name}`, blob, {
-                      contentType: hlsFile.contentType,
-                      upsert: true,
-                    });
-                  
-                  return { success: true };
-    } catch (error: any) {
-                  return { success: false, error: `${hlsFile.name}: ${error.message}` };
-                }
-              });
-              
-              const results = await Promise.all(batchPromises);
-              
-              for (const result of results) {
-                if (result.success) {
-                  completedUploads++;
-                } else {
-                  failedUploads++;
-                  if (result.error) uploadErrors.push(result.error);
-                }
+            const hlsUploadResult = await uploadHLSFilesWithReliability(
+              trackInfo.trackId,
+              hlsResult.files,
+              supabase,
+              (completed, total) => {
+                const progress = (completed / total) * 100;
+                updateStepProgress(tempId, 'hls-storage', progress);
+                updateStepProgress(tempId, 'hls-cdn', progress);
               }
-              
-              const progress = ((batchStart + batch.length) / hlsResult.files.length) * 100;
-              updateStepProgress(tempId, 'hls-storage', progress);
-              updateStepProgress(tempId, 'hls-cdn', progress);
+            );
+            
+            // Log retry statistics if any retries occurred
+            if (hlsUploadResult.retryStats.filesWithRetries > 0) {
+              addLogEntry('info', `Retry stats: ${hlsUploadResult.retryStats.filesWithRetries} files needed retries (${hlsUploadResult.retryStats.totalRetries} total retries)`);
             }
             
-            if (failedUploads > 0) {
-              const errorMsg = `${failedUploads} of ${hlsResult.files.length} HLS files failed`;
+            if (hlsUploadResult.failedCount > 0) {
+              const errorMsg = `${hlsUploadResult.failedCount} of ${hlsUploadResult.totalFiles} HLS files failed`;
               updateTrackStep(tempId, 'hls-storage', 'failed', trackInfo.trackId, errorMsg);
               updateTrackStep(tempId, 'hls-cdn', 'failed', trackInfo.trackId, errorMsg);
               addLogEntry('error', `HLS upload failed: ${errorMsg}`);
@@ -1220,7 +1250,7 @@ export function TrackUploadModal({ onClose, onSuccess, channels }: TrackUploadMo
             } else {
               updateTrackStep(tempId, 'hls-storage', 'completed', trackInfo.trackId);
               updateTrackStep(tempId, 'hls-cdn', 'completed', trackInfo.trackId);
-              addLogEntry('success', `All ${completedUploads} HLS files uploaded to CDN`);
+              addLogEntry('success', `All ${hlsUploadResult.successCount} HLS files uploaded to CDN`);
               
               const hlsPath = `${trackInfo.trackId}/master.m3u8`;
               const hlsCdnUrl = `https://pub-16f9274cf01948468de2d5af8a6fdb23.r2.dev/hls/${trackInfo.trackId}/master.m3u8`;
