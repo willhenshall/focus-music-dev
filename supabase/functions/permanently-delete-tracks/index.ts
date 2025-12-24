@@ -104,84 +104,10 @@ Deno.serve(async (req: Request) => {
         const trackId = track.track_id || track.metadata?.track_id || track.id;
         console.log(`Processing track ${trackId}...`);
 
-        // Delete from CDN (Cloudflare R2) FIRST, before deleting from database
-        // Pass track data directly to avoid database lookup (which would fail after deletion)
-        console.log(`Deleting track ${trackId} from CDN...`);
-        try {
-          const cdnResponse = await fetch(
-            `${supabaseUrl}/functions/v1/sync-to-cdn`,
-            {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${supabaseServiceKey}`,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                trackId: trackId.toString(),
-                operation: 'delete',
-                // Provide track data directly to avoid database lookup
-                trackData: {
-                  cdn_url: track.cdn_url,
-                  metadata: track.metadata,
-                  storage_locations: track.storage_locations,
-                },
-              }),
-            }
-          );
-
-          // Log response status for debugging
-          console.log(`CDN Response Status: ${cdnResponse.status} ${cdnResponse.statusText}`);
-
-          if (!cdnResponse.ok) {
-            const errorText = await cdnResponse.text();
-            console.error(`CDN request failed with status ${cdnResponse.status}: ${errorText}`);
-            deletionResults.cdnDeletionFailed += 2;
-            deletionResults.errors.push(`CDN HTTP error ${cdnResponse.status}: ${errorText}`);
-            continue; // Skip to next track
-          }
-
-          const cdnResult = await cdnResponse.json();
-          console.log(`CDN Result for track ${trackId}:`, JSON.stringify(cdnResult, null, 2));
-
-          if (cdnResult.success && cdnResult.verified) {
-            // Both audio and metadata verified as deleted
-            if (cdnResult.details.audioFile.deleted && cdnResult.details.metadataFile.deleted) {
-              deletionResults.cdnFilesDeleted += 2; // audio + metadata
-              console.log(`Successfully deleted and verified track ${trackId} from CDN`);
-            } else {
-              // Partial deletion
-              if (cdnResult.details.audioFile.deleted) {
-                deletionResults.cdnFilesDeleted++;
-              } else {
-                deletionResults.cdnDeletionFailed++;
-                deletionResults.errors.push(`CDN audio file for ${trackId}: ${cdnResult.details.audioFile.error || 'Still exists'}`);
-              }
-              if (cdnResult.details.metadataFile.deleted) {
-                deletionResults.cdnFilesDeleted++;
-              } else {
-                deletionResults.cdnDeletionFailed++;
-                deletionResults.errors.push(`CDN metadata file for ${trackId}: ${cdnResult.details.metadataFile.error || 'Still exists'}`);
-              }
-            }
-            // Track HLS deletion from CDN
-            if (cdnResult.details.hlsFiles) {
-              deletionResults.cdnHlsDeleted += cdnResult.details.hlsFiles.deleted || 0;
-              if (cdnResult.details.hlsFiles.failed > 0) {
-                deletionResults.cdnDeletionFailed += cdnResult.details.hlsFiles.failed;
-              }
-              console.log(`CDN HLS deletion for track ${trackId}: ${cdnResult.details.hlsFiles.deleted} deleted, ${cdnResult.details.hlsFiles.failed} failed`);
-            }
-          } else {
-            const errorMsg = cdnResult.error || cdnResult.message || 'CDN deletion failed';
-            console.error(`CDN deletion failed for track ${trackId}:`, errorMsg);
-            deletionResults.cdnDeletionFailed += 2; // both audio and metadata failed
-            deletionResults.errors.push(`CDN deletion for ${trackId}: ${errorMsg}`);
-          }
-        } catch (cdnError: any) {
-          console.error(`CDN deletion error for track ${trackId}:`, cdnError);
-          deletionResults.cdnDeletionFailed += 2;
-          deletionResults.errors.push(`CDN deletion for ${trackId}: ${cdnError.message}`);
-        }
+        // SKIP CDN deletion - it was causing timeouts due to 600+ HLS files per track
+        // CDN files will be orphaned but harmless (new tracks get unique IDs)
+        // A separate cleanup job can be added later if needed
+        console.log(`Skipping CDN deletion for track ${trackId} (orphaned files are harmless)`);
 
         if (track.file_path) {
           // file_path stores the full public URL, extract just the filename

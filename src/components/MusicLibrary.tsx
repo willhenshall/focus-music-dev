@@ -1139,8 +1139,9 @@ export function MusicLibrary() {
   const handlePermanentDelete = async () => {
     setBulkDeleting(true);
 
-    // Batch size: process 3 tracks at a time to avoid edge function timeout
-    const BATCH_SIZE = 3;
+    // Batch size: process 1 track at a time to avoid edge function timeout
+    // Each track can have 50+ HLS files, so even 1 track can take 10-15 seconds
+    const BATCH_SIZE = 1;
     const totalTracks = selectedTracks.length;
     const batches = [];
     for (let i = 0; i < totalTracks; i += BATCH_SIZE) {
