@@ -1139,6 +1139,15 @@ export function MusicLibrary() {
   const handlePermanentDelete = async () => {
     setBulkDeleting(true);
 
+    // Batch size: process 1 track at a time to avoid edge function timeout
+    // Each track can have 50+ HLS files, so even 1 track can take 10-15 seconds
+    const BATCH_SIZE = 1;
+    const totalTracks = selectedTracks.length;
+    const batches = [];
+    for (let i = 0; i < totalTracks; i += BATCH_SIZE) {
+      batches.push(selectedTracks.slice(i, i + BATCH_SIZE));
+    }
+
     setDeletionStatus({
       inProgress: true,
       completed: false,
@@ -1148,6 +1157,7 @@ export function MusicLibrary() {
       cdn: { status: 'pending' },
       playlists: { status: 'pending' },
       analytics: { status: 'pending' },
+      batchProgress: { current: 0, total: batches.length, tracksCurrent: 0, tracksTotal: totalTracks },
     });
 
     try {
@@ -1157,53 +1167,107 @@ export function MusicLibrary() {
       }
 
       const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/permanently-delete-tracks`;
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.session.access_token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ trackIds: selectedTracks }),
-      });
+      
+      // Accumulate results from all batches
+      const aggregatedDetails = {
+        tracksDeleted: 0,
+        filesDeleted: 0,
+        hlsFilesDeleted: 0,
+        cdnFilesDeleted: 0,
+        cdnDeletionFailed: 0,
+        cdnHlsDeleted: 0,
+        channelReferencesRemoved: 0,
+        playlistsAffected: 0,
+        analyticsDeleted: 0,
+      };
 
-      const result = await response.json();
+      let batchErrors: string[] = [];
 
-      if (!response.ok || !result.success) {
-        throw new Error(result.error || 'Failed to permanently delete tracks');
+      // Process batches sequentially to avoid overwhelming the edge function
+      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+        const batch = batches[batchIndex];
+        
+        // Update progress before processing batch
+        setDeletionStatus(prev => prev ? {
+          ...prev,
+          batchProgress: {
+            current: batchIndex + 1,
+            total: batches.length,
+            tracksCurrent: batchIndex * BATCH_SIZE + batch.length,
+            tracksTotal: totalTracks,
+          },
+        } : prev);
+
+        try {
+          const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${session.session.access_token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ trackIds: batch }),
+          });
+
+          const result = await response.json();
+
+          if (!response.ok || !result.success) {
+            batchErrors.push(`Batch ${batchIndex + 1}: ${result.error || 'Unknown error'}`);
+            continue;
+          }
+
+          const details = result.details;
+          aggregatedDetails.tracksDeleted += details.tracksDeleted || 0;
+          aggregatedDetails.filesDeleted += details.filesDeleted || 0;
+          aggregatedDetails.hlsFilesDeleted += details.hlsFilesDeleted || 0;
+          aggregatedDetails.cdnFilesDeleted += details.cdnFilesDeleted || 0;
+          aggregatedDetails.cdnDeletionFailed += details.cdnDeletionFailed || 0;
+          aggregatedDetails.cdnHlsDeleted += details.cdnHlsDeleted || 0;
+          aggregatedDetails.channelReferencesRemoved += details.channelReferencesRemoved || 0;
+          aggregatedDetails.playlistsAffected += details.playlistsAffected || 0;
+          aggregatedDetails.analyticsDeleted += details.analyticsDeleted || 0;
+        } catch (batchError) {
+          const errorMessage = batchError instanceof Error ? batchError.message : 'Network error';
+          batchErrors.push(`Batch ${batchIndex + 1}: ${errorMessage}`);
+        }
       }
 
-      const details = result.details;
+      // Check if we had complete failure
+      if (aggregatedDetails.tracksDeleted === 0 && batchErrors.length > 0) {
+        throw new Error(`All batches failed: ${batchErrors.join('; ')}`);
+      }
 
       setDeletionStatus({
         inProgress: false,
         completed: true,
         database: {
-          status: details.tracksDeleted > 0 ? 'success' : 'error',
-          count: details.tracksDeleted
+          status: aggregatedDetails.tracksDeleted > 0 ? 'success' : 'error',
+          count: aggregatedDetails.tracksDeleted
         },
         supabaseStorage: {
-          status: details.filesDeleted > 0 ? 'success' : 'error',
-          count: details.filesDeleted
+          status: aggregatedDetails.filesDeleted > 0 ? 'success' : 'error',
+          count: aggregatedDetails.filesDeleted
         },
         hlsStorage: {
           status: 'success',
-          count: details.hlsFilesDeleted || 0
+          count: aggregatedDetails.hlsFilesDeleted
         },
         cdn: {
-          status: details.cdnDeletionFailed > 0 ? 'error' : 'success',
-          count: details.cdnFilesDeleted,
-          failed: details.cdnDeletionFailed,
-          hlsCount: details.cdnHlsDeleted || 0
+          status: aggregatedDetails.cdnDeletionFailed > 0 ? 'error' : 'success',
+          count: aggregatedDetails.cdnFilesDeleted,
+          failed: aggregatedDetails.cdnDeletionFailed,
+          hlsCount: aggregatedDetails.cdnHlsDeleted
         },
         playlists: {
           status: 'success',
-          count: details.channelReferencesRemoved,
-          affected: details.playlistsAffected
+          count: aggregatedDetails.channelReferencesRemoved,
+          affected: aggregatedDetails.playlistsAffected
         },
         analytics: {
           status: 'success',
-          count: details.analyticsDeleted
+          count: aggregatedDetails.analyticsDeleted
         },
+        batchProgress: { current: batches.length, total: batches.length, tracksCurrent: totalTracks, tracksTotal: totalTracks },
+        partialErrors: batchErrors.length > 0 ? batchErrors : undefined,
       });
 
       setSelectedTracks([]);
