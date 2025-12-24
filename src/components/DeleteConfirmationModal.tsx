@@ -11,6 +11,8 @@ export interface DeletionStatus {
   playlists: { status: 'pending' | 'success' | 'error'; count?: number; affected?: number };
   analytics: { status: 'pending' | 'success' | 'error'; count?: number };
   error?: string;
+  batchProgress?: { current: number; total: number; tracksCurrent: number; tracksTotal: number };
+  partialErrors?: string[];
 }
 
 interface DeleteConfirmationModalProps {
@@ -120,6 +122,20 @@ export function DeleteConfirmationModal({
               <div className="space-y-4 mt-6">
                 <div className="border-t border-neutral-700 pt-4">
                   <h3 className="text-sm font-semibold text-white mb-3">Deletion Progress</h3>
+                  {deletionStatus.batchProgress && deletionStatus.batchProgress.total > 1 && (
+                    <div className="mb-4">
+                      <div className="flex items-center justify-between text-sm text-neutral-300 mb-2">
+                        <span>Batch {deletionStatus.batchProgress.current} of {deletionStatus.batchProgress.total}</span>
+                        <span>{deletionStatus.batchProgress.tracksCurrent} / {deletionStatus.batchProgress.tracksTotal} tracks</span>
+                      </div>
+                      <div className="w-full bg-neutral-700 rounded-full h-2">
+                        <div 
+                          className="bg-blue-500 h-2 rounded-full transition-all duration-300"
+                          style={{ width: `${(deletionStatus.batchProgress.current / deletionStatus.batchProgress.total) * 100}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div className="bg-neutral-800 rounded-lg p-4 space-y-3">
                   <div className="flex items-center justify-between">
@@ -197,6 +213,17 @@ export function DeleteConfirmationModal({
                 {deletionStatus.error && (
                   <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
                     <p className="text-sm text-red-400">{deletionStatus.error}</p>
+                  </div>
+                )}
+
+                {deletionStatus.partialErrors && deletionStatus.partialErrors.length > 0 && (
+                  <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
+                    <p className="text-sm text-amber-400 font-medium mb-2">Some batches had errors:</p>
+                    <ul className="text-sm text-amber-300 space-y-1">
+                      {deletionStatus.partialErrors.map((error, idx) => (
+                        <li key={idx}>• {error}</li>
+                      ))}
+                    </ul>
                   </div>
                 )}
 
