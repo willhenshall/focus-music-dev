@@ -1132,7 +1132,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
       // Determine starting position based on playback continuation setting
       let startPosition = 0;
-      let sessionId = crypto.randomUUID();
+      const sessionId =
+      (globalThis.crypto?.randomUUID?.() ??
+        `${Date.now()}-${Math.random().toString(16).slice(2)}`);
 
       if (!forceRestart && playbackContinuation !== 'restart_login') {
         // Check for existing playback state
