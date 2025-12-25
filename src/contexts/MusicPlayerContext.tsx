@@ -1381,8 +1381,18 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   };
 
   const toggleChannel = async (channel: AudioChannel, turnOn: boolean, fromPlayer: boolean = false) => {
+    console.log('[DIAG] toggleChannel START', { fromChannel: activeChannel?.channel_name, toChannel: channel.channel_name, isPlaying, currentTrackId: playlist[currentTrackIndex]?.track_id });
+    console.log('[DIAG] toggleChannel START audio state', {
+      engineType,
+      metricsTrackId: audioMetrics?.currentTrackId,
+      metricsPlaybackState: audioMetrics?.playbackState,
+      metricsCurrentTime: audioMetrics?.currentTime,
+      metricsVolume: audioMetrics?.volume,
+      metricsAudioElement: audioMetrics?.audioElement,
+      engineIsPlaying: audioEngine?.isPlaying?.(),
+    });
     console.log('[DIAGNOSTIC] toggleChannel called:', {
-      channelName: channel.name,
+      channelName: channel.channel_name,
       turnOn,
       fromPlayer,
       currentIsPlaying: isPlaying,
@@ -1556,6 +1566,16 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         return newState;
       });
     }
+    console.log('[DIAG] toggleChannel END', { activeChannelNow: activeChannel?.channel_name, isPlayingNow: isPlaying, currentTrackNow: playlist[currentTrackIndex]?.track_id });
+    console.log('[DIAG] toggleChannel END audio state', {
+      engineType,
+      metricsTrackId: audioMetrics?.currentTrackId,
+      metricsPlaybackState: audioMetrics?.playbackState,
+      metricsCurrentTime: audioMetrics?.currentTime,
+      metricsVolume: audioMetrics?.volume,
+      metricsAudioElement: audioMetrics?.audioElement,
+      engineIsPlaying: audioEngine?.isPlaying?.(),
+    });
   };
 
   const setChannelEnergy = async (channelId: string, energyLevel: 'low' | 'medium' | 'high') => {
