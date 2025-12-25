@@ -106,14 +106,40 @@ export class IosSafariPlayer implements IAudioEngine {
   }
 
   async play(): Promise<void> {
-    console.log('[IosSafariPlayer] play (stub)');
-    // TODO: Implement native HLS playback
-    throw new Error('IosSafariPlayer.play not implemented');
+    console.log('[IosSafariPlayer] play');
+    try {
+      await this.audio.play();
+      this.playbackState = 'playing';
+      console.log('[IosSafariPlayer] Playback started');
+    } catch (error) {
+      if (error instanceof Error && error.name === 'NotAllowedError') {
+        console.warn('[IosSafariPlayer] Play rejected - user gesture required');
+        if (this.callbacks.onError) {
+          this.callbacks.onError(
+            new Error('Playback requires user interaction. Please tap play.'),
+            'unknown',
+            true // recoverable
+          );
+        }
+      } else {
+        console.error('[IosSafariPlayer] Play failed:', error);
+        this.playbackState = 'error';
+        if (this.callbacks.onError) {
+          this.callbacks.onError(
+            error instanceof Error ? error : new Error(String(error)),
+            'unknown',
+            false
+          );
+        }
+      }
+      throw error;
+    }
   }
 
   pause(): void {
-    console.log('[IosSafariPlayer] pause (stub)');
-    // TODO: Implement pause
+    console.log('[IosSafariPlayer] pause');
+    this.audio.pause();
+    this.playbackState = 'paused';
   }
 
   stop(): void {
@@ -122,9 +148,15 @@ export class IosSafariPlayer implements IAudioEngine {
     // TODO: Implement stop
   }
 
-  seek(time: number): void {
-    console.log('[IosSafariPlayer] seek (stub):', time);
-    // TODO: Implement seek
+  seek(timeSeconds: number): void {
+    console.log('[IosSafariPlayer] seek:', timeSeconds);
+    // Clamp to valid range [0, duration]
+    const duration = this.trackDuration > 0 ? this.trackDuration : this.audio.duration;
+    let clampedTime = Math.max(0, timeSeconds);
+    if (duration && !isNaN(duration) && isFinite(duration)) {
+      clampedTime = Math.min(clampedTime, duration);
+    }
+    this.audio.currentTime = clampedTime;
   }
 
   // ============================================================================
