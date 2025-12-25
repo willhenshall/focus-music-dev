@@ -143,9 +143,13 @@ export class IosSafariPlayer implements IAudioEngine {
   }
 
   stop(): void {
-    console.log('[IosSafariPlayer] stop (stub)');
+    console.log('[IosSafariPlayer] stop');
+    this.audio.pause();
+    this.audio.removeAttribute('src');
+    this.audio.load();
+    this.currentTrackId = null;
+    this.trackDuration = 0;
     this.playbackState = 'stopped';
-    // TODO: Implement stop
   }
 
   seek(timeSeconds: number): void {
@@ -347,6 +351,9 @@ export class IosSafariPlayer implements IAudioEngine {
 
   destroy(): void {
     console.log('[IosSafariPlayer] destroy');
+    this.audio.removeEventListener('loadedmetadata', this.handleLoadedMetadata);
+    this.audio.removeEventListener('error', this.handleError);
+    this.audio.removeEventListener('ended', this.handleEnded);
     this.stop();
     this.callbacks = {};
   }
