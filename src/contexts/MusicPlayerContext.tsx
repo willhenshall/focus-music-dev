@@ -5,8 +5,8 @@ import { useAuth } from './AuthContext';
 import { trackPlayStart, trackPlayEnd } from '../lib/analyticsService';
 import { EnterpriseAudioEngine } from '../lib/enterpriseAudioEngine';
 import type { AudioMetrics } from '../lib/enterpriseAudioEngine';
-import { StreamingAudioEngine } from '../lib/streamingAudioEngine';
 import { createStorageAdapter } from '../lib/storageAdapters';
+import { createAudioEngine as routerCreateAudioEngine, type AudioEngineType } from '../player';
 import { selectNextTrackCached, getCurrentSlotIndex } from '../lib/slotStrategyEngine';
 import { getIosWebkitInfo } from '../lib/iosWebkitDetection';
 import type { IAudioEngine, AudioMetrics as StreamingAudioMetrics } from '../lib/types/audioEngine';
@@ -19,13 +19,7 @@ type EngineAudioMetrics = AudioMetrics | StreamingAudioMetrics;
 // ENGINE SELECTION
 // ============================================================================
 
-/**
- * Audio engine type selector.
- * - 'legacy': Uses EnterpriseAudioEngine (HTML5 Audio, current production)
- * - 'streaming': Uses StreamingAudioEngine (HLS-based, new implementation)
- * - 'auto': Automatically selects based on platform (streaming for iOS, legacy for others)
- */
-export type AudioEngineType = 'legacy' | 'streaming' | 'auto';
+// AudioEngineType is imported from '../player' (router)
 
 /**
  * Get the engine type from environment or local storage.
@@ -34,18 +28,18 @@ export type AudioEngineType = 'legacy' | 'streaming' | 'auto';
 function getEngineType(): AudioEngineType {
   // Check environment variable first
   const envEngine = import.meta.env.VITE_AUDIO_ENGINE_TYPE as AudioEngineType;
-  if (envEngine && ['legacy', 'streaming', 'auto'].includes(envEngine)) {
+  if (envEngine && ['legacy', 'streaming', 'ios-safari', 'auto'].includes(envEngine)) {
     return envEngine;
   }
-  
+
   // Check local storage (for per-user override)
   try {
     const stored = localStorage.getItem('audioEngineType') as AudioEngineType;
-    if (stored && ['legacy', 'streaming', 'auto'].includes(stored)) {
+    if (stored && ['legacy', 'streaming', 'ios-safari', 'auto'].includes(stored)) {
       return stored;
     }
   } catch {}
-  
+
   // Default to streaming for all platforms (HLS with MP3 fallback)
   // This provides better resilience, faster starts, and lower memory usage
   return 'streaming';
@@ -53,29 +47,24 @@ function getEngineType(): AudioEngineType {
 
 /**
  * Determine if we should use the streaming engine based on platform.
+ * Returns true for streaming-based engines (streaming, ios-safari), false for legacy.
  */
 function shouldUseStreamingEngine(engineType: AudioEngineType): boolean {
   if (engineType === 'streaming') return true;
+  if (engineType === 'ios-safari') return true;
   if (engineType === 'legacy') return false;
-  
+
   // Auto mode: use streaming on iOS (where buffer issues occur)
   const iosInfo = getIosWebkitInfo();
   return iosInfo.isIOSWebKit;
 }
 
 /**
- * Create the appropriate audio engine instance.
+ * Create the appropriate audio engine instance via the router.
  */
-function createAudioEngine(useStreaming: boolean): IAudioEngine {
+function createAudioEngine(engineType: AudioEngineType): IAudioEngine {
   const storageAdapter = createStorageAdapter();
-  
-  if (useStreaming) {
-    console.log('[AUDIO ENGINE] Creating StreamingAudioEngine (HLS-based)');
-    return new StreamingAudioEngine(storageAdapter);
-  } else {
-    console.log('[AUDIO ENGINE] Creating EnterpriseAudioEngine (legacy)');
-    return new EnterpriseAudioEngine(storageAdapter);
-  }
+  return routerCreateAudioEngine(storageAdapter, engineType);
 }
 
 type ChannelState = {
@@ -395,7 +384,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     });
 
     // Create the appropriate audio engine based on configuration
-    const engine = createAudioEngine(useStreaming);
+    const engine = createAudioEngine(engineType);
 
     // Set up callbacks using refs to avoid stale closures
     engine.setCallbacks({
