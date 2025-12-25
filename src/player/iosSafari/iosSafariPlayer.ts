@@ -18,6 +18,7 @@ import type {
   AudioEngineCallbacks,
   TrackMetadata,
   StorageAdapter,
+  HLSStorageAdapter,
   CrossfadeMode,
   PlaybackState,
   ConnectionQuality,
@@ -32,22 +33,76 @@ export class IosSafariPlayer implements IAudioEngine {
   private volume: number = 1.0;
   private currentTrackId: string | null = null;
   private playbackState: PlaybackState = 'idle';
+  private audio: HTMLAudioElement;
+  private trackDuration: number = 0;
 
   constructor(storageAdapter: StorageAdapter) {
     this.storageAdapter = storageAdapter;
-    console.log('[IosSafariPlayer] Initialized (stub)');
+    this.audio = new Audio();
+    this.audio.preload = 'metadata';
+    this.setupEventListeners();
+    console.log('[IosSafariPlayer] Initialized');
   }
+
+  private setupEventListeners(): void {
+    this.audio.addEventListener('loadedmetadata', this.handleLoadedMetadata);
+    this.audio.addEventListener('error', this.handleError);
+    this.audio.addEventListener('ended', this.handleEnded);
+  }
+
+  private handleLoadedMetadata = (): void => {
+    this.trackDuration = this.audio.duration;
+    this.playbackState = 'paused';
+    console.log('[IosSafariPlayer] Metadata loaded, duration:', this.trackDuration);
+
+    if (this.currentTrackId && this.callbacks.onTrackLoad) {
+      this.callbacks.onTrackLoad(this.currentTrackId, this.trackDuration);
+    }
+  };
+
+  private handleError = (): void => {
+    const error = this.audio.error;
+    const errorMessage = error
+      ? `MediaError code ${error.code}: ${error.message || 'Unknown error'}`
+      : 'Unknown audio error';
+
+    console.error('[IosSafariPlayer] Audio error:', errorMessage);
+    this.playbackState = 'error';
+
+    if (this.callbacks.onError) {
+      this.callbacks.onError(new Error(errorMessage), 'unknown', false);
+    }
+  };
+
+  private handleEnded = (): void => {
+    console.log('[IosSafariPlayer] Track ended');
+    this.playbackState = 'stopped';
+
+    if (this.callbacks.onTrackEnd) {
+      this.callbacks.onTrackEnd();
+    }
+  };
 
   // ============================================================================
   // PLAYBACK CONTROL
   // ============================================================================
 
-  async loadTrack(trackId: string, filePath: string, _metadata?: TrackMetadata): Promise<void> {
-    console.log('[IosSafariPlayer] loadTrack (stub):', trackId, filePath);
+  async loadTrack(trackId: string, _filePath: string, _metadata?: TrackMetadata): Promise<void> {
+    console.log('[IosSafariPlayer] loadTrack:', trackId);
+
     this.currentTrackId = trackId;
     this.playbackState = 'loading';
-    // TODO: Implement native HLS loading
-    throw new Error('IosSafariPlayer.loadTrack not implemented');
+    this.trackDuration = 0;
+
+    // Build HLS URL using the storage adapter
+    const hlsAdapter = this.storageAdapter as HLSStorageAdapter;
+    const hlsUrl = await hlsAdapter.getHLSUrl(trackId, `${trackId}/master.m3u8`);
+
+    console.log('[IosSafariPlayer] Loading HLS URL:', hlsUrl);
+
+    // Set the source and trigger load
+    this.audio.src = hlsUrl;
+    this.audio.load();
   }
 
   async play(): Promise<void> {
