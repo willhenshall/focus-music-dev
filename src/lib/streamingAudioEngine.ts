@@ -149,17 +149,6 @@ export class StreamingAudioEngine implements IAudioEngine {
   private crossfadeMode: 'overlap' | 'sequential' | 'none' = 'sequential'; // Default to sequential (safe)
   private enableCrossfade: boolean = true;
   private prefetchedNextTrack: boolean = false;
-  // Track whether we have a fully prewarmed pipeline for the next track
-  private prewarmedNext: {
-    trackId: string | null;
-    url: string | null;
-    audio: HTMLAudioElement | null;
-    hls: Hls | null;
-    warmedAt: number;
-  } = { trackId: null, url: null, audio: null, hls: null, warmedAt: 0 };
-
-  // Fast-start ABR lock (start at low quality, then re-enable ABR after playback begins)
-  private fastStartLockedHls: Hls | null = null;
   
   // Track fade-in/fade-out for smooth transitions (eliminates clicks)
   private readonly TRACK_FADE_DURATION = 500; // 500ms fade in/out
@@ -169,8 +158,6 @@ export class StreamingAudioEngine implements IAudioEngine {
   private hasTriggeredEarlyTransition: boolean = false;
   // Flag to prevent play() calls during crossfade transition
   private isTransitioning: boolean = false;
-  // If play() is requested during a transition, queue it so playback resumes immediately after swap.
-  private pendingPlayAfterTransition: boolean = false;
   
   // Configuration
   private storageAdapter: StorageAdapter;
@@ -207,17 +194,6 @@ export class StreamingAudioEngine implements IAudioEngine {
 
   // [CELLBUG FIX] Track cellular connection status for more lenient handling
   private isCellular: boolean = false;
-  // Remember last good bandwidth estimate so ABR can start at an appropriate level on fast networks.
-  private lastBandwidthEstimateBps: number = 0;
-
-  private shouldForceLowStart(): boolean {
-    // Force low start only when we expect slow/unstable conditions.
-    if (this.isCellular) return true;
-    if (this.metrics.connectionQuality === 'poor' || this.metrics.connectionQuality === 'fair') return true;
-    // On non-cellular connections, do NOT force low by default — it can cause long stretches of low-quality audio
-    // to be buffered even on fast networks.
-    return false;
-  }
   
   // [CELLBUG FIX] Stall recovery for streaming engine (similar to EnterpriseAudioEngine)
   private stallRecoveryTimer: NodeJS.Timeout | null = null;
@@ -436,29 +412,6 @@ export class StreamingAudioEngine implements IAudioEngine {
       if (this.isPlayingState && audio === this.currentAudio) {
         this.startStallRecovery(audio);
       }
-
-      // Fast-start regression guard: if we already have buffered media but receive a waiting event,
-      // immediately unmute and nudge play() to avoid silent stalls after energy/quality switches.
-      // Allow this even if isPlayingState temporarily flipped false (e.g., during crossfade bookkeeping).
-      if (
-        audio === this.currentAudio &&
-        (this.isPlayingState || audio.readyState >= 3) &&
-        this.hasPlayableSource(audio)
-      ) {
-        const hasBuffer =
-          audio.buffered.length > 0
-            ? audio.buffered.end(audio.buffered.length - 1) - audio.currentTime
-            : 0;
-        const isReady = audio.readyState >= 3;
-        if (hasBuffer > 1 && isReady) {
-          try {
-            audio.muted = false;
-            audio.play().catch(() => {});
-          } catch {
-            // best effort
-          }
-        }
-      }
     });
     
     audio.addEventListener('playing', () => {
@@ -474,13 +427,6 @@ export class StreamingAudioEngine implements IAudioEngine {
       this.metrics.isWaiting = false;
       this.metrics.isStalled = false;
       this.metrics.playbackState = 'playing';
-
-      // If we intentionally started at a low HLS level for fast-start, unlock ABR once playback begins.
-      const hlsForAudio = this.getHlsForAudioElement(audio);
-      if (hlsForAudio && this.fastStartLockedHls === hlsForAudio) {
-        this.releaseFastStartABR();
-      }
-
       if (audio === this.currentAudio) {
         this.metrics.error = null;
         this.metrics.errorCategory = null;
@@ -531,14 +477,10 @@ export class StreamingAudioEngine implements IAudioEngine {
     const manifestTimeout = this.isCellular ? 30000 : 10000;  // 30s for cell, 10s for WiFi
     
     // [CELLBUG FIX] Lower initial bandwidth estimate on slow networks
-    // This makes HLS start with a sensible quality instead of lingering at LOW on a fast network.
-    // If we've already measured bandwidth on this session, reuse it (clamped) so ABR ramps quickly.
-    const remembered = this.lastBandwidthEstimateBps;
-    const initialBandwidthEstimate = this.isCellular
-      ? 150000 // 150 kbps - assume very slow on cellular/throttled
-      : remembered > 0
-        ? Math.max(500000, Math.min(5_000_000, remembered)) // clamp 0.5–5 Mbps
-        : this.hlsConfig.abrEwmaDefaultEstimate; // 500 kbps default
+    // This makes HLS start with lower quality (if available) instead of buffering
+    const initialBandwidthEstimate = this.isCellular 
+      ? 150000   // 150 kbps - assume very slow on cellular/throttled
+      : this.hlsConfig.abrEwmaDefaultEstimate;  // 500 kbps default
     
     console.log('[AUDIO][CELLBUG][HLS] Creating HLS instance', {
       fragTimeout,
@@ -734,12 +676,6 @@ export class StreamingAudioEngine implements IAudioEngine {
     });
     
     return hls;
-  }
-
-  private hasPlayableSource(audio: HTMLAudioElement): boolean {
-    if (!audio.src) return false;
-    const NETWORK_NO_SOURCE = (audio as any).NETWORK_NO_SOURCE ?? 3;
-    return audio.networkState !== NETWORK_NO_SOURCE && audio.readyState >= 2;
   }
 
   private setupNetworkMonitoring(): void {
@@ -941,26 +877,6 @@ export class StreamingAudioEngine implements IAudioEngine {
       this.metrics.buffered = bufferedEnd;
       this.metrics.bufferPercentage = (bufferedEnd / audio.duration) * 100;
     }
-
-    // If we're marked buffering but already have data buffered and the element is ready, nudge playback.
-    if (
-      this.metrics.playbackState === 'buffering' &&
-      audio.buffered.length > 0 &&
-      audio.readyState >= 3 &&
-      this.hasPlayableSource(audio)
-    ) {
-      const bufferEnd = audio.buffered.end(audio.buffered.length - 1);
-      const bufferAhead = bufferEnd - audio.currentTime;
-      if (bufferAhead > 1) {
-        try {
-          audio.muted = false;
-          audio.volume = this.volume;
-          audio.play().catch(() => {});
-        } catch {
-          // best effort
-        }
-      }
-    }
     
     // HLS metrics
     if (this.currentHls && this.hlsMetrics.isHLSActive) {
@@ -969,20 +885,6 @@ export class StreamingAudioEngine implements IAudioEngine {
       // Bandwidth
       this.hlsMetrics.bandwidthEstimate = hls.bandwidthEstimate || 0;
       this.metrics.estimatedBandwidth = Math.floor(this.hlsMetrics.bandwidthEstimate / 1000);
-      // Cache a last-known-good bandwidth estimate for subsequent track loads (ABR warm start).
-      if (this.hlsMetrics.bandwidthEstimate > 0) {
-        this.lastBandwidthEstimateBps = this.hlsMetrics.bandwidthEstimate;
-      }
-
-      // Keep "current level" in sync even if we miss/lag HLS events.
-      // LEVEL_SWITCHED can be inconsistent around cold-start / channel switches; reading from the instance is the source of truth.
-      const effectiveCurrentLevel =
-        hls.currentLevel >= 0
-          ? hls.currentLevel
-          : hls.loadLevel >= 0
-            ? hls.loadLevel
-            : this.hlsMetrics.currentLevel;
-      this.hlsMetrics.currentLevel = effectiveCurrentLevel;
       
       // ABR state from hls.js
       this.hlsMetrics.abr.autoLevelEnabled = hls.autoLevelEnabled;
@@ -994,7 +896,7 @@ export class StreamingAudioEngine implements IAudioEngine {
       this.hlsMetrics.abr.effectiveBandwidth = hls.bandwidthEstimate || 0;
       
       // Quality tier recommendations
-      this.hlsMetrics.abr.currentQualityTier = this.getQualityTierName(effectiveCurrentLevel);
+      this.hlsMetrics.abr.currentQualityTier = this.getQualityTierName(hls.currentLevel);
       this.hlsMetrics.abr.recommendedQualityTier = this.getRecommendedTier(hls.bandwidthEstimate || 0);
       
       // Time since last switch
@@ -1003,7 +905,7 @@ export class StreamingAudioEngine implements IAudioEngine {
       }
       
       // Determine ABR state
-      const currentLevel = effectiveCurrentLevel;
+      const currentLevel = hls.currentLevel;
       const recommendedLevel = this.hlsMetrics.levels.findIndex(
         l => l.tierName === this.hlsMetrics.abr.recommendedQualityTier
       );
@@ -1270,15 +1172,14 @@ export class StreamingAudioEngine implements IAudioEngine {
     this.abortController = new AbortController();
     
     try {
-      // Fast-start: avoid an extra network round-trip to "check" if HLS exists.
-      // Assume HLS exists and attempt HLS first; fallback to direct MP3 on error.
-      if (this.useNativeHLS || this.useHLSJS) {
-        try {
-          await this.loadHLSTrack(trackId, filePath, metadata);
-        } catch (err) {
-          console.warn('[STREAMING ENGINE] HLS load failed, falling back to direct:', err);
-          await this.loadDirectTrack(trackId, filePath, metadata);
-        }
+      // Check if HLS is available for this track
+      const hlsAdapter = this.storageAdapter as HLSStorageAdapter;
+      const hasHLS = hlsAdapter.hasHLSSupport 
+        ? await hlsAdapter.hasHLSSupport(trackId)
+        : false;
+      
+      if (hasHLS && (this.useNativeHLS || this.useHLSJS)) {
+        await this.loadHLSTrack(trackId, filePath, metadata);
       } else {
         await this.loadDirectTrack(trackId, filePath, metadata);
       }
@@ -1298,11 +1199,7 @@ export class StreamingAudioEngine implements IAudioEngine {
     console.log('[STREAMING ENGINE] Loading HLS track:', trackId);
     
     const hlsAdapter = this.storageAdapter as HLSStorageAdapter;
-    if (!hlsAdapter.getHLSUrl) {
-      throw new Error('Storage adapter does not support getHLSUrl');
-    }
     const hlsUrl = await hlsAdapter.getHLSUrl(trackId, `${trackId}/master.m3u8`);
-    this.ensurePreconnect(hlsUrl);
     
     this.metrics.currentTrackUrl = hlsUrl;
     this.metrics.currentTrackId = trackId;
@@ -1311,20 +1208,8 @@ export class StreamingAudioEngine implements IAudioEngine {
     if (this.useNativeHLS) {
       // Native HLS (Safari/iOS) - just set the source
       this.hlsMetrics.isNativeHLS = true;
-      // If the next pipeline was already prewarmed with this exact URL, reuse it.
-      if (
-        this.prewarmedNext.trackId === trackId &&
-        this.prewarmedNext.url === hlsUrl &&
-        this.prewarmedNext.audio === this.nextAudio
-      ) {
-        // Best-effort readiness check; avoid forcing a reload if we already have data.
-        if (this.nextAudio.readyState < 2) {
-          await this.waitForCanPlay(this.nextAudio);
-        }
-      } else {
-        this.nextAudio.src = hlsUrl;
-        await this.waitForCanPlay(this.nextAudio);
-      }
+      this.nextAudio.src = hlsUrl;
+      await this.waitForCanPlay(this.nextAudio);
     } else {
       // hls.js - use the HLS instance for nextAudio, not currentAudio
       this.hlsMetrics.isNativeHLS = false;
@@ -1333,12 +1218,6 @@ export class StreamingAudioEngine implements IAudioEngine {
       const nextHls = this.nextAudio === this.primaryAudio ? this.primaryHls : this.secondaryHls;
       
       if (nextHls) {
-        const canReusePrewarm =
-          this.prewarmedNext.trackId === trackId &&
-          this.prewarmedNext.url === hlsUrl &&
-          this.prewarmedNext.audio === this.nextAudio &&
-          this.prewarmedNext.hls === nextHls;
-
         // Re-attach HLS to the audio element if it was detached during cleanup
         // @ts-ignore - checking internal HLS state
         if (!nextHls.media) {
@@ -1346,22 +1225,10 @@ export class StreamingAudioEngine implements IAudioEngine {
           nextHls.attachMedia(this.nextAudio);
         }
         
-        if (!canReusePrewarm) {
-          nextHls.loadSource(hlsUrl);
-          // Ensure segment loading begins even while paused
-          try {
-            nextHls.startLoad();
-          } catch {}
-        }
+        nextHls.loadSource(hlsUrl);
         await this.waitForHLSReady(nextHls);
       }
     }
-
-    // Safety: prewarm may have left the inactive element muted. Ensure newly loaded track is audible once played.
-    try {
-      this.nextAudio.muted = false;
-      this.nextAudio.volume = this.volume;
-    } catch {}
     
     if (metadata) {
       this.updateMediaSessionMetadata(metadata);
@@ -1393,12 +1260,6 @@ export class StreamingAudioEngine implements IAudioEngine {
     
     this.nextAudio.src = url;
     await this.waitForCanPlay(this.nextAudio);
-
-    // Safety: ensure direct-load target isn't left muted from prewarm.
-    try {
-      this.nextAudio.muted = false;
-      this.nextAudio.volume = this.volume;
-    } catch {}
     
     if (metadata) {
       this.updateMediaSessionMetadata(metadata);
@@ -1457,135 +1318,26 @@ export class StreamingAudioEngine implements IAudioEngine {
     });
   }
 
-  private getHlsForAudioElement(audio: HTMLAudioElement): Hls | null {
-    if (!this.useHLSJS || this.useNativeHLS) return null;
-    if (audio === this.primaryAudio) return this.primaryHls;
-    if (audio === this.secondaryAudio) return this.secondaryHls;
-    return null;
-  }
-
-  private ensurePreconnect(url: string): void {
-    try {
-      const origin = new URL(url).origin;
-      const id = `preconnect:${origin}`;
-      if (document.getElementById(id)) return;
-      const link = document.createElement('link');
-      link.id = id;
-      link.rel = 'preconnect';
-      link.href = origin;
-      document.head.appendChild(link);
-    } catch {
-      // Ignore invalid URLs / SSR
-    }
-  }
-
-  private lockFastStartABR(hls: Hls): void {
-    // Force lowest ladder level for startup ONLY on slow/unstable conditions.
-    // On fast networks, forcing low can fill the buffer with low-quality segments and keep playback low for many seconds.
-    // We'll release this lock on the first "playing" event.
-    if (!this.shouldForceLowStart()) {
-      // Ensure ABR is allowed immediately.
-      this.fastStartLockedHls = null;
-      try {
-        (hls as any).startLevel = -1;
-      } catch {}
-      return;
-    }
-
-    this.fastStartLockedHls = hls;
-    try {
-      // hls.js uses startLevel for initial level selection.
-      (hls as any).startLevel = 0;
-      // IMPORTANT: Do NOT set `currentLevel=0` here.
-      // In hls.js, setting currentLevel forces manual mode (autoLevelEnabled=false) and can cause
-      // repeated level thrashing (L3->L0) and intermittent stalls even on fast networks.
-    } catch {
-      // Best-effort
-    }
-  }
-
-  private releaseFastStartABR(): void {
-    const hls = this.fastStartLockedHls;
-    if (!hls) return;
-    try {
-      // Restore auto level selection after initial playback begins.
-      (hls as any).startLevel = -1;
-      // If we ever ended up in manual mode, return to ABR.
-      if (!hls.autoLevelEnabled) {
-        hls.currentLevel = -1;
-      }
-    } catch {
-      // Best-effort
-    } finally {
-      this.fastStartLockedHls = null;
-    }
-  }
-
-  private waitForHLSReady(
-    hls?: Hls | null,
-    options?: { minBufferSeconds?: number }
-  ): Promise<void> {
+  private waitForHLSReady(hls?: Hls | null): Promise<void> {
     return new Promise((resolve, reject) => {
       const targetHls = hls || this.currentHls;
       if (!targetHls) {
         reject(new Error('HLS not initialized'));
         return;
       }
-      const minBufferSeconds = options?.minBufferSeconds ?? 0;
       
-      // [CELLBUG FIX] Use extended timeout on cellular/throttled networks
-      const effectiveTimeout = this.isCellular
-        ? CELLULAR_RETRY_CONFIG.timeoutPerAttempt
-        : this.retryConfig.timeoutPerAttempt;
-
       const timeout = setTimeout(() => {
         cleanup();
         reject(new Error('HLS load timeout'));
-      }, effectiveTimeout);
+      }, this.retryConfig.timeoutPerAttempt);
       
-      const maybeResolveReady = () => {
-        try {
-          const media = targetHls.media as HTMLMediaElement | null | undefined;
-          if (!media) return;
-
-          const hasAnyBuffer = Boolean(media.buffered && media.buffered.length > 0);
-          const bufferEnd = hasAnyBuffer ? media.buffered.end(media.buffered.length - 1) : 0;
-          const bufferAhead = hasAnyBuffer ? Math.max(0, bufferEnd - media.currentTime) : 0;
-
-          const readyByBuffer = minBufferSeconds > 0 ? bufferAhead >= minBufferSeconds : hasAnyBuffer;
-          const readyByState = minBufferSeconds > 0 ? media.readyState >= 3 : media.readyState >= 2;
-
-          // Ready when we have enough buffered media (preferred) or the media element reports readiness.
-          if (readyByBuffer || readyByState) {
-            clearTimeout(timeout);
-            cleanup();
-            resolve();
-          }
-        } catch {
-          // Ignore and keep waiting
-        }
-      };
-
       const onManifestParsed = () => {
-        // Apply fast-start ABR lock as early as possible (levels available now).
-        this.lockFastStartABR(targetHls);
-        // Ensure segment loading begins even if playback hasn't started yet.
-        try {
-          targetHls.startLoad();
-        } catch {}
-        maybeResolveReady();
-      };
-
-      const onFragBuffered = () => {
-        maybeResolveReady();
-      };
-
-      const onBufferAppended = () => {
-        maybeResolveReady();
-      };
-
-      const onCanPlay = () => {
-        maybeResolveReady();
+        // Wait a bit more for initial buffering
+        setTimeout(() => {
+          clearTimeout(timeout);
+          cleanup();
+          resolve();
+        }, 500);
       };
       
       const onError = (event: string, data: any) => {
@@ -1598,24 +1350,11 @@ export class StreamingAudioEngine implements IAudioEngine {
       
       const cleanup = () => {
         targetHls?.off(Hls.Events.MANIFEST_PARSED, onManifestParsed);
-        targetHls?.off(Hls.Events.FRAG_BUFFERED as any, onFragBuffered as any);
-        targetHls?.off(Hls.Events.BUFFER_APPENDED, onBufferAppended as any);
         targetHls?.off(Hls.Events.ERROR, onError);
-        const media = targetHls?.media as HTMLMediaElement | null | undefined;
-        if (media) media.removeEventListener('canplay', onCanPlay);
       };
       
       targetHls.on(Hls.Events.MANIFEST_PARSED, onManifestParsed);
-      // FRAG_BUFFERED exists in hls.js but isn't in some type defs
-      targetHls.on(Hls.Events.FRAG_BUFFERED as any, onFragBuffered as any);
-      targetHls.on(Hls.Events.BUFFER_APPENDED, onBufferAppended as any);
       targetHls.on(Hls.Events.ERROR, onError);
-      const media = targetHls.media as HTMLMediaElement | null | undefined;
-      if (media) media.addEventListener('canplay', onCanPlay, { once: true });
-
-      // Critical: if we are reusing a prewarmed pipeline, media may already be ready/buffered.
-      // Do an immediate readiness check so we don't wait for a future event that may never fire.
-      maybeResolveReady();
     });
   }
 
@@ -1650,10 +1389,8 @@ export class StreamingAudioEngine implements IAudioEngine {
   }
   
   private async attemptStallRecovery(audio: HTMLAudioElement, maxAttempts: number): Promise<void> {
-    // Cancel recovery if playback state changed, we switched pipelines, or playback resumed.
-    // NOTE: the previous condition `!audio.paused === false` was incorrect and would cancel recovery
-    // exactly when audio was paused (the stalled case).
-    if (!this.isPlayingState || audio !== this.currentAudio || !audio.paused) {
+    if (!this.isPlayingState || !audio.paused === false) {
+      // Playback resumed on its own or user paused
       console.log('[AUDIO][CELLBUG][STALL] Stall recovery cancelled - playback state changed');
       return;
     }
@@ -1769,14 +1506,12 @@ export class StreamingAudioEngine implements IAudioEngine {
   }
   
   private setupTrackEndHandler(): void {
-    // [CELLBUG FIX] Guard against false "ended" events on iOS cellular.
-    // IMPORTANT: bind the handler to the actual audio element that ended.
-    // We cannot read `this.nextAudio` inside the handler because pipeline swaps change that reference.
-    const attach = (audioEl: HTMLAudioElement) => {
-      audioEl.onended = () => {
-        const audio = audioEl;
-        const currentTime = audio.currentTime;
-        const duration = audio.duration;
+    // [CELLBUG FIX] Guard against false "ended" events on iOS cellular
+    // iOS Safari can fire "ended" prematurely when buffer runs dry during network stalls
+    this.nextAudio.onended = () => {
+      const audio = this.nextAudio;
+      const currentTime = audio.currentTime;
+      const duration = audio.duration;
       
       // [CELLBUG FIX] Verify the track actually ended
       // Allow 2 second tolerance for rounding/timing issues
@@ -1834,42 +1569,30 @@ export class StreamingAudioEngine implements IAudioEngine {
         return;  // Don't call onTrackEnd for false ended events
       }
 
-        // Only advance when the ENDED element is the currently active element.
-        // During transitions, the old element may end while no longer current.
-        if (audio !== this.currentAudio) {
-          return;
-        }
+      // Don't trigger during channel switch transitions
+      if (this.isTransitioning) {
+        console.log('[STREAMING AUDIO] Track ended during transition - ignoring');
+        return;
+      }
 
-        // Don't trigger during channel switch transitions
-        if (this.isTransitioning) {
-          console.log('[STREAMING AUDIO] Track ended during transition - ignoring');
-          return;
-        }
+      // Don't double-trigger if we already triggered early for overlap crossfade
+      if (this.hasTriggeredEarlyTransition) {
+        console.log('[STREAMING AUDIO] Track ended naturally after early crossfade trigger - ignoring');
+        return;
+      }
 
-        // Don't double-trigger if we already triggered early for overlap crossfade
-        if (this.hasTriggeredEarlyTransition) {
-          console.log('[STREAMING AUDIO] Track ended naturally after early crossfade trigger - ignoring');
-          return;
-        }
-
-        if (this.isPlayingState && this.onTrackEnd) {
-          console.log('[AUDIO][CELLBUG][ENDED] Track genuinely ended, advancing to next');
-          this.consecutiveStallFailures = 0;  // Reset on successful track completion
-          this.onTrackEnd();
-        }
-      };
+      if (this.isPlayingState && this.onTrackEnd) {
+        console.log('[AUDIO][CELLBUG][ENDED] Track genuinely ended, advancing to next');
+        this.consecutiveStallFailures = 0;  // Reset on successful track completion
+        this.onTrackEnd();
+      }
     };
-
-    // Ensure both audio elements always have a stable ended handler.
-    attach(this.primaryAudio);
-    attach(this.secondaryAudio);
   }
 
   async play(): Promise<void> {
     // Prevent re-entry during crossfade transition
     if (this.isTransitioning) {
       console.log('[STREAMING AUDIO] Ignoring play() call during transition');
-      this.pendingPlayAfterTransition = true;
       return;
     }
 
@@ -1877,19 +1600,9 @@ export class StreamingAudioEngine implements IAudioEngine {
       return;
     }
 
-    // IMPORTANT: With hls.js, both audio elements may end up with the same blob: URL even when
-    // they represent different pipelines/tracks. Don't compare src strings here; we only care
-    // whether we're switching to the inactive element that has something loaded.
-    const hasNewTrack = this.nextAudio !== this.currentAudio && Boolean(this.nextAudio.src);
-
-    // Safety: prewarm may have muted the inactive element. Ensure audible playback when we actually play.
-    try {
-      if (hasNewTrack) {
-        this.nextAudio.muted = false;
-      } else {
-        this.currentAudio.muted = false;
-      }
-    } catch {}
+    const hasNewTrack = this.nextAudio.src &&
+                        this.nextAudio.src !== this.currentAudio.src &&
+                        this.nextAudio !== this.currentAudio;
 
     // [iOS FIX] On iOS, the FIRST play() must be called directly from user gesture
     // Crossfade uses async callbacks which iOS blocks on first interaction
@@ -1909,9 +1622,6 @@ export class StreamingAudioEngine implements IAudioEngine {
       }
       
       // Start new audio directly
-      try {
-        newAudio.muted = false;
-      } catch {}
       newAudio.volume = this.volume;
       try {
         await newAudio.play();
@@ -1935,11 +1645,6 @@ export class StreamingAudioEngine implements IAudioEngine {
       await this.crossfadeToNext();
       this.isAudioUnlocked = true; // Mark as unlocked after successful crossfade
     } else {
-      try {
-        this.currentAudio.muted = false;
-      } catch {}
-      // Safety: prewarm uses volume=0; ensure a resumed play is audible.
-      this.currentAudio.volume = this.volume;
       await this.currentAudio.play();
       this.isPlayingState = true;
       this.metrics.playbackState = 'playing';
@@ -1969,9 +1674,6 @@ export class StreamingAudioEngine implements IAudioEngine {
       }
       
       // Always start at volume 0 and fade in to eliminate clicks
-      try {
-        newAudio.muted = false;
-      } catch {}
       newAudio.volume = 0;
       await newAudio.play();
       this.currentAudio = newAudio;
@@ -1999,9 +1701,6 @@ export class StreamingAudioEngine implements IAudioEngine {
     
     newAudio.volume = 0;
     try {
-      try {
-        newAudio.muted = false;
-      } catch {}
       await newAudio.play();
       console.log('[STREAMING AUDIO] New track play() succeeded');
     } catch (err) {
@@ -2067,22 +1766,6 @@ export class StreamingAudioEngine implements IAudioEngine {
         
         this.isTransitioning = false;
         this.updateMetrics();
-
-        // If a play request came in during the transition, honor it now.
-        if (this.pendingPlayAfterTransition) {
-          this.pendingPlayAfterTransition = false;
-          try {
-            this.currentAudio.muted = false;
-          } catch {}
-          try {
-            this.currentAudio.volume = this.volume;
-          } catch {}
-          try {
-            if (this.currentAudio.paused) {
-              this.currentAudio.play().catch(() => {});
-            }
-          } catch {}
-        }
       }
     }, fadeInterval);
   }
@@ -2135,184 +1818,41 @@ export class StreamingAudioEngine implements IAudioEngine {
     return { ...this.metrics };
   }
 
-  /**
-   * Prewarm a track for fast-start.
-   * Loads the HLS manifest/first fragments (preferred) or MP3 metadata into the inactive pipeline,
-   * so the next user-initiated play can start with minimal delay.
-   */
-  async prewarmTrack(
-    trackId: string,
-    filePath: string,
-    options?: { preferHLS?: boolean; startLevel?: number }
-  ): Promise<void> {
-    if (this.nextTrackId === trackId) return;
-    this.nextTrackId = trackId;
-
-    const preferHLS = options?.preferHLS ?? true;
-    const requestedStartLevel = options?.startLevel ?? 0;
-    const startLevel = this.shouldForceLowStart() ? requestedStartLevel : -1;
-
-    // Prewarm always uses the inactive element (the one we'll play next).
-    const prewarmAudio = this.currentAudio === this.primaryAudio ? this.secondaryAudio : this.primaryAudio;
-    const prewarmHls = this.getHlsForAudioElement(prewarmAudio);
-
-    const hlsAdapter = this.storageAdapter as HLSStorageAdapter;
-    const canUseHLS = (this.useNativeHLS || this.useHLSJS) && preferHLS;
-
-    try {
-      if (canUseHLS && hlsAdapter.getHLSUrl) {
-        const hlsUrl = await hlsAdapter.getHLSUrl(trackId, `${trackId}/master.m3u8`);
-        this.ensurePreconnect(hlsUrl);
-
-        if (this.useNativeHLS) {
-          prewarmAudio.src = hlsUrl;
-          prewarmAudio.preload = 'auto';
-          prewarmAudio.load();
-          // Native HLS readiness is best-effort here; we don't want to block.
-          this.prewarmedNext = {
-            trackId,
-            url: hlsUrl,
-            audio: prewarmAudio,
-            hls: null,
-            warmedAt: performance.now(),
-          };
-        } else if (prewarmHls) {
-          // Ensure start level is low for fastest first audio
-          try {
-            (prewarmHls as any).startLevel = startLevel;
-          } catch {}
-
-          // Re-attach HLS to the audio element if it was detached during cleanup
-          // @ts-ignore - checking internal HLS state
-          if (!prewarmHls.media) {
-            prewarmHls.attachMedia(prewarmAudio);
-          }
-
-          prewarmHls.loadSource(hlsUrl);
-          // Start loading immediately even while paused
-          try {
-            prewarmHls.startLoad();
-          } catch {}
-
-            // Critical: On Chrome/Android, hls.js may not append media data while the element is paused.
-            // Muted autoplay is generally permitted, and forces the media pipeline to start consuming buffer.
-            try {
-              prewarmAudio.muted = true;
-              prewarmAudio.volume = 0;
-              // Fire-and-forget: if blocked, we still keep the manifest/connection warm.
-              prewarmAudio.play().catch(() => {});
-            } catch {}
-
-            // Prewarm should be best-effort and must not stall indefinitely while paused.
-            await this.waitForHLSReady(prewarmHls);
-
-            // Pause once we have some buffer; keep the buffer primed for later.
-            try {
-              prewarmAudio.pause();
-            } catch {}
-
-          // Lock ABR to low start level until playback begins
-          this.lockFastStartABR(prewarmHls);
-
-          // Record that this exact pipeline is warm and ready to be reused by loadTrack().
-          this.prewarmedNext = {
-            trackId,
-            url: hlsUrl,
-            audio: prewarmAudio,
-            hls: prewarmHls,
-            warmedAt: performance.now(),
-          };
-        }
-
-        this.prefetchedNextTrack = true;
-        this.metrics.prefetchedTrackId = trackId;
-        this.metrics.prefetchedTrackUrl = hlsUrl;
-        this.updateMetrics();
-        return;
-      }
-
-      // Fallback: MP3 prefetch
-      const url = await this.storageAdapter.getAudioUrl(filePath);
-      prewarmAudio.src = url;
-      prewarmAudio.preload = 'auto';
-      prewarmAudio.load();
-
-      this.prefetchedNextTrack = true;
-      this.metrics.prefetchedTrackId = trackId;
-      this.metrics.prefetchedTrackUrl = url;
-      this.updateMetrics();
-    } catch (e) {
-      console.warn('[STREAMING ENGINE] prewarmTrack failed:', e);
-    }
-  }
-
-  /**
-   * Fast-start: if a track is already prewarmed into the inactive pipeline, start it immediately.
-   * Intended to be called from a user gesture handler (tap/click) to maximize autoplay compatibility.
-   *
-   * Falls back to the regular loadTrack() + play() path if prewarm isn't available.
-   */
-  async playPrewarmedTrack(trackId: string, filePath: string, metadata?: TrackMetadata): Promise<void> {
-    const hlsAdapter = this.storageAdapter as HLSStorageAdapter;
-
-    // If we have a matching prewarmed pipeline, use it.
-    if (this.prewarmedNext.trackId === trackId && this.prewarmedNext.url && this.prewarmedNext.audio) {
-      const prewarmedAudio = this.prewarmedNext.audio;
-
-      // Ensure our nextAudio pointer matches the prewarmed audio element.
-      if (prewarmedAudio !== this.nextAudio) {
-        const other = prewarmedAudio === this.primaryAudio ? this.secondaryAudio : this.primaryAudio;
-        this.currentAudio = other;
-        this.nextAudio = prewarmedAudio;
-      }
-
-      // Ensure currentHls pointer matches the pipeline that will become current after the swap.
-      if (this.useHLSJS && !this.useNativeHLS) {
-        const nextHls = this.nextAudio === this.primaryAudio ? this.primaryHls : this.secondaryHls;
-        this.currentHls = nextHls;
-      }
-
-      // Update metrics to reflect the now-active track.
-      this.metrics.currentTrackId = trackId;
-      this.metrics.currentTrackUrl = this.prewarmedNext.url;
-      this.metrics.playbackState = 'ready';
-      this.hlsMetrics.isHLSActive = true;
-      this.hlsMetrics.isNativeHLS = this.useNativeHLS;
-      this.updateMetrics();
-
-      // Restore normal audio output before starting real playback.
-      try {
-        this.nextAudio.muted = false;
-        this.nextAudio.volume = this.volume;
-      } catch {}
-
-      if (metadata) {
-        this.updateMediaSessionMetadata(metadata);
-      }
-
-      this.setupTrackEndHandler();
-      if (this.onTrackLoad) {
-        this.onTrackLoad(trackId, this.nextAudio.duration);
-      }
-
-      // Start playback immediately.
-      await this.play();
-      return;
-    }
-
-    // Fallback: normal path
-    // (Try HLS first with MP3 fallback, then play.)
-    await this.loadTrack(trackId, filePath, metadata);
-    await this.play();
-  }
-
   prefetchNextTrack(trackId: string, filePath: string): void {
     if (this.nextTrackId === trackId) {
       return;
     }
-
-    // Use the richer prewarm path (loads HLS fragments via hls.js when available).
-    this.prewarmTrack(trackId, filePath, { preferHLS: true, startLevel: 0 }).catch(() => {});
+    
+    this.nextTrackId = trackId;
+    const prefetchAudio = this.currentAudio === this.primaryAudio 
+      ? this.secondaryAudio 
+      : this.primaryAudio;
+    
+    // Check if HLS is available and use HLS URL if supported
+    const hlsAdapter = this.storageAdapter as HLSStorageAdapter;
+    const canUseHLS = this.useNativeHLS || this.useHLSJS;
+    
+    const getPrefetchUrl = async (): Promise<string> => {
+      if (canUseHLS && hlsAdapter.hasHLSSupport) {
+        const hasHLS = await hlsAdapter.hasHLSSupport(trackId);
+        if (hasHLS) {
+          return hlsAdapter.getHLSUrl(trackId, `${trackId}/master.m3u8`);
+        }
+      }
+      // Fall back to MP3
+      return this.storageAdapter.getAudioUrl(filePath);
+    };
+    
+    getPrefetchUrl().then(url => {
+      prefetchAudio.src = url;
+      prefetchAudio.preload = 'auto';
+      prefetchAudio.load();
+      
+      this.prefetchedNextTrack = true;
+      this.metrics.prefetchedTrackId = trackId;
+      this.metrics.prefetchedTrackUrl = url;
+      this.updateMetrics();
+    }).catch(console.warn);
   }
 
   /**
@@ -2324,13 +1864,10 @@ export class StreamingAudioEngine implements IAudioEngine {
    * Uses a tiny silent audio data URI since the main audio elements may not have a source yet.
    */
   unlockIOSAudio(): void {
+    if (!this.isIOS) return;
     if (this.isAudioUnlocked) return;
     
-    // Despite the name, this "silent play" unlock helps on other platforms too
-    // when play() must be initiated from a user gesture.
-    console.log('[STREAMING AUDIO] Unlocking audio context with silent buffer', {
-      isIOS: this.isIOS,
-    });
+    console.log('[STREAMING AUDIO] Unlocking iOS audio context with silent buffer');
     
     // Tiny silent MP3 - this is a valid MP3 file that plays silence
     // Using a data URI ensures we have something to play even if no track is loaded
