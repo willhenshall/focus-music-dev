@@ -139,3 +139,125 @@ export async function getTrackAnalytics(trackId: string) {
     return null;
   }
 }
+
+/**
+ * TTFA (Time To First Audio) analytics event.
+ * Tracks how long it takes from user action to first audible audio.
+ */
+export interface TTFAEvent {
+  requestId: string;
+  ttfaMs: number;
+  channelId: string;
+  channelName: string;
+  energyLevel: 'low' | 'medium' | 'high';
+  trackId?: string;
+  trackName?: string;
+  artistName?: string;
+  engineType: 'legacy' | 'streaming' | 'auto';
+  browser: string;
+  platform: string;
+  isMobile: boolean;
+  triggerType: 'channel_switch' | 'energy_change' | 'initial_play';
+  timestamp?: string;
+  userId?: string;
+}
+
+// Local storage for TTFA events (for debugging and E2E testing)
+const ttfaEventsStore: TTFAEvent[] = [];
+
+/**
+ * Get all recorded TTFA events (for debugging/E2E).
+ */
+export function getTTFAEvents(): TTFAEvent[] {
+  return [...ttfaEventsStore];
+}
+
+/**
+ * Clear all recorded TTFA events (for testing).
+ */
+export function clearTTFAEvents(): void {
+  ttfaEventsStore.length = 0;
+}
+
+/**
+ * Track TTFA (Time To First Audio) event.
+ * Records how long it took from user action to first audible audio.
+ * 
+ * NOTE: This is currently LOCAL-ONLY. Events are stored in memory and
+ * exposed via window.__playerDebug.ttfaEvents for debugging/E2E.
+ * Backend storage will be added later once the ttfa_events table exists.
+ */
+export function trackTTFA(event: TTFAEvent, userId?: string): void {
+  try {
+    // Add timestamp and userId to the event
+    const fullEvent: TTFAEvent = {
+      ...event,
+      timestamp: new Date().toISOString(),
+      userId,
+    };
+
+    // Store locally
+    ttfaEventsStore.push(fullEvent);
+
+    // Expose via window.__playerDebug for debugging/E2E
+    if (typeof window !== 'undefined') {
+      const debug = (window as any).__playerDebug;
+      if (debug) {
+        if (!debug.ttfaEvents) {
+          debug.ttfaEvents = [];
+        }
+        debug.ttfaEvents.push(fullEvent);
+      }
+    }
+
+    // Log in dev mode only
+    if (import.meta.env.DEV) {
+      console.log('[TTFA] Recorded event (local-only):', {
+        requestId: event.requestId,
+        ttfaMs: event.ttfaMs,
+        channelName: event.channelName,
+        energyLevel: event.energyLevel,
+        trackName: event.trackName,
+        engineType: event.engineType,
+        triggerType: event.triggerType,
+      });
+    }
+  } catch {
+    // Never throw - analytics should never break playback
+  }
+}
+
+/**
+ * Get browser and platform info for TTFA tracking.
+ */
+export function getBrowserInfo(): { browser: string; platform: string; isMobile: boolean } {
+  const ua = navigator.userAgent;
+  
+  let browser = 'unknown';
+  if (ua.includes('Chrome') && !ua.includes('Edg')) {
+    browser = 'Chrome';
+  } else if (ua.includes('Safari') && !ua.includes('Chrome')) {
+    browser = 'Safari';
+  } else if (ua.includes('Firefox')) {
+    browser = 'Firefox';
+  } else if (ua.includes('Edg')) {
+    browser = 'Edge';
+  }
+  
+  let platform = 'unknown';
+  if (ua.includes('Mac')) {
+    platform = 'macOS';
+  } else if (ua.includes('Windows')) {
+    platform = 'Windows';
+  } else if (ua.includes('Android')) {
+    platform = 'Android';
+  } else if (ua.includes('iPhone') || ua.includes('iPad')) {
+    platform = 'iOS';
+  } else if (ua.includes('Linux')) {
+    platform = 'Linux';
+  }
+  
+  const isMobile = getDeviceType() === 'mobile' || getDeviceType() === 'tablet';
+  
+  return { browser, platform, isMobile };
+}

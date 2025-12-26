@@ -1,8 +1,8 @@
-import { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
+import { createContext, useContext, useState, useEffect, ReactNode, useRef, useCallback } from 'react';
 import { supabase, AudioChannel, AudioTrack, SystemPreferences } from '../lib/supabase';
 import { generatePlaylist, EnergyLevel } from '../lib/playlisterService';
 import { useAuth } from './AuthContext';
-import { trackPlayStart, trackPlayEnd } from '../lib/analyticsService';
+import { trackPlayStart, trackPlayEnd, trackTTFA, getBrowserInfo } from '../lib/analyticsService';
 import { EnterpriseAudioEngine } from '../lib/enterpriseAudioEngine';
 import type { AudioMetrics } from '../lib/enterpriseAudioEngine';
 import { StreamingAudioEngine } from '../lib/streamingAudioEngine';
@@ -10,6 +10,68 @@ import { createStorageAdapter } from '../lib/storageAdapters';
 import { selectNextTrackCached, getCurrentSlotIndex } from '../lib/slotStrategyEngine';
 import { getIosWebkitInfo } from '../lib/iosWebkitDetection';
 import type { IAudioEngine, AudioMetrics as StreamingAudioMetrics } from '../lib/types/audioEngine';
+
+// ============================================================================
+// PLAYBACK LOADING STATE MACHINE (for loading modal + TTFA)
+// ============================================================================
+
+/**
+ * Trigger types for playback loading state.
+ */
+export type PlaybackLoadingTrigger = 'channel_switch' | 'energy_change' | 'initial_play';
+
+/**
+ * Playback loading state machine states.
+ */
+export type PlaybackLoadingStatus = 'idle' | 'loading' | 'playing' | 'error';
+
+/**
+ * Minimum time (ms) the loading modal must remain visible.
+ * Creates a calm "ritual" transition for focus (meditation-app style).
+ */
+const MIN_MODAL_VISIBLE_MS = 4000;
+
+/**
+ * Maximum time (ms) to wait for new audio before showing error state.
+ * If no new track plays within this time, show "No track available" error.
+ */
+const MAX_LOADING_TIMEOUT_MS = 10000;
+
+/**
+ * Playback loading state - tracks the current loading request.
+ * Uses requestId to prevent stale completions from dismissing the modal.
+ */
+export type PlaybackLoadingState = {
+  status: PlaybackLoadingStatus;
+  // Set when loading
+  requestId?: string;
+  channelId?: string;
+  channelName?: string;
+  channelImageUrl?: string;
+  energyLevel: 'low' | 'medium' | 'high';
+  trackId?: string;
+  trackName?: string;
+  artistName?: string;
+  startedAt?: number;
+  triggerType?: PlaybackLoadingTrigger;
+  // Set when first audible audio is detected (may be before modal dismisses)
+  firstAudibleAt?: number;
+  // True when first audible audio detected but modal still visible (ritual overlay mode)
+  // Modal becomes non-blocking (pointer-events: none) when this is true
+  audibleStarted?: boolean;
+  // Set when playing (after modal actually dismisses)
+  ttfaMs?: number;
+  // Set on error
+  errorMessage?: string;
+  errorReason?: 'NO_TRACK_OR_AUDIO_TIMEOUT' | 'PLAYBACK_ERROR';
+};
+
+/**
+ * Generate a unique request ID for each load attempt.
+ */
+function generateRequestId(): string {
+  return `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+}
 
 // Re-export for consistency - both engines produce compatible metrics
 type EngineAudioMetrics = AudioMetrics | StreamingAudioMetrics;
@@ -101,6 +163,9 @@ type MusicPlayerContextType = {
   // Engine selection (for A/B testing)
   engineType: AudioEngineType;
   isStreamingEngine: boolean;
+  // Playback loading state (for loading modal + TTFA)
+  playbackLoadingState: PlaybackLoadingState;
+  dismissLoadingError: () => void;
   setSessionTimer: (active: boolean, remaining: number) => void;
   toggleChannel: (channel: AudioChannel, turnOn: boolean, fromPlayer?: boolean) => Promise<void>;
   setChannelEnergy: (channelId: string, energyLevel: 'low' | 'medium' | 'high') => void;
@@ -143,6 +208,29 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const [isStreamingEngine, setIsStreamingEngine] = useState<boolean>(() => 
     shouldUseStreamingEngine(getEngineType())
   );
+  
+  // Playback loading state machine (for loading modal + TTFA)
+  const [playbackLoadingState, setPlaybackLoadingState] = useState<PlaybackLoadingState>({
+    status: 'idle',
+    energyLevel: 'medium',
+  });
+  
+  // Ref to track the current active request ID (for stale completion protection)
+  const activeLoadingRequestIdRef = useRef<string | null>(null);
+  // Ref to track if TTFA has already been fired for current request
+  const ttfaFiredForRequestRef = useRef<string | null>(null);
+  // Timeout for error fallback if audio never starts
+  const loadingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Ref to track which requestId detection is currently running for (prevents duplicate detection runs)
+  const detectionRequestIdRef = useRef<string | null>(null);
+  // Ref to track old audio sources when entering loading state (to ignore during detection)
+  const oldAudioSourcesRef = useRef<Set<string>>(new Set());
+  // Timeout for minimum visible duration (anti-flicker)
+  const minVisibleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Ref to track if first audible audio was detected (for delayed dismiss)
+  const firstAudibleDetectedRef = useRef<{ requestId: string; timestamp: number } | null>(null);
+  // Set of preloaded channel image URLs (to avoid duplicate preloading)
+  const preloadedChannelImagesRef = useRef<Set<string>>(new Set());
   
   const playStartTimeRef = useRef<number>(0);
   const isLoadingTrack = useRef<boolean>(false);
@@ -311,7 +399,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       const trackId = track?.metadata?.track_id?.toString();
 
 
-      if (!trackId) {
+      if (!trackId || !track) {
         return;
       }
 
@@ -338,6 +426,15 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       lastLoadedTrackId.current = trackId;
       // Increment playback session ID for E2E test tracking
       playbackSessionIdRef.current += 1;
+      
+      // Update loading modal with track info (if loading state is active)
+      if (track.track_name || track.artist_name) {
+        updateLoadingTrackInfo(
+          trackId,
+          track.track_name || 'Unknown Track',
+          track.artist_name || 'Unknown Artist'
+        );
+      }
 
       try {
         // Validate track has required data before attempting to load
@@ -543,6 +640,23 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     handleTrackEndRef.current = handleTrackEnd;
   });
 
+  /**
+   * Preload channel images to ensure instant display in loading modal.
+   * Uses Image() constructor to trigger browser cache.
+   */
+  const preloadChannelImages = useCallback((channelList: AudioChannel[]) => {
+    channelList.forEach(channel => {
+      const imageUrl = channel.image_url;
+      if (imageUrl && !preloadedChannelImagesRef.current.has(imageUrl)) {
+        preloadedChannelImagesRef.current.add(imageUrl);
+        const img = new Image();
+        img.src = imageUrl;
+        // No need to handle onload/onerror - we just want browser to cache it
+        console.log('[IMAGE PRELOAD] Preloading channel image:', channel.channel_name);
+      }
+    });
+  }, []);
+
   const loadChannels = async () => {
     const { data } = await supabase
       .from('audio_channels')
@@ -550,6 +664,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       .order('display_order');
     if (data) {
       setChannels(data);
+
+      // Preload all channel images for instant modal display
+      preloadChannelImages(data);
 
       // If there's an active channel, update it with fresh data
       if (activeChannel) {
@@ -1024,9 +1141,420 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     return null;
   };
 
+  /**
+   * Start the loading state machine for a new playback request.
+   * Returns the requestId for this loading attempt.
+   */
+  const startPlaybackLoading = useCallback((
+    triggerType: PlaybackLoadingTrigger,
+    channel: AudioChannel,
+    energyLevel: 'low' | 'medium' | 'high',
+    trackInfo?: { trackId?: string; trackName?: string; artistName?: string }
+  ): string => {
+    const requestId = generateRequestId();
+    const now = Date.now();
+    
+    // Capture current audio sources BEFORE starting load
+    // These are the "old" sources that should be ignored during detection
+    const currentAudioSources = new Set<string>();
+    document.querySelectorAll('audio').forEach(audio => {
+      if (audio.src && !audio.paused) {
+        currentAudioSources.add(audio.src);
+      }
+    });
+    oldAudioSourcesRef.current = currentAudioSources;
+    
+    console.log('[LOADING MODAL] Starting loading state:', {
+      requestId,
+      channelName: channel.channel_name,
+      energyLevel,
+      triggerType,
+      oldAudioSources: currentAudioSources.size,
+    });
+    
+    // Clear any existing timeouts (cleanup for new request)
+    if (loadingTimeoutRef.current) {
+      clearTimeout(loadingTimeoutRef.current);
+      loadingTimeoutRef.current = null;
+    }
+    if (minVisibleTimeoutRef.current) {
+      clearTimeout(minVisibleTimeoutRef.current);
+      minVisibleTimeoutRef.current = null;
+    }
+    
+    // Set the active request ID
+    activeLoadingRequestIdRef.current = requestId;
+    ttfaFiredForRequestRef.current = null;
+    firstAudibleDetectedRef.current = null;
+    
+    // Update loading state
+    setPlaybackLoadingState({
+      status: 'loading',
+      requestId,
+      channelId: channel.id,
+      channelName: channel.channel_name,
+      channelImageUrl: channel.image_url || undefined,
+      energyLevel,
+      trackId: trackInfo?.trackId,
+      trackName: trackInfo?.trackName || 'Loading track...',
+      artistName: trackInfo?.artistName,
+      startedAt: now,
+      triggerType,
+    });
+    
+    // Set a timeout to transition to error state if audio never starts
+    // This prevents the modal from being stuck forever
+    loadingTimeoutRef.current = setTimeout(() => {
+      if (activeLoadingRequestIdRef.current === requestId) {
+        console.warn('[LOADING MODAL] Timeout - no new audio detected, transitioning to error');
+        setPlaybackLoadingState(prev => ({
+          ...prev,
+          status: 'error',
+          errorMessage: 'No track available for this channel/energy. Try another energy level.',
+          errorReason: 'NO_TRACK_OR_AUDIO_TIMEOUT',
+        }));
+        // Do NOT auto-dismiss - user must click dismiss button
+      }
+    }, MAX_LOADING_TIMEOUT_MS);
+    
+    return requestId;
+  }, []);
+
+  /**
+   * Actually dismiss the modal and fire TTFA analytics.
+   * Called when both conditions are met:
+   * 1. First audible audio detected
+   * 2. MIN_VISIBLE_MS has elapsed
+   */
+  const dismissModal = useCallback((requestId: string, ttfaMs: number) => {
+    // Validate this is still the active request (stale protection)
+    if (activeLoadingRequestIdRef.current !== requestId) {
+      console.log('[LOADING MODAL] Stale dismiss ignored for requestId:', requestId);
+      return;
+    }
+    
+    console.log('[LOADING MODAL] Dismissing modal:', {
+      requestId,
+      ttfaMs,
+    });
+    
+    // Transition to playing state
+    setPlaybackLoadingState(prev => ({
+      ...prev,
+      status: 'playing',
+      ttfaMs,
+    }));
+    
+    // Clear active request after a brief delay (allow state to be read by consumers)
+    setTimeout(() => {
+      if (activeLoadingRequestIdRef.current === requestId) {
+        setPlaybackLoadingState({ status: 'idle', energyLevel: 'medium' });
+        activeLoadingRequestIdRef.current = null;
+      }
+    }, 100);
+    
+    // Fire TTFA analytics (non-blocking, local-only)
+    const browserInfo = getBrowserInfo();
+    trackTTFA({
+      requestId,
+      ttfaMs,
+      channelId: playbackLoadingState.channelId || '',
+      channelName: playbackLoadingState.channelName || '',
+      energyLevel: playbackLoadingState.energyLevel,
+      trackId: playbackLoadingState.trackId,
+      trackName: playbackLoadingState.trackName,
+      artistName: playbackLoadingState.artistName,
+      engineType: engineType,
+      browser: browserInfo.browser,
+      platform: browserInfo.platform,
+      isMobile: browserInfo.isMobile,
+      triggerType: playbackLoadingState.triggerType || 'channel_switch',
+    }, user?.id);
+  }, [playbackLoadingState, engineType, user?.id]);
+
+  /**
+   * Complete the loading state when first audio is detected.
+   * Implements minimum visible duration (MIN_VISIBLE_MS) for anti-flicker.
+   * Only fires once per requestId to prevent duplicate TTFA events.
+   */
+  const completePlaybackLoading = useCallback((requestId: string) => {
+    // Validate this is the active request (stale protection)
+    if (activeLoadingRequestIdRef.current !== requestId) {
+      console.log('[LOADING MODAL] Ignoring stale completion for requestId:', requestId);
+      return;
+    }
+    
+    // Prevent duplicate TTFA fires
+    if (ttfaFiredForRequestRef.current === requestId) {
+      console.log('[LOADING MODAL] TTFA already fired for requestId:', requestId);
+      return;
+    }
+    
+    const now = Date.now();
+    const startedAt = playbackLoadingState.startedAt || now;
+    const elapsedMs = now - startedAt;
+    const ttfaMs = elapsedMs;
+    
+    console.log('[LOADING MODAL] First audio detected:', {
+      requestId,
+      ttfaMs,
+      elapsedMs,
+      minVisibleMs: MIN_MODAL_VISIBLE_MS,
+      channelName: playbackLoadingState.channelName,
+    });
+    
+    // Clear error timeout since audio started successfully
+    if (loadingTimeoutRef.current) {
+      clearTimeout(loadingTimeoutRef.current);
+      loadingTimeoutRef.current = null;
+    }
+    
+    // Mark TTFA as fired for this request (prevent duplicate fires)
+    ttfaFiredForRequestRef.current = requestId;
+    
+    // Record first audible timestamp and set audibleStarted for ritual overlay mode
+    // Modal becomes non-blocking (pointer-events: none) when audibleStarted is true
+    setPlaybackLoadingState(prev => ({
+      ...prev,
+      firstAudibleAt: now,
+      audibleStarted: true,
+    }));
+    
+    // Check if minimum visible time has elapsed
+    if (elapsedMs >= MIN_MODAL_VISIBLE_MS) {
+      // Dismiss immediately - enough time has passed
+      console.log('[LOADING MODAL] Min visible time met, dismissing immediately');
+      dismissModal(requestId, ttfaMs);
+    } else {
+      // Schedule delayed dismiss for remaining time
+      const remainingMs = MIN_MODAL_VISIBLE_MS - elapsedMs;
+      console.log('[LOADING MODAL] Scheduling delayed dismiss in', remainingMs, 'ms');
+      
+      // Clear any existing min visible timeout
+      if (minVisibleTimeoutRef.current) {
+        clearTimeout(minVisibleTimeoutRef.current);
+      }
+      
+      minVisibleTimeoutRef.current = setTimeout(() => {
+        // RequestId-safe: only dismiss if this is still the active request
+        if (activeLoadingRequestIdRef.current === requestId) {
+          console.log('[LOADING MODAL] Delayed dismiss firing for requestId:', requestId);
+          dismissModal(requestId, ttfaMs);
+        } else {
+          console.log('[LOADING MODAL] Delayed dismiss cancelled - requestId changed');
+        }
+        minVisibleTimeoutRef.current = null;
+      }, remainingMs);
+    }
+  }, [playbackLoadingState, dismissModal]);
+
+  /**
+   * Update track info in loading state (called when track metadata becomes available).
+   */
+  const updateLoadingTrackInfo = useCallback((
+    trackId: string,
+    trackName: string,
+    artistName: string
+  ) => {
+    setPlaybackLoadingState(prev => {
+      if (prev.status !== 'loading') return prev;
+      return {
+        ...prev,
+        trackId,
+        trackName,
+        artistName,
+      };
+    });
+  }, []);
+
+  /**
+   * Dismiss the loading error modal (user-initiated).
+   * Called when user clicks the dismiss button on error state.
+   */
+  const dismissLoadingError = useCallback(() => {
+    console.log('[LOADING MODAL] User dismissed error state');
+    // Clear any pending timeouts
+    if (loadingTimeoutRef.current) {
+      clearTimeout(loadingTimeoutRef.current);
+      loadingTimeoutRef.current = null;
+    }
+    if (minVisibleTimeoutRef.current) {
+      clearTimeout(minVisibleTimeoutRef.current);
+      minVisibleTimeoutRef.current = null;
+    }
+    // Reset to idle
+    setPlaybackLoadingState({ status: 'idle', energyLevel: 'medium' });
+    activeLoadingRequestIdRef.current = null;
+  }, []);
+
+  // First audio detection for loading modal + TTFA
+  // Monitors ALL audio elements to detect when first audible audio plays
+  // Uses a stable ref-based approach to avoid useEffect dependency issues
+  useEffect(() => {
+    if (!audioEngine) return;
+    
+    // Only run detection when we're in loading state
+    if (playbackLoadingState.status !== 'loading') return;
+    
+    const requestId = activeLoadingRequestIdRef.current;
+    if (!requestId) return;
+    
+    // Prevent duplicate detection runs for the same requestId
+    if (detectionRequestIdRef.current === requestId) {
+      return; // Already detecting for this requestId
+    }
+    detectionRequestIdRef.current = requestId;
+    
+    // Capture old sources at detection start time
+    const oldSources = new Set(oldAudioSourcesRef.current);
+    
+    console.log('[FIRST AUDIO] Starting detection for requestId:', requestId, {
+      oldSourcesCount: oldSources.size,
+    });
+    
+    let hasCompleted = false;
+    let playingEventTimeouts: NodeJS.Timeout[] = [];
+    
+    /**
+     * Check if a NEW audio element meets "first audible audio" criteria:
+     * - audio.src NOT in oldSources (must be a new track)
+     * - audio.paused === false
+     * - audio.currentTime >= 0.05
+     * - audio.readyState >= HAVE_CURRENT_DATA (2)
+     * - audio.volume > 0 && !audio.muted (actually audible)
+     */
+    const checkForNewAudioPlaying = (): HTMLAudioElement | null => {
+      const audioElements = document.querySelectorAll('audio');
+      
+      for (const audio of audioElements) {
+        const src = audio.src;
+        const isPaused = audio.paused;
+        const currentTime = audio.currentTime;
+        const readyState = audio.readyState;
+        const volume = audio.volume;
+        const muted = audio.muted;
+        
+        // Skip if this is an old source (the track that was playing before)
+        if (oldSources.has(src)) {
+          continue;
+        }
+        
+        // New track must have a src
+        if (!src) continue;
+        
+        // First audible audio criteria for NEW track
+        const isPlaying = !isPaused;
+        const hasPlayedEnough = currentTime >= 0.05;
+        const hasBuffer = readyState >= 2;
+        const isAudible = volume > 0 && !muted;
+        
+        if (isPlaying && hasPlayedEnough && hasBuffer && isAudible) {
+          return audio;
+        }
+      }
+      return null;
+    };
+    
+    const completeDetection = (audio: HTMLAudioElement) => {
+      if (hasCompleted) return;
+      // Validate this is still the active request (stale protection)
+      if (activeLoadingRequestIdRef.current !== requestId) {
+        console.log('[FIRST AUDIO] Stale requestId, ignoring completion');
+        return;
+      }
+      
+      hasCompleted = true;
+      console.log('[FIRST AUDIO] Detected! New track audio playing:', {
+        requestId,
+        src: audio.src.split('/').pop(),
+        currentTime: audio.currentTime,
+      });
+      completePlaybackLoading(requestId);
+    };
+    
+    const checkFirstAudio = () => {
+      if (hasCompleted) return;
+      if (activeLoadingRequestIdRef.current !== requestId) {
+        // Request was superseded - stop checking
+        return;
+      }
+      
+      const newAudio = checkForNewAudioPlaying();
+      if (newAudio) {
+        completeDetection(newAudio);
+      }
+    };
+    
+    // Poll for first audio at 50ms intervals
+    const pollInterval = setInterval(checkFirstAudio, 50);
+    
+    // Also set up event listeners on all audio elements as a fallback
+    const handlePlaying = (event: Event) => {
+      if (hasCompleted) return;
+      if (activeLoadingRequestIdRef.current !== requestId) return;
+      
+      const audio = event.target as HTMLAudioElement;
+      
+      // Ignore if this is an old source
+      if (oldSources.has(audio.src)) return;
+      
+      if (audio.currentTime >= 0.05 && audio.readyState >= 2 && audio.volume > 0 && !audio.muted) {
+        completeDetection(audio);
+      } else {
+        // Wait up to 500ms for currentTime to advance
+        const timeout = setTimeout(() => {
+          if (hasCompleted) return;
+          if (activeLoadingRequestIdRef.current !== requestId) return;
+          if (oldSources.has(audio.src)) return;
+          
+          if (audio.currentTime >= 0.05 && audio.readyState >= 2 && !audio.paused && audio.volume > 0 && !audio.muted) {
+            completeDetection(audio);
+          }
+        }, 500);
+        playingEventTimeouts.push(timeout);
+      }
+    };
+    
+    // Attach listeners to all current audio elements
+    const audioElements = document.querySelectorAll('audio');
+    audioElements.forEach(audio => {
+      audio.addEventListener('playing', handlePlaying);
+    });
+    
+    // Also watch for new audio elements being added (MutationObserver)
+    const observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) {
+          if (node instanceof HTMLAudioElement) {
+            node.addEventListener('playing', handlePlaying);
+          }
+        }
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    
+    return () => {
+      clearInterval(pollInterval);
+      playingEventTimeouts.forEach(t => clearTimeout(t));
+      
+      // Remove listeners from all audio elements
+      const allAudioElements = document.querySelectorAll('audio');
+      allAudioElements.forEach(audio => {
+        audio.removeEventListener('playing', handlePlaying);
+      });
+      
+      observer.disconnect();
+      
+      // Clear detection ref if this cleanup is for the current detection
+      if (detectionRequestIdRef.current === requestId) {
+        detectionRequestIdRef.current = null;
+      }
+    };
+  }, [audioEngine, playbackLoadingState.status, completePlaybackLoading]);
+
   const toggleChannel = async (channel: AudioChannel, turnOn: boolean, fromPlayer: boolean = false) => {
     console.log('[DIAGNOSTIC] toggleChannel called:', {
-      channelName: channel.name,
+      channelName: channel.channel_name,
       turnOn,
       fromPlayer,
       currentIsPlaying: isPlaying,
@@ -1040,6 +1568,10 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       if (audioEngine?.unlockIOSAudio) {
         audioEngine.unlockIOSAudio();
       }
+      
+      // Start loading state immediately for instant visual feedback
+      const energyLevel = channelStates[channel.id]?.energyLevel || 'medium';
+      startPlaybackLoading('channel_switch', channel, energyLevel);
       
       // Clear playlistChannelId immediately to prevent stale track display during transition
       setPlaylistChannelId(null);
@@ -1134,6 +1666,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const setChannelEnergy = async (channelId: string, energyLevel: 'low' | 'medium' | 'high') => {
     const channel = channels.find(c => c.id === channelId);
     if (!channel) return;
+
+    // Start loading state immediately for instant visual feedback
+    startPlaybackLoading('energy_change', channel, energyLevel);
 
     if (user) {
       const { data: userPreference } = await supabase
@@ -1453,9 +1988,12 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         getIosInfo: () => iosInfo,
         // HLS metrics (only available on streaming engine)
         getHLSMetrics: () => audioMetrics?.hls ?? null,
+        // Playback loading state (for loading modal + TTFA testing)
+        getPlaybackLoadingState: () => playbackLoadingState,
+        getActiveLoadingRequestId: () => activeLoadingRequestIdRef.current,
       };
     }
-  }, [currentTrack, currentTrackIndex, isPlaying, playlist, activeChannel, channelStates, isAdminMode, audioMetrics, audioEngine, engineType, isStreamingEngine]);
+  }, [currentTrack, currentTrackIndex, isPlaying, playlist, activeChannel, channelStates, isAdminMode, audioMetrics, audioEngine, engineType, isStreamingEngine, playbackLoadingState]);
 
   return (
     <MusicPlayerContext.Provider
@@ -1476,6 +2014,8 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         playlistChannelId,
         engineType,
         isStreamingEngine,
+        playbackLoadingState,
+        dismissLoadingError,
         setSessionTimer,
         toggleChannel,
         setChannelEnergy,
