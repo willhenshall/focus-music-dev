@@ -12,6 +12,7 @@ import { UserDashboard } from './components/UserDashboard';
 import { AdminDashboard } from './components/AdminDashboard';
 import { SlotStrategyEditor } from './components/SlotStrategyEditor';
 import { AudioEngineDiagnostics } from './components/AudioEngineDiagnostics';
+import { PlaybackLoadingModal } from './components/PlaybackLoadingModal';
 import { supabase } from './lib/supabase';
 import { BrainType } from './lib/brainTypeCalculator';
 import { useMusicPlayer } from './contexts/MusicPlayerContext';
@@ -354,6 +355,8 @@ function App() {
       <MusicPlayerProvider>
         <ImageSetProvider>
           <AppContent />
+          {/* Global playback loading modal - shown across all views */}
+          <PlaybackLoadingModal />
         </ImageSetProvider>
       </MusicPlayerProvider>
     </AuthProvider>

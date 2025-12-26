@@ -1815,6 +1815,7 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
                           </div>
 
                           {/* Track Info - only show when playlist is ready for this channel */}
+                          {/* Note: Loading state is now handled by global PlaybackLoadingModal */}
                           <div className="text-center space-y-0.5 w-full min-w-0">
                             {playlistChannelId === activeChannel?.id ? (
                               <>
@@ -1827,11 +1828,12 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
                               </>
                             ) : (
                               <>
+                                {/* Minimal placeholder while loading modal is displayed */}
                                 <div className="text-xs text-slate-400 truncate px-2">
-                                  Loading...
+                                  &nbsp;
                                 </div>
-                                <div className="text-sm font-semibold text-slate-400 truncate px-2 animate-pulse">
-                                  Loading track...
+                                <div className="text-sm font-semibold text-slate-400 truncate px-2">
+                                  &nbsp;
                                 </div>
                               </>
                             )}
