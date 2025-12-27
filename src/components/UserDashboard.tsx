@@ -145,19 +145,41 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
 
   useEffect(() => {
     if (user?.id) {
-      // Load threshold first, then session count to ensure proper evaluation
-      const loadData = async () => {
+      // Consolidated user preferences loading - single getUserPreferences call
+      const loadAllUserPreferences = async () => {
+        // Load system preferences first
         await loadRecommendationVisibilityThreshold();
-        await loadSessionCount();
+        
+        // Load user preferences ONCE and extract all needed values
+        const prefs = await getUserPreferences(user.id);
+        
+        if (prefs) {
+          // Extract session count
+          const count = prefs.session_count || 0;
+          setSessionCount(count);
+          setShowRecommendedHighlight(count < recommendationVisibilitySessions);
+          
+          // Extract energy levels
+          if (prefs.channel_energy_levels) {
+            setSavedEnergyLevels(prefs.channel_energy_levels);
+          }
+          
+          // Extract view mode
+          if (prefs.channel_view_mode) {
+            setViewMode(prefs.channel_view_mode as ViewMode);
+          }
+          
+          // Extract auto-hide preference
+          if (prefs.auto_hide_tab_navigation !== null) {
+            setAutoHideNavEnabled(prefs.auto_hide_tab_navigation);
+          }
+        }
       };
 
-      loadData();
+      loadAllUserPreferences();
       loadRecommendedChannels();
       loadUserChannelOrder();
-      loadSavedEnergyLevels();
       loadBrainType();
-      loadViewMode();
-      loadAutoHidePreference();
 
       // Subscribe to quiz_results changes to refresh brain type when quiz is retaken
       const quizResultsSubscription = supabase
@@ -355,12 +377,9 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
     setShowRecommendedHighlight(count < recommendationVisibilitySessions);
   };
 
-  // Reload energy levels when channel states change (after setChannelEnergy is called)
-  useEffect(() => {
-    if (user?.id) {
-      loadSavedEnergyLevels();
-    }
-  }, [channelStates]);
+  // NOTE: Removed channelStates effect that was calling getUserPreferences repeatedly
+  // Energy levels are already loaded once on mount and cached - no need to reload on every channelStates change
+  // The UI already reflects changes via channelStates prop from MusicPlayerContext
 
   // Update highlight visibility when session count or threshold changes
   useEffect(() => {

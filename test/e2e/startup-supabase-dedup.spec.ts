@@ -72,29 +72,44 @@ test.describe("Startup Supabase Request Deduplication", () => {
     console.log('Supabase request counts:', requestCounts);
 
     // Each resource should be fetched at most once
-    expect(requestCounts.audio_channels).toBeLessThanOrEqual(1);
-    expect(requestCounts.system_preferences).toBeLessThanOrEqual(1);
-    expect(requestCounts.image_sets).toBeLessThanOrEqual(1);
-    // Note: user_profiles and user_preferences may be 0 if not logged in
-    // They are fetched only when user is authenticated
+    expect(requestCounts.audio_channels, 
+      'audio_channels should be fetched at most once'
+    ).toBeLessThanOrEqual(1);
+    
+    expect(requestCounts.system_preferences, 
+      'system_preferences should be fetched at most once'
+    ).toBeLessThanOrEqual(1);
+    
+    expect(requestCounts.image_sets, 
+      'image_sets should be fetched at most once'
+    ).toBeLessThanOrEqual(1);
+    
+    // CRITICAL: user_preferences should be fetched at most once (Part 3 fix)
+    // When logged in, this should be exactly 1
+    expect(requestCounts.user_preferences, 
+      'user_preferences should be fetched at most once per session'
+    ).toBeLessThanOrEqual(1);
+    
+    // user_profiles should also be at most once
+    expect(requestCounts.user_profiles, 
+      'user_profiles should be fetched at most once'
+    ).toBeLessThanOrEqual(1);
 
     // audio_tracks?select=* should NOT fire on initial load
     expect(requestCounts.audio_tracks_select_all).toBe(0);
   });
 
   test("audio_channels returns valid data after dedup", async ({ page }) => {
-    let channelsResponse: any = null;
-
-    // Intercept and capture the audio_channels response
-    await page.route(`**/*${SUPABASE_DOMAIN}**/rest/v1/audio_channels**`, async (route) => {
-      const response = await route.fetch();
-      const body = await response.json();
-      channelsResponse = body;
-      await route.fulfill({ response });
-    });
+    // Wait for the audio_channels response directly using waitForResponse
+    const channelsResponsePromise = page.waitForResponse(
+      (response) => response.url().includes('/rest/v1/audio_channels') && response.status() === 200
+    );
 
     await login(page);
-    await page.waitForLoadState('networkidle');
+
+    // Wait for the response to complete before asserting
+    const response = await channelsResponsePromise;
+    const channelsResponse = await response.json();
 
     // Verify channels data was received
     expect(channelsResponse).not.toBeNull();
@@ -120,9 +135,29 @@ test.describe("Startup Supabase Request Deduplication", () => {
     // Note: This may be null in production builds
     if (debugInfo) {
       console.log('Debug fetch counts:', debugInfo);
+      
       // Verify the structure exists
       expect(typeof debugInfo.audio_channels).toBe('number');
       expect(typeof debugInfo.system_preferences).toBe('number');
+      expect(typeof debugInfo.user_preferences).toBe('number');
+      
+      // CRITICAL: user_preferences should be at most 1 (Part 3 fix)
+      expect(debugInfo.user_preferences, 
+        'user_preferences debug counter should be at most 1'
+      ).toBeLessThanOrEqual(1);
+      
+      // All other counters should also be at most 1
+      expect(debugInfo.audio_channels, 
+        'audio_channels debug counter should be at most 1'
+      ).toBeLessThanOrEqual(1);
+      
+      expect(debugInfo.system_preferences, 
+        'system_preferences debug counter should be at most 1'
+      ).toBeLessThanOrEqual(1);
+      
+      expect(debugInfo.image_sets, 
+        'image_sets debug counter should be at most 1'
+      ).toBeLessThanOrEqual(1);
     }
   });
 });

@@ -1,4 +1,5 @@
-import { supabase, AudioChannel } from './supabase';
+import { AudioChannel } from './supabase';
+import { getChannelById } from './supabaseDataCache';
 
 export type EnergyLevel = 'low' | 'medium' | 'high';
 
@@ -26,13 +27,10 @@ export interface PlaylistSequenceRequest extends PlaylistRequest {
 export async function generatePlaylist(request: PlaylistRequest): Promise<PlaylistResponse> {
   const strategy = request.strategy || 'weighted';
 
-  const { data: channel, error } = await supabase
-    .from('audio_channels')
-    .select('*')
-    .eq('id', request.channelId)
-    .maybeSingle();
+  // Use cached channel lookup instead of per-ID Supabase query
+  const channel = await getChannelById(request.channelId);
 
-  if (error || !channel) {
+  if (!channel) {
     throw new Error('Channel not found');
   }
 
@@ -106,13 +104,10 @@ function shuffleArray<T>(array: T[]): T[] {
 export async function generatePlaylistSequence(request: PlaylistSequenceRequest): Promise<PlaylistResponse> {
   const strategy = request.strategy || 'weighted';
 
-  const { data: channel, error } = await supabase
-    .from('audio_channels')
-    .select('*')
-    .eq('id', request.channelId)
-    .maybeSingle();
+  // Use cached channel lookup instead of per-ID Supabase query
+  const channel = await getChannelById(request.channelId);
 
-  if (error || !channel) {
+  if (!channel) {
     throw new Error('Channel not found');
   }
 

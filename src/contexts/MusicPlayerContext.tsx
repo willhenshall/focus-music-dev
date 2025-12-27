@@ -14,7 +14,7 @@ import {
   getAudioChannels,
   getSystemPreferences,
   getUserPreferences,
-  getChannelFromCache,
+  getChannelById,
   invalidateAudioChannels,
   invalidateUserPreferences,
   updateSystemPreferencesCache,
@@ -712,18 +712,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     const userPreference = await getUserPreferences(user.id);
 
     if (userPreference?.last_channel_id) {
-      // Try to get channel from cache first (channels should already be loaded)
-      let channel = getChannelFromCache(userPreference.last_channel_id);
-      
-      // If not in cache, fetch from Supabase (fallback)
-      if (!channel) {
-        const { data } = await supabase
-          .from('audio_channels')
-          .select('*')
-          .eq('id', userPreference.last_channel_id)
-          .single();
-        channel = data;
-      }
+      // Use getChannelById which leverages the cached channel list
+      // This avoids per-ID Supabase queries - if cache is empty, it fetches ALL channels once
+      const channel = await getChannelById(userPreference.last_channel_id);
 
       if (channel) {
         const savedEnergyLevels = userPreference.channel_energy_levels || {};
@@ -770,8 +761,8 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
             onConflict: 'user_id'
           }
         );
-      // Invalidate user preferences cache after upsert
-      invalidateUserPreferences(user.id);
+      // NOTE: Don't invalidate cache here - this is a background upsert during startup
+      // The cached value is still valid for reading purposes
     }
   };
 
@@ -793,8 +784,8 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
           onConflict: 'user_id'
         }
       );
-    // Invalidate user preferences cache after upsert
-    invalidateUserPreferences(user.id);
+    // NOTE: Don't invalidate cache here - this is a background increment during startup
+    // The cache is still valid for reading purposes (session_count is display-only)
   };
 
   const saveLastChannel = async (channelId: string) => {
