@@ -32,6 +32,7 @@ import type {
   CircuitBreakerState,
   IAudioEngine,
 } from './types/audioEngine';
+import { trackHLSFallback, getBrowserInfo } from './analyticsService';
 
 // ============================================================================
 // CONFIGURATION
@@ -194,6 +195,9 @@ export class StreamingAudioEngine implements IAudioEngine {
 
   // [CELLBUG FIX] Track cellular connection status for more lenient handling
   private isCellular: boolean = false;
+  
+  // Request ID for tracking active load operations (prevents stale fallback attempts)
+  private activeLoadRequestId: string | null = null;
   
   // [CELLBUG FIX] Stall recovery for streaming engine (similar to EnterpriseAudioEngine)
   private stallRecoveryTimer: NodeJS.Timeout | null = null;
@@ -1154,6 +1158,10 @@ export class StreamingAudioEngine implements IAudioEngine {
       throw new Error('Circuit breaker is open - too many recent failures');
     }
     
+    // Generate unique request ID for this load operation
+    const requestId = `${trackId}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    this.activeLoadRequestId = requestId;
+    
     this.metrics.loadStartTime = performance.now();
     this.metrics.playbackState = 'loading';
     this.metrics.error = null;
@@ -1179,7 +1187,7 @@ export class StreamingAudioEngine implements IAudioEngine {
         : false;
       
       if (hasHLS && (this.useNativeHLS || this.useHLSJS)) {
-        await this.loadHLSTrack(trackId, filePath, metadata);
+        await this.loadHLSTrack(trackId, filePath, metadata, requestId);
       } else {
         await this.loadDirectTrack(trackId, filePath, metadata);
       }
@@ -1194,55 +1202,134 @@ export class StreamingAudioEngine implements IAudioEngine {
   private async loadHLSTrack(
     trackId: string,
     filePath: string,
-    metadata?: TrackMetadata
+    metadata?: TrackMetadata,
+    requestId?: string
   ): Promise<void> {
     console.log('[STREAMING ENGINE] Loading HLS track:', trackId);
     
     const hlsAdapter = this.storageAdapter as HLSStorageAdapter;
-    const hlsUrl = await hlsAdapter.getHLSUrl(trackId, `${trackId}/master.m3u8`);
     
-    this.metrics.currentTrackUrl = hlsUrl;
-    this.metrics.currentTrackId = trackId;
-    this.hlsMetrics.isHLSActive = true;
-    
-    if (this.useNativeHLS) {
-      // Native HLS (Safari/iOS) - just set the source
-      this.hlsMetrics.isNativeHLS = true;
-      this.nextAudio.src = hlsUrl;
-      await this.waitForCanPlay(this.nextAudio);
-    } else {
-      // hls.js - use the HLS instance for nextAudio, not currentAudio
-      this.hlsMetrics.isNativeHLS = false;
+    try {
+      const hlsUrl = await hlsAdapter.getHLSUrl(trackId, `${trackId}/master.m3u8`);
       
-      // Determine which HLS instance corresponds to nextAudio
-      const nextHls = this.nextAudio === this.primaryAudio ? this.primaryHls : this.secondaryHls;
+      this.metrics.currentTrackUrl = hlsUrl;
+      this.metrics.currentTrackId = trackId;
+      this.hlsMetrics.isHLSActive = true;
       
-      if (nextHls) {
-        // Re-attach HLS to the audio element if it was detached during cleanup
-        // @ts-ignore - checking internal HLS state
-        if (!nextHls.media) {
-          console.log('[STREAMING AUDIO] Re-attaching HLS to audio element');
-          nextHls.attachMedia(this.nextAudio);
-        }
+      if (this.useNativeHLS) {
+        // Native HLS (Safari/iOS) - just set the source
+        this.hlsMetrics.isNativeHLS = true;
+        this.nextAudio.src = hlsUrl;
+        await this.waitForCanPlay(this.nextAudio);
+      } else {
+        // hls.js - use the HLS instance for nextAudio, not currentAudio
+        this.hlsMetrics.isNativeHLS = false;
         
-        nextHls.loadSource(hlsUrl);
-        await this.waitForHLSReady(nextHls);
+        // Determine which HLS instance corresponds to nextAudio
+        const nextHls = this.nextAudio === this.primaryAudio ? this.primaryHls : this.secondaryHls;
+        
+        if (nextHls) {
+          // Re-attach HLS to the audio element if it was detached during cleanup
+          // @ts-ignore - checking internal HLS state
+          if (!nextHls.media) {
+            console.log('[STREAMING AUDIO] Re-attaching HLS to audio element');
+            nextHls.attachMedia(this.nextAudio);
+          }
+          
+          nextHls.loadSource(hlsUrl);
+          await this.waitForHLSReady(nextHls);
+        }
+      }
+      
+      if (metadata) {
+        this.updateMediaSessionMetadata(metadata);
+      }
+      
+      this.metrics.loadEndTime = performance.now();
+      this.metrics.loadDuration = this.metrics.loadEndTime - this.metrics.loadStartTime;
+      this.metrics.playbackState = 'ready';
+      
+      this.setupTrackEndHandler();
+      
+      if (this.onTrackLoad) {
+        this.onTrackLoad(trackId, this.nextAudio.duration);
+      }
+    } catch (hlsError) {
+      // HLS loading failed - attempt MP3 fallback
+      const errorMessage = hlsError instanceof Error ? hlsError.message : String(hlsError);
+      
+      // Guard: Check if this request is still active (user may have switched tracks)
+      if (requestId && this.activeLoadRequestId !== requestId) {
+        console.log('[STREAMING ENGINE] Stale HLS request, skipping MP3 fallback:', {
+          requestId,
+          activeRequestId: this.activeLoadRequestId,
+        });
+        throw new Error('HLS load cancelled - request superseded');
+      }
+      
+      // Determine error type for metrics
+      const errorType = this.categorizeHLSError(errorMessage);
+      
+      console.warn('[STREAMING ENGINE] HLS load failed, attempting MP3 fallback:', {
+        trackId,
+        error: errorMessage,
+        errorType,
+      });
+      
+      // Track the fallback event (lightweight, single event per fallback)
+      try {
+        const browserInfo = getBrowserInfo();
+        trackHLSFallback({
+          trackId,
+          channelId: undefined, // Channel context not available at engine level
+          errorType,
+          errorDetails: errorMessage,
+          browser: browserInfo.browser,
+          platform: browserInfo.platform,
+          isMobile: browserInfo.isMobile,
+        });
+      } catch {
+        // Never let analytics break playback
+      }
+      
+      // Attempt MP3 fallback
+      try {
+        // Reset HLS metrics since we're falling back to direct
+        this.hlsMetrics.isHLSActive = false;
+        
+        await this.loadDirectTrack(trackId, filePath, metadata);
+        console.log('[STREAMING ENGINE] MP3 fallback succeeded for track:', trackId);
+      } catch (mp3Error) {
+        // Both HLS and MP3 failed - throw meaningful error
+        const mp3ErrorMessage = mp3Error instanceof Error ? mp3Error.message : String(mp3Error);
+        throw new Error(
+          `Playback failed: HLS error (${errorMessage}), MP3 fallback error (${mp3ErrorMessage})`
+        );
       }
     }
-    
-    if (metadata) {
-      this.updateMediaSessionMetadata(metadata);
+  }
+
+  /**
+   * Categorize HLS error for metrics reporting.
+   */
+  private categorizeHLSError(errorMessage: string): string {
+    const lowerMsg = errorMessage.toLowerCase();
+    if (lowerMsg.includes('manifestloaderror') || lowerMsg.includes('manifest')) {
+      return 'manifestLoadError';
     }
-    
-    this.metrics.loadEndTime = performance.now();
-    this.metrics.loadDuration = this.metrics.loadEndTime - this.metrics.loadStartTime;
-    this.metrics.playbackState = 'ready';
-    
-    this.setupTrackEndHandler();
-    
-    if (this.onTrackLoad) {
-      this.onTrackLoad(trackId, this.nextAudio.duration);
+    if (lowerMsg.includes('levelloaderror') || lowerMsg.includes('level')) {
+      return 'levelLoadError';
     }
+    if (lowerMsg.includes('fragloaderror') || lowerMsg.includes('frag')) {
+      return 'fragLoadError';
+    }
+    if (lowerMsg.includes('timeout')) {
+      return 'timeout';
+    }
+    if (lowerMsg.includes('network')) {
+      return 'networkError';
+    }
+    return 'unknown';
   }
 
   private async loadDirectTrack(
