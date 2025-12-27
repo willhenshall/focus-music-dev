@@ -25,12 +25,21 @@ type UserPreferencesData = {
   channel_energy_levels: Record<string, string> | null;
   last_energy_level: string | null;
   session_count: number | null;
+  // Additional fields to prevent duplicate queries from UserDashboard
+  auto_hide_tab_navigation: boolean | null;
+  channel_view_mode: string | null;
 };
 
 type ImageSetBasic = {
   id: string;
   name?: string;
   set_type?: string;
+};
+
+type ImageSetDetails = {
+  id: string;
+  name: string;
+  set_type: string;
 };
 
 // ============================================================================
@@ -44,6 +53,8 @@ const cache = {
   activeChannelImageSet: null as CacheEntry<ImageSetBasic | null> | null,
   userProfiles: new Map<string, CacheEntry<UserProfile>>(),
   userPreferences: new Map<string, CacheEntry<UserPreferencesData | null>>(),
+  // Cache for image_sets by ID (prevents 4x duplicate calls for slideshow set details)
+  imageSetsById: new Map<string, CacheEntry<ImageSetDetails | null>>(),
 };
 
 // In-flight promises (to deduplicate concurrent requests)
@@ -53,6 +64,7 @@ const inFlight = {
   activeChannelImageSet: null as Promise<ImageSetBasic | null> | null,
   userProfiles: new Map<string, Promise<UserProfile | null>>(),
   userPreferences: new Map<string, Promise<UserPreferencesData | null>>(),
+  imageSetsById: new Map<string, Promise<ImageSetDetails | null>>(),
 };
 
 // ============================================================================
@@ -91,11 +103,17 @@ if (import.meta.env.DEV) {
  * Get all audio channels (cached)
  * Returns cached data if available, otherwise fetches from Supabase.
  * Concurrent calls share the same in-flight promise.
+ * @param forceRefresh - If true, bypasses cache and fetches fresh data (default: false)
  */
-export async function getAudioChannels(): Promise<AudioChannel[]> {
-  // Return cached data if available
-  if (cache.audioChannels) {
+export async function getAudioChannels(forceRefresh = false): Promise<AudioChannel[]> {
+  // Return cached data if available (unless forceRefresh)
+  if (!forceRefresh && cache.audioChannels) {
     return cache.audioChannels.data;
+  }
+
+  // If forceRefresh, clear any existing cache entry
+  if (forceRefresh) {
+    cache.audioChannels = null;
   }
 
   // Return in-flight promise if request is already pending
@@ -131,11 +149,17 @@ export async function getAudioChannels(): Promise<AudioChannel[]> {
 /**
  * Get system preferences (cached)
  * Fetches from system_preferences table where id = 1
+ * @param forceRefresh - If true, bypasses cache and fetches fresh data (default: false)
  */
-export async function getSystemPreferences(): Promise<SystemPreferences | null> {
-  // Return cached data if available
-  if (cache.systemPreferences) {
+export async function getSystemPreferences(forceRefresh = false): Promise<SystemPreferences | null> {
+  // Return cached data if available (unless forceRefresh)
+  if (!forceRefresh && cache.systemPreferences) {
     return cache.systemPreferences.data;
+  }
+
+  // If forceRefresh, clear any existing cache entry
+  if (forceRefresh) {
+    cache.systemPreferences = null;
   }
 
   // Return in-flight promise if request is already pending
@@ -171,11 +195,17 @@ export async function getSystemPreferences(): Promise<SystemPreferences | null> 
 /**
  * Get active channel image set (cached)
  * Fetches from image_sets where set_type = 'channel' and is_active_channel_set = true
+ * @param forceRefresh - If true, bypasses cache and fetches fresh data (default: false)
  */
-export async function getActiveChannelImageSet(): Promise<ImageSetBasic | null> {
-  // Return cached data if available
-  if (cache.activeChannelImageSet) {
+export async function getActiveChannelImageSet(forceRefresh = false): Promise<ImageSetBasic | null> {
+  // Return cached data if available (unless forceRefresh)
+  if (!forceRefresh && cache.activeChannelImageSet) {
     return cache.activeChannelImageSet.data;
+  }
+
+  // If forceRefresh, clear any existing cache entry
+  if (forceRefresh) {
+    cache.activeChannelImageSet = null;
   }
 
   // Return in-flight promise if request is already pending
@@ -210,14 +240,72 @@ export async function getActiveChannelImageSet(): Promise<ImageSetBasic | null> 
 }
 
 /**
+ * Get image set by ID (cached)
+ * Per-ID cache with in-flight deduplication.
+ * Used to prevent duplicate calls for slideshow set details.
+ * @param imageSetId - The image set ID to fetch
+ * @param forceRefresh - If true, bypasses cache and fetches fresh data (default: false)
+ */
+export async function getImageSetById(imageSetId: string, forceRefresh = false): Promise<ImageSetDetails | null> {
+  // Return cached data if available (unless forceRefresh)
+  const cached = cache.imageSetsById.get(imageSetId);
+  if (!forceRefresh && cached) {
+    return cached.data;
+  }
+
+  // If forceRefresh, clear any existing cache entry
+  if (forceRefresh) {
+    cache.imageSetsById.delete(imageSetId);
+  }
+
+  // Return in-flight promise if request is already pending
+  const pending = inFlight.imageSetsById.get(imageSetId);
+  if (pending) {
+    return pending;
+  }
+
+  // Create new request
+  const promise = (async () => {
+    if (import.meta.env.DEV) {
+      fetchCounts.image_sets++;
+    }
+
+    const { data, error } = await supabase
+      .from('image_sets')
+      .select('id, name, set_type')
+      .eq('id', imageSetId)
+      .maybeSingle();
+
+    if (error) {
+      console.error('[CACHE] Error fetching image_set by ID:', error);
+      throw error;
+    }
+
+    cache.imageSetsById.set(imageSetId, { data: data as ImageSetDetails | null, fetchedAt: Date.now() });
+    inFlight.imageSetsById.delete(imageSetId);
+    return data as ImageSetDetails | null;
+  })();
+
+  inFlight.imageSetsById.set(imageSetId, promise);
+  return promise;
+}
+
+/**
  * Get user profile by user ID (cached)
  * Per-user cache with in-flight deduplication.
+ * @param userId - The user ID to fetch profile for
+ * @param forceRefresh - If true, bypasses cache and fetches fresh data (default: false)
  */
-export async function getUserProfile(userId: string): Promise<UserProfile | null> {
-  // Return cached data if available
+export async function getUserProfile(userId: string, forceRefresh = false): Promise<UserProfile | null> {
+  // Return cached data if available (unless forceRefresh)
   const cached = cache.userProfiles.get(userId);
-  if (cached) {
+  if (!forceRefresh && cached) {
     return cached.data;
+  }
+
+  // If forceRefresh, clear any existing cache entry for this user
+  if (forceRefresh) {
+    cache.userProfiles.delete(userId);
   }
 
   // Return in-flight promise if request is already pending
@@ -256,13 +344,22 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
 
 /**
  * Get user preferences by user ID (cached)
- * Fetches minimal fields needed for startup: last_channel_id, channel_energy_levels, last_energy_level, session_count
+ * Fetches all fields needed for startup to prevent duplicate queries from UserDashboard.
+ * Fields: last_channel_id, channel_energy_levels, last_energy_level, session_count,
+ *         auto_hide_tab_navigation, channel_view_mode
+ * @param userId - The user ID to fetch preferences for
+ * @param forceRefresh - If true, bypasses cache and fetches fresh data (default: false)
  */
-export async function getUserPreferences(userId: string): Promise<UserPreferencesData | null> {
-  // Return cached data if available
+export async function getUserPreferences(userId: string, forceRefresh = false): Promise<UserPreferencesData | null> {
+  // Return cached data if available (unless forceRefresh)
   const cached = cache.userPreferences.get(userId);
-  if (cached) {
+  if (!forceRefresh && cached) {
     return cached.data;
+  }
+
+  // If forceRefresh, clear any existing cache entry for this user
+  if (forceRefresh) {
+    cache.userPreferences.delete(userId);
   }
 
   // Return in-flight promise if request is already pending
@@ -279,7 +376,7 @@ export async function getUserPreferences(userId: string): Promise<UserPreference
 
     const { data, error } = await supabase
       .from('user_preferences')
-      .select('last_channel_id, channel_energy_levels, last_energy_level, session_count')
+      .select('last_channel_id, channel_energy_levels, last_energy_level, session_count, auto_hide_tab_navigation, channel_view_mode')
       .eq('user_id', userId)
       .maybeSingle();
 
@@ -347,6 +444,14 @@ export function clearAllCaches(): void {
   cache.activeChannelImageSet = null;
   cache.userProfiles.clear();
   cache.userPreferences.clear();
+  cache.imageSetsById.clear();
+}
+
+/**
+ * Invalidate image set cache for a specific ID
+ */
+export function invalidateImageSetById(imageSetId: string): void {
+  cache.imageSetsById.delete(imageSetId);
 }
 
 /**
