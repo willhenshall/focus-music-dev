@@ -6,6 +6,18 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+// Mock analyticsService BEFORE importing StreamingAudioEngine
+// This prevents the supabase import from throwing "Missing Supabase environment variables"
+vi.mock('../analyticsService', () => ({
+  trackHLSFallback: vi.fn(),
+  getBrowserInfo: vi.fn(() => ({
+    browser: 'Chrome',
+    platform: 'macOS',
+    isMobile: false,
+  })),
+}));
+
 import { StreamingAudioEngine } from '../streamingAudioEngine';
 import Hls from 'hls.js';
 
