@@ -485,6 +485,8 @@ export function FocusProfileTabs({
                           src={channel.image_url}
                           alt={channel.channel_name}
                           className="w-full h-40 object-cover"
+                          loading="lazy"
+                          decoding="async"
                         />
                       ) : (
                         <div className="w-full h-40 bg-gradient-to-br from-slate-200 to-slate-300 flex items-center justify-center">

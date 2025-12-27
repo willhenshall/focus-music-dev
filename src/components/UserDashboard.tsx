@@ -1669,6 +1669,10 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
                       alt={channel.channel_name}
                       className="w-full h-full object-cover transition-transform group-hover:scale-105 block"
                       style={{ objectPosition: 'center' }}
+                      loading="lazy"
+                      decoding="async"
+                      width={viewMode === 'grid' ? 300 : 96}
+                      height={viewMode === 'grid' ? 110 : 64}
                     />
                   ) : (
                     <div className="w-full h-full bg-gradient-to-br from-slate-200 to-slate-300 flex items-center justify-center">

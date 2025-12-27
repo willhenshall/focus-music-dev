@@ -182,6 +182,8 @@ export function BrainTypeProfile({ primaryType, secondaryType, secondaryScore, c
                             src={channel.image_url}
                             alt={channel.channel_name}
                             className="w-full h-full object-cover"
+                            loading="lazy"
+                            decoding="async"
                           />
                         ) : (
                           <div className="w-full h-full bg-gradient-to-br from-slate-200 to-slate-300" />

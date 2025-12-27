@@ -1250,57 +1250,50 @@ describe('RitualOverlayBehavior', () => {
 
 /**
  * Tests for channel image preloading.
+ * 
+ * UPDATED: We now use single-image preloading for the modal (not bulk preloading).
+ * - Channel card images use native lazy loading (loading="lazy")
+ * - Only the selected channel image is preloaded when modal is triggered
  */
 describe('ChannelImagePreloading', () => {
-  class ImagePreloader {
+  class SingleImagePreloader {
     private preloadedUrls: Set<string> = new Set();
     private preloadCalls: string[] = [];
 
     getPreloadedUrls() { return this.preloadedUrls; }
     getPreloadCalls() { return this.preloadCalls; }
 
-    preloadChannelImages(channels: Array<{ image_url?: string | null; channel_name: string }>) {
-      channels.forEach(channel => {
-        const imageUrl = channel.image_url;
-        if (imageUrl && !this.preloadedUrls.has(imageUrl)) {
-          this.preloadedUrls.add(imageUrl);
-          this.preloadCalls.push(imageUrl);
-          // In real implementation: new Image().src = imageUrl;
-        }
-      });
+    /**
+     * Preload a single channel image for instant modal display.
+     * Called when user selects a channel (not on app startup).
+     */
+    preloadSingleChannelImage(imageUrl: string | null | undefined, channelName?: string) {
+      if (!imageUrl || this.preloadedUrls.has(imageUrl)) {
+        return;
+      }
+      this.preloadedUrls.add(imageUrl);
+      this.preloadCalls.push(imageUrl);
+      // In real implementation: new Image().src = imageUrl;
     }
   }
 
-  let preloader: ImagePreloader;
+  let preloader: SingleImagePreloader;
 
   beforeEach(() => {
-    preloader = new ImagePreloader();
+    preloader = new SingleImagePreloader();
   });
 
-  it('should preload channel images on first call', () => {
-    const channels = [
-      { image_url: 'https://example.com/img1.jpg', channel_name: 'Channel 1' },
-      { image_url: 'https://example.com/img2.jpg', channel_name: 'Channel 2' },
-    ];
+  it('should preload single image when channel is selected', () => {
+    preloader.preloadSingleChannelImage('https://example.com/img1.jpg', 'Channel 1');
 
-    preloader.preloadChannelImages(channels);
-
-    expect(preloader.getPreloadCalls()).toHaveLength(2);
+    expect(preloader.getPreloadCalls()).toHaveLength(1);
     expect(preloader.getPreloadedUrls().has('https://example.com/img1.jpg')).toBe(true);
-    expect(preloader.getPreloadedUrls().has('https://example.com/img2.jpg')).toBe(true);
   });
 
   it('should NOT preload same image twice', () => {
-    const channels1 = [
-      { image_url: 'https://example.com/img1.jpg', channel_name: 'Channel 1' },
-    ];
-    const channels2 = [
-      { image_url: 'https://example.com/img1.jpg', channel_name: 'Channel 1' }, // Same URL
-      { image_url: 'https://example.com/img2.jpg', channel_name: 'Channel 2' }, // New URL
-    ];
-
-    preloader.preloadChannelImages(channels1);
-    preloader.preloadChannelImages(channels2);
+    preloader.preloadSingleChannelImage('https://example.com/img1.jpg', 'Channel 1');
+    preloader.preloadSingleChannelImage('https://example.com/img1.jpg', 'Channel 1'); // Same URL
+    preloader.preloadSingleChannelImage('https://example.com/img2.jpg', 'Channel 2'); // Different URL
 
     // Should only have 2 calls total (img1 once, img2 once)
     expect(preloader.getPreloadCalls()).toHaveLength(2);
@@ -1310,22 +1303,26 @@ describe('ChannelImagePreloading', () => {
     ]);
   });
 
-  it('should skip channels without image_url', () => {
-    const channels = [
-      { image_url: 'https://example.com/img1.jpg', channel_name: 'Channel 1' },
-      { image_url: null, channel_name: 'Channel 2' },
-      { image_url: undefined, channel_name: 'Channel 3' },
-    ];
-
-    preloader.preloadChannelImages(channels);
+  it('should skip null/undefined image URLs', () => {
+    preloader.preloadSingleChannelImage(null, 'Channel 1');
+    preloader.preloadSingleChannelImage(undefined, 'Channel 2');
+    preloader.preloadSingleChannelImage('https://example.com/img1.jpg', 'Channel 3');
 
     expect(preloader.getPreloadCalls()).toHaveLength(1);
     expect(preloader.getPreloadCalls()[0]).toBe('https://example.com/img1.jpg');
   });
 
-  it('should handle empty channel list', () => {
-    preloader.preloadChannelImages([]);
-    expect(preloader.getPreloadCalls()).toHaveLength(0);
+  it('should track preloaded URLs to prevent duplicate loads', () => {
+    // Simulate user switching between channels multiple times
+    preloader.preloadSingleChannelImage('https://example.com/img1.jpg', 'Channel 1');
+    preloader.preloadSingleChannelImage('https://example.com/img2.jpg', 'Channel 2');
+    preloader.preloadSingleChannelImage('https://example.com/img1.jpg', 'Channel 1'); // Back to ch1
+    preloader.preloadSingleChannelImage('https://example.com/img3.jpg', 'Channel 3');
+    preloader.preloadSingleChannelImage('https://example.com/img2.jpg', 'Channel 2'); // Back to ch2
+
+    // Should only have 3 unique calls
+    expect(preloader.getPreloadCalls()).toHaveLength(3);
+    expect(preloader.getPreloadedUrls().size).toBe(3);
   });
 });
 
