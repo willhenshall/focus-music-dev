@@ -641,20 +641,21 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   });
 
   /**
-   * Preload channel images to ensure instant display in loading modal.
+   * Preload a single channel image to ensure instant display in loading modal.
    * Uses Image() constructor to trigger browser cache.
+   * Only called when a specific channel is selected (not on startup).
    */
-  const preloadChannelImages = useCallback((channelList: AudioChannel[]) => {
-    channelList.forEach(channel => {
-      const imageUrl = channel.image_url;
-      if (imageUrl && !preloadedChannelImagesRef.current.has(imageUrl)) {
-        preloadedChannelImagesRef.current.add(imageUrl);
-        const img = new Image();
-        img.src = imageUrl;
-        // No need to handle onload/onerror - we just want browser to cache it
-        console.log('[IMAGE PRELOAD] Preloading channel image:', channel.channel_name);
-      }
-    });
+  const preloadSingleChannelImage = useCallback((imageUrl: string | undefined | null, channelName?: string) => {
+    if (!imageUrl || preloadedChannelImagesRef.current.has(imageUrl)) {
+      return;
+    }
+    preloadedChannelImagesRef.current.add(imageUrl);
+    const img = new Image();
+    img.src = imageUrl;
+    // No need to handle onload/onerror - we just want browser to cache it
+    if (import.meta.env.DEV) {
+      console.log('[IMAGE PRELOAD] Preloading single channel image for modal:', channelName || 'unknown');
+    }
   }, []);
 
   const loadChannels = async () => {
@@ -665,8 +666,10 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     if (data) {
       setChannels(data);
 
-      // Preload all channel images for instant modal display
-      preloadChannelImages(data);
+      // DEV-ONLY: Log that we're NOT preloading all images on startup
+      if (import.meta.env.DEV) {
+        console.log('[IMAGE PRELOAD] Channels loaded:', data.length, '- NOT preloading all images (lazy loading)');
+      }
 
       // If there's an active channel, update it with fresh data
       if (activeChannel) {
@@ -1585,6 +1588,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         audioEngine.unlockIOSAudio();
       }
       
+      // Preload only this channel's image for instant modal display (not all channels)
+      preloadSingleChannelImage(channelImageUrl || channel.image_url, channel.channel_name);
+      
       // Start loading state immediately for instant visual feedback
       const energyLevel = channelStates[channel.id]?.energyLevel || 'medium';
       startPlaybackLoading('channel_switch', channel, energyLevel, undefined, channelImageUrl);
@@ -1683,6 +1689,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     const channel = channels.find(c => c.id === channelId);
     if (!channel) return;
 
+    // Preload only this channel's image for instant modal display
+    preloadSingleChannelImage(channelImageUrl || channel.image_url, channel.channel_name);
+    
     // Start loading state immediately for instant visual feedback
     // Pass channelImageUrl to preserve the current channel image during energy changes
     startPlaybackLoading('energy_change', channel, energyLevel, undefined, channelImageUrl);
