@@ -505,10 +505,20 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         }
 
         // Auto-play if should be playing or if autoPlay was requested
+        console.log('[loadAndPlay] Auto-play check:', {
+          isPlaying,
+          shouldAutoPlayRef: shouldAutoPlayRef.current,
+          willAutoPlay: isPlaying || shouldAutoPlayRef.current,
+          trackId,
+        });
         if (isPlaying || shouldAutoPlayRef.current) {
+          console.log('[loadAndPlay] Starting playback...');
           shouldAutoPlayRef.current = false;
           setIsPlaying(true, 'loadAndPlay: auto-play after track load');
           await audioEngine.play();
+          console.log('[loadAndPlay] Playback started successfully');
+        } else {
+          console.log('[loadAndPlay] NOT auto-playing - neither isPlaying nor shouldAutoPlayRef are true');
         }
       } catch (error) {
         console.log('[AUDIO][CELLBUG][CONTEXT] Track load failed:', error);
@@ -1700,6 +1710,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
           // Set state first
           setChannelStates(newStates);
           setActiveChannel(channel);
+          // [RESUME BUG FIX] Set shouldAutoPlayRef to ensure loadAndPlay starts playback
+          // (isPlaying might be stale in loadAndPlay's closure)
+          shouldAutoPlayRef.current = true;
           setIsPlaying(true, 'toggleChannel: restart_session mode');
 
           // Then manually generate playlist with forceRestart=true to skip playback state query
@@ -1711,6 +1724,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       // Set state AFTER cleanup is complete (for non-restart_session modes)
       setChannelStates(newStates);
       setActiveChannel(channel);
+      // [RESUME BUG FIX] Set shouldAutoPlayRef to ensure loadAndPlay starts playback
+      // (isPlaying might be stale in loadAndPlay's closure)
+      shouldAutoPlayRef.current = true;
       setIsPlaying(true, 'toggleChannel: turning ON channel');
     } else {
       // Turn off the channel
@@ -1787,6 +1803,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
       setChannelStates(newStates);
       setActiveChannel(channel);
+      // [RESUME BUG FIX] Set shouldAutoPlayRef to ensure loadAndPlay starts playback
+      // (isPlaying might be stale in loadAndPlay's closure)
+      shouldAutoPlayRef.current = true;
       setIsPlaying(true, 'setChannelEnergy: switching to different channel');
 
       if (user) {

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { loginAsUser } from './helpers/auth';
+import { loginAsUser } from '../../tests/helpers/auth';
 
 /**
  * Regression test for: Resume-After-Pause Playback Bug
@@ -67,33 +67,60 @@ async function waitForAudioPlaying(page: any, timeout = 15000): Promise<boolean>
 
 /**
  * Helper: Verify audio currentTime is advancing (true playback, not just unpaused)
+ * Retries a few times to handle track transitions and crossfades
  */
-async function verifyAudioTimeAdvances(page: any, duration = 2000): Promise<boolean> {
-  const startState = await page.evaluate(() => {
-    const audios = document.querySelectorAll('audio');
-    for (const audio of audios) {
-      if (audio.src) {
-        return { currentTime: audio.currentTime, paused: audio.paused };
+async function verifyAudioTimeAdvances(page: any, duration = 2000, maxRetries = 3): Promise<boolean> {
+  for (let retry = 0; retry < maxRetries; retry++) {
+    const startState = await page.evaluate(() => {
+      const audios = document.querySelectorAll('audio');
+      for (const audio of audios) {
+        if (audio.src && !audio.paused && audio.currentTime > 0.1) {
+          return { currentTime: audio.currentTime, paused: audio.paused, src: audio.src.split('/').pop() };
+        }
       }
-    }
-    return { currentTime: 0, paused: true };
-  });
-  
-  await page.waitForTimeout(duration);
-  
-  const endState = await page.evaluate(() => {
-    const audios = document.querySelectorAll('audio');
-    for (const audio of audios) {
-      if (audio.src) {
-        return { currentTime: audio.currentTime, paused: audio.paused };
+      // Fallback: return first audio with src
+      for (const audio of audios) {
+        if (audio.src) {
+          return { currentTime: audio.currentTime, paused: audio.paused, src: audio.src.split('/').pop() };
+        }
       }
+      return { currentTime: 0, paused: true, src: null };
+    });
+    
+    await page.waitForTimeout(duration);
+    
+    const endState = await page.evaluate(() => {
+      const audios = document.querySelectorAll('audio');
+      for (const audio of audios) {
+        if (audio.src && !audio.paused && audio.currentTime > 0.1) {
+          return { currentTime: audio.currentTime, paused: audio.paused, src: audio.src.split('/').pop() };
+        }
+      }
+      // Fallback: return first audio with src
+      for (const audio of audios) {
+        if (audio.src) {
+          return { currentTime: audio.currentTime, paused: audio.paused, src: audio.src.split('/').pop() };
+        }
+      }
+      return { currentTime: 0, paused: true, src: null };
+    });
+    
+    const advanced = endState.currentTime > startState.currentTime + 0.5;
+    console.log(`Audio time: ${startState.currentTime} -> ${endState.currentTime}, advanced: ${advanced}`);
+    
+    if (advanced) {
+      return true;
     }
-    return { currentTime: 0, paused: true };
-  });
+    
+    // If time went backwards (new track loaded), that's actually a success indication
+    if (endState.currentTime > 0.1 && startState.currentTime > endState.currentTime) {
+      console.log('Track switched (time reset), verifying new track is playing...');
+      // Wait a bit and check if new track is advancing
+      await page.waitForTimeout(500);
+    }
+  }
   
-  const advanced = endState.currentTime > startState.currentTime + 0.5;
-  console.log(`Audio time: ${startState.currentTime} -> ${endState.currentTime}, advanced: ${advanced}`);
-  return advanced;
+  return false;
 }
 test.describe('Resume After Pause Playback', () => {
   test('should play new channel after pausing and switching channels', async ({ page }) => {
@@ -211,14 +238,18 @@ test.describe('Resume After Pause Playback', () => {
       console.log('Selected LOW energy level on second channel');
     }
     
-    // Wait for loading modal (should appear)
+    // Wait for loading modal to appear and dismiss (indicates track loaded successfully)
     console.log('Waiting for loading modal on second channel...');
-    await page.waitForTimeout(2000);
+    const loadingModal = page.locator('[data-testid="playback-loading-modal"]');
+    const modalAppeared = await loadingModal.isVisible({ timeout: 5000 }).catch(() => false);
+    console.log('Loading modal appeared:', modalAppeared);
     
-    // CRITICAL: Wait for audio to actually start playing
-    // This is the key assertion - audio must be unpaused AND currentTime advancing
-    console.log('Waiting for audio playback after channel switch...');
-    const isPlaying = await waitForAudioPlaying(page, 20000);
+    if (modalAppeared) {
+      // Wait for loading modal to dismiss OR error to appear
+      console.log('Waiting for loading modal to dismiss...');
+      await loadingModal.waitFor({ state: 'hidden', timeout: 30000 }).catch(() => null);
+      console.log('Loading modal dismissed');
+    }
     
     // Check for error state - this is what the bug would show
     const errorModal = page.locator('text=No track available');
@@ -228,6 +259,13 @@ test.describe('Resume After Pause Playback', () => {
       console.error('❌ BUG REPRODUCED: "No Track Available" error appeared!');
       throw new Error('Resume after pause bug: "No Track Available" error shown when switching channels while paused');
     }
+    
+    // Give audio time to stabilize after loading modal dismisses
+    await page.waitForTimeout(500);
+    
+    // CRITICAL: Wait for audio to actually start playing
+    console.log('Waiting for audio playback after channel switch...');
+    const isPlaying = await waitForAudioPlaying(page, 20000);
     
     // Verify audio is playing
     expect(isPlaying).toBe(true);
@@ -334,12 +372,26 @@ test.describe('Resume After Pause Playback', () => {
       await highButton.click();
     }
     
-    // Wait for audio to actually start playing
-    const isPlaying = await waitForAudioPlaying(page, 20000);
+    // Wait for the loading modal to appear and then dismiss (shows new track loaded)
+    const loadingModal = page.locator('[data-testid="playback-loading-modal"]');
+    const modalAppeared = await loadingModal.isVisible({ timeout: 5000 }).catch(() => false);
+    console.log('Loading modal appeared:', modalAppeared);
+    
+    if (modalAppeared) {
+      // Wait for loading modal to dismiss (indicates successful load)
+      await loadingModal.waitFor({ state: 'hidden', timeout: 30000 });
+      console.log('Loading modal dismissed');
+    }
+    
+    // Give the new track time to start playing
+    await page.waitForTimeout(1000);
     
     // Check for errors
     const hasError = await page.locator('text=No track available').isVisible({ timeout: 1000 }).catch(() => false);
     expect(hasError).toBe(false);
+    
+    // Wait for audio to actually start playing
+    const isPlaying = await waitForAudioPlaying(page, 20000);
     
     // Verify playing
     expect(isPlaying).toBe(true);
