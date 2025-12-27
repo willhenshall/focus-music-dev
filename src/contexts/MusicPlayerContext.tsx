@@ -204,8 +204,21 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
   // Track which channel the current playlist belongs to (prevents stale track display during channel switch)
   const [playlistChannelId, setPlaylistChannelId] = useState<string | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
+  const [isPlayingRaw, setIsPlayingRaw] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  
+  // [RESUME BUG DEBUG] Wrapper for setIsPlaying that logs every call with reason
+  const setIsPlaying = useCallback((value: boolean, reason?: string) => {
+    const stack = new Error().stack?.split('\n').slice(2, 5).join('\n') || '';
+    console.log('[setIsPlaying]', value, {
+      reason: reason || 'no reason provided',
+      stack,
+    });
+    setIsPlayingRaw(value);
+  }, []);
+  
+  // Alias for reading state
+  const isPlaying = isPlayingRaw;
   const [currentPlayEventId, setCurrentPlayEventId] = useState<string | null>(null);
   const [audioEngine, setAudioEngine] = useState<IAudioEngine | null>(null);
   const [audioMetrics, setAudioMetrics] = useState<AudioMetrics | null>(null);
@@ -494,7 +507,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         // Auto-play if should be playing or if autoPlay was requested
         if (isPlaying || shouldAutoPlayRef.current) {
           shouldAutoPlayRef.current = false;
-          setIsPlaying(true);
+          setIsPlaying(true, 'loadAndPlay: auto-play after track load');
           await audioEngine.play();
         }
       } catch (error) {
@@ -557,26 +570,41 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!audioEngine) return;
     if (isLoadingTrack.current) {
+      console.log('[SYNC EFFECT] Skipping - track is loading');
       return;
     }
 
     const currentlyPlaying = audioEngine.isPlaying();
     const hasBuffer = audioEngine.getDuration() > 0;
+    
+    // [RESUME BUG DEBUG] Check if we're in a loading state - if so, we should NOT resume the old track
+    const isInLoadingState = playbackLoadingState.status === 'loading';
+    const hasActiveLoadingRequest = !!activeLoadingRequestIdRef.current;
 
     console.log('[SYNC EFFECT] Checking sync:', {
       isPlaying,
       currentlyPlaying,
-      hasBuffer
+      hasBuffer,
+      isInLoadingState,
+      hasActiveLoadingRequest,
+      playlistLength: playlist.length,
+      currentTrackIndex,
     });
 
+    // [RESUME BUG FIX] Don't resume old track if we're in a loading state (switching channels/energy)
+    // The new track will be loaded and played by loadAndPlay effect
     if (isPlaying && !currentlyPlaying && hasBuffer) {
+      if (isInLoadingState || hasActiveLoadingRequest) {
+        console.log('[SYNC EFFECT] BLOCKING play() - in loading state, waiting for new track');
+        return; // Don't resume old track - wait for new track to load
+      }
       console.log('[SYNC EFFECT] Calling audioEngine.play()');
       audioEngine.play();
     } else if (!isPlaying && currentlyPlaying) {
       console.log('[SYNC EFFECT] Calling audioEngine.pause()');
       audioEngine.pause();
     }
-  }, [isPlaying, audioEngine]);
+  }, [isPlaying, audioEngine, playbackLoadingState.status, playlist.length, currentTrackIndex]);
 
   const handleTrackEnd = async () => {
     if (isAdminMode) return;
@@ -1171,13 +1199,22 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     
     // Capture current audio sources BEFORE starting load
     // These are the "old" sources that should be ignored during detection
+    // [RESUME BUG FIX] Include ALL audio sources (even paused ones) to prevent
+    // the resumed old track from falsely triggering "first audio" detection
     const currentAudioSources = new Set<string>();
     document.querySelectorAll('audio').forEach(audio => {
-      if (audio.src && !audio.paused) {
+      if (audio.src) {
+        // Include all audio sources, not just playing ones
+        // This prevents the old track from triggering detection when it resumes
         currentAudioSources.add(audio.src);
       }
     });
     oldAudioSourcesRef.current = currentAudioSources;
+    
+    console.log('[LOADING MODAL] Captured old audio sources:', {
+      count: currentAudioSources.size,
+      sources: Array.from(currentAudioSources).map(s => s.split('/').pop()),
+    });
     
     // Resolve image URL: prefer explicit channelImageUrl, fall back to channel.image_url
     const resolvedImageUrl = channelImageUrl || channel.image_url || undefined;
@@ -1663,7 +1700,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
           // Set state first
           setChannelStates(newStates);
           setActiveChannel(channel);
-          setIsPlaying(true);
+          setIsPlaying(true, 'toggleChannel: restart_session mode');
 
           // Then manually generate playlist with forceRestart=true to skip playback state query
           await generateNewPlaylist(energyLevel, true);
@@ -1674,11 +1711,11 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       // Set state AFTER cleanup is complete (for non-restart_session modes)
       setChannelStates(newStates);
       setActiveChannel(channel);
-      setIsPlaying(true);
+      setIsPlaying(true, 'toggleChannel: turning ON channel');
     } else {
       // Turn off the channel
       if (activeChannel?.id === channel.id) {
-        setIsPlaying(false);
+        setIsPlaying(false, 'toggleChannel: turning OFF channel');
         if (audioEngine) {
           // Use pause for smoother UX, but channel is still marked as off
           audioEngine.pause();
@@ -1750,7 +1787,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
       setChannelStates(newStates);
       setActiveChannel(channel);
-      setIsPlaying(true);
+      setIsPlaying(true, 'setChannelEnergy: switching to different channel');
 
       if (user) {
         await saveLastChannel(channelId);
@@ -1769,9 +1806,15 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         if (data) setCurrentSessionId(data.id);
       }
     } else {
-
-      // Store the current playing state
-      const wasPlaying = isPlaying;
+      // Same channel, just changing energy level
+      // [RESUME BUG FIX] User explicitly clicked energy button = intent to play
+      // Always set shouldAutoPlayRef and isPlaying, regardless of previous pause state
+      console.log('[setChannelEnergy] Same channel energy change:', {
+        channelId,
+        energyLevel,
+        wasPlaying: isPlaying,
+        reason: 'User clicked energy button - will start playback',
+      });
       
       // Clear playlistChannelId to prevent stale track display during energy level change
       setPlaylistChannelId(null);
@@ -1785,10 +1828,10 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         // Clear last loaded track so new playlist starts fresh
         lastLoadedTrackId.current = null;
 
-        // If currently playing, ensure the new track will auto-play
-        if (wasPlaying) {
-          shouldAutoPlayRef.current = true;
-        }
+        // [RESUME BUG FIX] Always auto-play when user explicitly clicks energy button
+        // This handles the case where user was paused but wants to switch energy levels
+        shouldAutoPlayRef.current = true;
+        setIsPlaying(true, 'setChannelEnergy: user clicked energy button (resume fix)');
 
         // Pass energy level directly to avoid stale state
         // Note: tracks are fetched on-demand, no need to wait for allTracks
@@ -1803,7 +1846,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       setIsAdminMode(true);
       setAdminPreviewTrack(track);
       if (!autoPlay) {
-        setIsPlaying(false);
+        setIsPlaying(false, 'setAdminPreview: preview without autoPlay');
         if (audioEngine) {
           audioEngine.stop();
         }
@@ -1812,7 +1855,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       shouldAutoPlayRef.current = false;
       setIsAdminMode(false);
       setAdminPreviewTrack(null);
-      setIsPlaying(false);
+      setIsPlaying(false, 'setAdminPreview: clearing preview');
       if (audioEngine) {
         audioEngine.stop();
       }
@@ -1825,12 +1868,12 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     if (isPlaying) {
       // Currently playing, so pause
       audioEngine.pause();
-      setIsPlaying(false);
+      setIsPlaying(false, 'toggleAdminPlayback: pause');
     } else {
       // Currently paused, so play
       try {
         await audioEngine.play();
-        setIsPlaying(true);
+        setIsPlaying(true, 'toggleAdminPlayback: play');
       } catch (error) {
       }
     }
@@ -1942,7 +1985,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     
     // Update state - will trigger engine recreation via useEffect
     setEngineType(type);
-    setIsPlaying(false);
+    setIsPlaying(false, 'switchEngine: engine type changed');
     lastLoadedTrackId.current = null;
     
     // Note: The useEffect will create the new engine on next render
