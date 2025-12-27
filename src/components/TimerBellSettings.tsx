@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings, Check, AlertCircle } from 'lucide-react';
+import { Settings, Check, AlertCircle, Clock } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { BellSoundLibrary } from './BellSoundLibrary';
@@ -8,9 +8,13 @@ import { getSystemPreferences, invalidateSystemPreferences } from '../lib/supaba
 export function TimerBellSettings() {
   const { user } = useAuth();
   const [recommendationSessions, setRecommendationSessions] = useState<number>(5);
+  const [loadingModalDuration, setLoadingModalDuration] = useState<number>(4000);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSavingModal, setIsSavingModal] = useState(false);
   const [saveStatus, setSaveStatus] = useState<string>('');
+  const [saveStatusModal, setSaveStatusModal] = useState<string>('');
   const [error, setError] = useState<string>('');
+  const [errorModal, setErrorModal] = useState<string>('');
 
   useEffect(() => {
     loadRecommendationSettings();
@@ -18,6 +22,7 @@ export function TimerBellSettings() {
 
   const loadRecommendationSettings = async () => {
     setError('');
+    setErrorModal('');
 
     try {
       // Use cached system preferences to avoid duplicate Supabase calls
@@ -25,6 +30,7 @@ export function TimerBellSettings() {
 
       if (data) {
         setRecommendationSessions(data.recommendation_visibility_sessions || 5);
+        setLoadingModalDuration(data.playback_loading_modal_duration_ms ?? 4000);
       }
     } catch (err) {
       setError('Failed to load settings. Please refresh the page.');
@@ -59,6 +65,39 @@ export function TimerBellSettings() {
       setError('Failed to save settings. Please try again.');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleSaveLoadingModalDuration = async () => {
+    if (!user?.id) return;
+
+    setIsSavingModal(true);
+    setSaveStatusModal('');
+    setErrorModal('');
+
+    try {
+      // Note: Omitting updated_by to avoid Supabase schema cache issues
+      // The updated_at timestamp is sufficient for tracking changes
+      const { error: updateError } = await supabase
+        .from('system_preferences')
+        .update({
+          playback_loading_modal_duration_ms: loadingModalDuration,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', 1);
+
+      if (updateError) throw updateError;
+
+      // Invalidate cache after mutation
+      invalidateSystemPreferences();
+
+      setSaveStatusModal('Settings saved successfully!');
+      setTimeout(() => setSaveStatusModal(''), 3000);
+    } catch (err: any) {
+      console.error('[TimerBellSettings] Failed to save loading modal duration:', err);
+      setErrorModal(`Failed to save settings: ${err?.message || 'Unknown error'}`);
+    } finally {
+      setIsSavingModal(false);
     }
   };
 
@@ -147,6 +186,92 @@ export function TimerBellSettings() {
             <div className="text-sm p-3 rounded-md bg-red-50 text-red-700 flex items-center gap-2">
               <AlertCircle size={16} />
               {error}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Track Loading Modal Duration */}
+      <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6">
+        <div className="flex items-start gap-3 mb-4">
+          <Clock size={24} className="text-slate-700 flex-shrink-0" />
+          <div className="flex-1">
+            <h3 className="text-lg font-semibold text-slate-900 mb-1">
+              Track Loading Modal Duration
+            </h3>
+            <p className="text-sm text-slate-600">
+              How long the loading modal stays visible before auto-dismiss when changing channels or energy levels.
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">
+              Duration (milliseconds)
+            </label>
+            <div className="flex items-center gap-4">
+              <input
+                type="number"
+                min="500"
+                max="10000"
+                step="100"
+                value={loadingModalDuration}
+                onChange={(e) => setLoadingModalDuration(Math.max(500, Math.min(10000, parseInt(e.target.value) || 4000)))}
+                className="w-32 px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+              <span className="text-sm text-slate-600">
+                ms (500-10000, default: 4000)
+              </span>
+            </div>
+          </div>
+
+          <div className="bg-slate-50 rounded-lg p-4 space-y-2">
+            <p className="text-sm font-medium text-slate-900">How it works:</p>
+            <ul className="text-sm text-slate-600 space-y-1 ml-4 list-disc">
+              <li>When a user switches channels or changes energy level, a loading modal appears</li>
+              <li>The modal stays visible for at least this duration (even if audio loads faster)</li>
+              <li>This creates a calm "ritual" transition for focus (meditation-app style)</li>
+              <li>Lower values = faster transitions, Higher values = more calming effect</li>
+            </ul>
+          </div>
+
+          <div className="flex items-center gap-2 text-sm text-slate-600 bg-blue-50 p-3 rounded-md border border-blue-100">
+            <AlertCircle size={16} className="text-blue-600 flex-shrink-0" />
+            <span>
+              Currently set to <strong>{loadingModalDuration}ms</strong> ({(loadingModalDuration / 1000).toFixed(1)} seconds)
+            </span>
+          </div>
+
+          <button
+            onClick={handleSaveLoadingModalDuration}
+            disabled={isSavingModal}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            {isSavingModal ? (
+              <>
+                <div className="inline-block animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
+                Saving...
+              </>
+            ) : (
+              <>
+                <Check size={18} />
+                Save Settings
+              </>
+            )}
+          </button>
+
+          {saveStatusModal && (
+            <div className="text-sm p-3 rounded-md bg-green-50 text-green-700 flex items-center gap-2">
+              <Check size={16} />
+              {saveStatusModal}
+            </div>
+          )}
+
+          {errorModal && (
+            <div className="text-sm p-3 rounded-md bg-red-50 text-red-700 flex items-center gap-2">
+              <AlertCircle size={16} />
+              {errorModal}
             </div>
           )}
         </div>

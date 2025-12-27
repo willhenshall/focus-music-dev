@@ -126,6 +126,8 @@ export type SystemPreferences = {
   // Continuous playback code removed here
   recommendation_visibility_sessions: number;
   timer_bell_url: string | null;
+  // Loading modal duration in milliseconds (min: 500, max: 10000, default: 4000)
+  playback_loading_modal_duration_ms: number;
   updated_at: string;
   updated_by: string | null;
 };
