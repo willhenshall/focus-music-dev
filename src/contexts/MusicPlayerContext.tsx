@@ -35,10 +35,11 @@ export type PlaybackLoadingTrigger = 'channel_switch' | 'energy_change' | 'initi
 export type PlaybackLoadingStatus = 'idle' | 'loading' | 'playing' | 'error';
 
 /**
- * Minimum time (ms) the loading modal must remain visible.
+ * Default minimum time (ms) the loading modal must remain visible.
  * Creates a calm "ritual" transition for focus (meditation-app style).
+ * This value can be overridden via system_preferences.playback_loading_modal_duration_ms
  */
-const MIN_MODAL_VISIBLE_MS = 4000;
+const DEFAULT_MODAL_VISIBLE_MS = 4000;
 
 /**
  * Maximum time (ms) to wait for new audio before showing error state.
@@ -1299,7 +1300,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
   /**
    * Complete the loading state when first audio is detected.
-   * Implements minimum visible duration (MIN_VISIBLE_MS) for anti-flicker.
+   * Implements minimum visible duration (configurable via system preferences) for anti-flicker.
    * Only fires once per requestId to prevent duplicate TTFA events.
    */
   const completePlaybackLoading = useCallback((requestId: string) => {
@@ -1315,6 +1316,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       return;
     }
     
+    // Get configurable modal duration from system preferences (fallback to default)
+    const minVisibleMs = systemPreferences?.playback_loading_modal_duration_ms ?? DEFAULT_MODAL_VISIBLE_MS;
+    
     const now = Date.now();
     const startedAt = playbackLoadingState.startedAt || now;
     const elapsedMs = now - startedAt;
@@ -1324,7 +1328,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       requestId,
       ttfaMs,
       elapsedMs,
-      minVisibleMs: MIN_MODAL_VISIBLE_MS,
+      minVisibleMs,
       channelName: playbackLoadingState.channelName,
     });
     
@@ -1346,13 +1350,13 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     }));
     
     // Check if minimum visible time has elapsed
-    if (elapsedMs >= MIN_MODAL_VISIBLE_MS) {
+    if (elapsedMs >= minVisibleMs) {
       // Dismiss immediately - enough time has passed
       console.log('[LOADING MODAL] Min visible time met, dismissing immediately');
       dismissModal(requestId, ttfaMs);
     } else {
       // Schedule delayed dismiss for remaining time
-      const remainingMs = MIN_MODAL_VISIBLE_MS - elapsedMs;
+      const remainingMs = minVisibleMs - elapsedMs;
       console.log('[LOADING MODAL] Scheduling delayed dismiss in', remainingMs, 'ms');
       
       // Clear any existing min visible timeout
@@ -1371,7 +1375,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         minVisibleTimeoutRef.current = null;
       }, remainingMs);
     }
-  }, [playbackLoadingState, dismissModal]);
+  }, [playbackLoadingState, dismissModal, systemPreferences]);
 
   /**
    * Update track info in loading state (called when track metadata becomes available).
