@@ -147,6 +147,24 @@ export async function getAudioChannels(forceRefresh = false): Promise<AudioChann
 }
 
 /**
+ * Get a single audio channel by ID (uses cached channel list)
+ * This avoids per-ID Supabase queries by leveraging the full channel list cache.
+ * If channels aren't cached yet, fetches all channels first (one request), then returns the matching one.
+ * @param channelId - The channel ID to look up
+ * @param forceRefresh - If true, refreshes the full channel list first (default: false)
+ */
+export async function getChannelById(channelId: string, forceRefresh = false): Promise<AudioChannel | null> {
+  // If we have cached channels, find the one we need
+  if (!forceRefresh && cache.audioChannels) {
+    return cache.audioChannels.data.find(ch => ch.id === channelId) || null;
+  }
+
+  // Otherwise, fetch all channels (this populates the cache)
+  const channels = await getAudioChannels(forceRefresh);
+  return channels.find(ch => ch.id === channelId) || null;
+}
+
+/**
  * Get system preferences (cached)
  * Fetches from system_preferences table where id = 1
  * @param forceRefresh - If true, bypasses cache and fetches fresh data (default: false)

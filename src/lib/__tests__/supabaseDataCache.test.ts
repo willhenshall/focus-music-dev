@@ -96,6 +96,7 @@ vi.mock('../supabase', () => ({
 // Import after mocking
 import {
   getAudioChannels,
+  getChannelById,
   getSystemPreferences,
   getActiveChannelImageSet,
   getImageSetById,
@@ -219,6 +220,79 @@ describe('supabaseDataCache', () => {
     });
   });
 
+  describe('getChannelById', () => {
+    it('returns channel from cached channels without triggering new fetch', async () => {
+      mockData.audio_channels = [
+        { id: 'ch1', channel_name: 'Focus' },
+        { id: 'ch2', channel_name: 'Chill' },
+        { id: 'ch3', channel_name: 'Energy' },
+      ];
+
+      // First, populate the cache by calling getAudioChannels
+      await getAudioChannels();
+      expect(getDebugFetchCounts().audio_channels).toBe(1);
+
+      // Now call getChannelById - should NOT trigger new fetch
+      const channel = await getChannelById('ch2');
+      expect(channel).toEqual({ id: 'ch2', channel_name: 'Chill' });
+      expect(getDebugFetchCounts().audio_channels).toBe(1); // Still 1!
+    });
+
+    it('fetches all channels if cache is empty, then returns the one requested', async () => {
+      mockData.audio_channels = [
+        { id: 'ch1', channel_name: 'Focus' },
+        { id: 'ch2', channel_name: 'Chill' },
+      ];
+
+      // Cache is empty - getChannelById should trigger full channel fetch
+      const channel = await getChannelById('ch1');
+      expect(channel).toEqual({ id: 'ch1', channel_name: 'Focus' });
+      expect(getDebugFetchCounts().audio_channels).toBe(1);
+
+      // Subsequent calls should not trigger new fetch
+      const channel2 = await getChannelById('ch2');
+      expect(channel2).toEqual({ id: 'ch2', channel_name: 'Chill' });
+      expect(getDebugFetchCounts().audio_channels).toBe(1); // Still 1
+    });
+
+    it('returns null for non-existent channel ID', async () => {
+      mockData.audio_channels = [{ id: 'ch1', channel_name: 'Focus' }];
+
+      const channel = await getChannelById('non-existent-id');
+      expect(channel).toBeNull();
+    });
+
+    it('10 concurrent getChannelById calls trigger only 1 Supabase request', async () => {
+      mockData.audio_channels = [
+        { id: 'ch1', channel_name: 'Channel 1' },
+        { id: 'ch2', channel_name: 'Channel 2' },
+      ];
+
+      // Fire 10 parallel requests for different channels
+      const promises = [
+        getChannelById('ch1'),
+        getChannelById('ch2'),
+        getChannelById('ch1'),
+        getChannelById('ch2'),
+        getChannelById('ch1'),
+        getChannelById('ch2'),
+        getChannelById('ch1'),
+        getChannelById('ch2'),
+        getChannelById('ch1'),
+        getChannelById('ch2'),
+      ];
+
+      const results = await Promise.all(promises);
+      
+      // All should resolve correctly
+      expect(results[0]).toEqual({ id: 'ch1', channel_name: 'Channel 1' });
+      expect(results[1]).toEqual({ id: 'ch2', channel_name: 'Channel 2' });
+
+      // Only ONE fetch should have been made
+      expect(getDebugFetchCounts().audio_channels).toBe(1);
+    });
+  });
+
   describe('getSystemPreferences', () => {
     it('returns cached data on second call without new fetch', async () => {
       mockData.system_preferences = { id: 1, show_audio_diagnostics: true };
@@ -329,6 +403,45 @@ describe('supabaseDataCache', () => {
       const result3 = await getUserPreferences('user1', true);
       expect(result3?.session_count).toBe(10);
       expect(getDebugFetchCounts().user_preferences).toBe(2);
+    });
+
+    it('10 concurrent callers trigger exactly 1 Supabase request (in-flight deduplication)', async () => {
+      mockData.user_preferences = {
+        'user1': { last_channel_id: 'ch1', session_count: 42 },
+      };
+
+      // Fire 10 concurrent requests for the SAME user
+      const promises = Array(10).fill(null).map(() => getUserPreferences('user1'));
+
+      // All should resolve to the same data
+      const results = await Promise.all(promises);
+      
+      results.forEach((result, i) => {
+        expect(result?.session_count).toBe(42);
+        expect(result?.last_channel_id).toBe('ch1');
+      });
+
+      // CRITICAL: Only ONE Supabase request should have been made
+      expect(getDebugFetchCounts().user_preferences).toBe(1);
+    });
+
+    it('sequential callers after cache is populated trigger 0 new requests', async () => {
+      mockData.user_preferences = {
+        'user1': { last_channel_id: 'ch1', session_count: 5 },
+      };
+
+      // First call - populates cache
+      await getUserPreferences('user1');
+      expect(getDebugFetchCounts().user_preferences).toBe(1);
+
+      // 10 sequential calls - all should hit cache
+      for (let i = 0; i < 10; i++) {
+        const result = await getUserPreferences('user1');
+        expect(result?.session_count).toBe(5);
+      }
+
+      // Still only 1 Supabase request
+      expect(getDebugFetchCounts().user_preferences).toBe(1);
     });
   });
 
