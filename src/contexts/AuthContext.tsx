@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, ReactNode } from 'react
 import { User, Session } from '@supabase/supabase-js';
 import { supabase, UserProfile } from '../lib/supabase';
 import { saveQuizResultsToDatabase } from '../lib/quizStorage';
+import { getUserProfile, updateUserProfileCache, invalidateUserProfile, clearAllCaches } from '../lib/supabaseDataCache';
 
 type AuthContextType = {
   user: User | null;
@@ -24,33 +25,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const fetchProfile = async (userId: string) => {
     try {
-      const { data, error } = await supabase
-        .from('user_profiles')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
-
-      if (error) {
-        console.error('Error fetching profile:', error);
-        throw error;
-      }
+      // Use cached user profile
+      const data = await getUserProfile(userId);
 
       if (data) {
         setProfile(data);
+        // Also update the cache
+        updateUserProfileCache(userId, data);
       } else {
         // No profile found - this might be a race condition during signup
-        // Try one more time after a short delay
+        // Invalidate cache and try one more time after a short delay
+        invalidateUserProfile(userId);
         await new Promise(resolve => setTimeout(resolve, 500));
-        const { data: retryData, error: retryError } = await supabase
-          .from('user_profiles')
-          .select('*')
-          .eq('id', userId)
-          .maybeSingle();
+        const retryData = await getUserProfile(userId);
 
         if (retryData) {
           setProfile(retryData);
+          updateUserProfileCache(userId, retryData);
         } else {
-          console.error('Profile not found after retry:', retryError);
+          console.error('Profile not found after retry');
           // Sign out to prevent stuck state
           await supabase.auth.signOut();
           setUser(null);
@@ -168,6 +161,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = async () => {
     await supabase.auth.signOut();
     setProfile(null);
+    // Clear all caches on logout
+    clearAllCaches();
   };
 
   return (

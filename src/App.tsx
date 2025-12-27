@@ -13,9 +13,9 @@ import { AdminDashboard } from './components/AdminDashboard';
 import { SlotStrategyEditor } from './components/SlotStrategyEditor';
 import { AudioEngineDiagnostics } from './components/AudioEngineDiagnostics';
 import { PlaybackLoadingModal } from './components/PlaybackLoadingModal';
-import { supabase } from './lib/supabase';
 import { BrainType } from './lib/brainTypeCalculator';
 import { useMusicPlayer } from './contexts/MusicPlayerContext';
+import { getSystemPreferences } from './lib/supabaseDataCache';
 
 function AppContent() {
   const { user, profile, loading, signOut } = useAuth();
@@ -103,11 +103,8 @@ function AppContent() {
   }, [profile]);
 
   const loadAudioPreferences = async () => {
-    const { data } = await supabase
-      .from('system_preferences')
-      .select('show_audio_diagnostics')
-      .eq('id', 1)
-      .maybeSingle();
+    // Use cached system preferences (shared with MusicPlayerContext)
+    const data = await getSystemPreferences();
 
     if (data) {
       // Check if diagnostics modal state is persisted in sessionStorage (survives tab switches)
