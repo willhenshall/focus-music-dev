@@ -294,11 +294,20 @@ export type TrackEndCallback = () => void;
 export type DiagnosticsUpdateCallback = (metrics: AudioMetrics) => void;
 export type ErrorCallback = (error: Error, category: ErrorCategory, canRetry: boolean) => void;
 
+/**
+ * Performance mark callback for TTFA instrumentation.
+ * Called when key events occur in the audio loading pipeline.
+ */
+export type PerfMarkType = 'sourceSelectedAt' | 'manifestParsedAt';
+export type PerfMarkCallback = (markType: PerfMarkType, audioType: 'hls' | 'mp3') => void;
+
 export interface AudioEngineCallbacks {
   onTrackLoad?: TrackLoadCallback;
   onTrackEnd?: TrackEndCallback;
   onDiagnosticsUpdate?: DiagnosticsUpdateCallback;
   onError?: ErrorCallback;
+  /** Optional: called for TTFA performance marks during loading */
+  onPerfMark?: PerfMarkCallback;
 }
 
 // ============================================================================
