@@ -10,6 +10,15 @@ import { createStorageAdapter } from '../lib/storageAdapters';
 import { selectNextTrackCached, getCurrentSlotIndex } from '../lib/slotStrategyEngine';
 import { getIosWebkitInfo } from '../lib/iosWebkitDetection';
 import type { IAudioEngine, AudioMetrics as StreamingAudioMetrics } from '../lib/types/audioEngine';
+import {
+  getAudioChannels,
+  getSystemPreferences,
+  getUserPreferences,
+  getChannelFromCache,
+  invalidateAudioChannels,
+  invalidateUserPreferences,
+  updateSystemPreferencesCache,
+} from '../lib/supabaseDataCache';
 
 // ============================================================================
 // PLAYBACK LOADING STATE MACHINE (for loading modal + TTFA)
@@ -289,7 +298,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
           table: 'audio_channels'
         },
         () => {
-          loadChannels();
+          // Invalidate cache and reload channels
+          invalidateAudioChannels();
+          loadChannelsFromCache();
         }
       )
       .subscribe();
@@ -303,19 +314,14 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
   // Load system preferences and subscribe to changes
   useEffect(() => {
-    const loadSystemPreferences = async () => {
-      const { data } = await supabase
-        .from('system_preferences')
-        .select('*')
-        .eq('id', 1)
-        .maybeSingle();
-
+    const loadSystemPreferencesFromCache = async () => {
+      const data = await getSystemPreferences();
       if (data) {
-        setSystemPreferences(data as SystemPreferences);
+        setSystemPreferences(data);
       }
     };
 
-    loadSystemPreferences();
+    loadSystemPreferencesFromCache();
 
     // Subscribe to realtime changes
     const preferencesSubscription = supabase
@@ -328,7 +334,10 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
           table: 'system_preferences'
         },
         (payload) => {
-          setSystemPreferences(payload.new as SystemPreferences);
+          const prefs = payload.new as SystemPreferences;
+          setSystemPreferences(prefs);
+          // Update cache with realtime data
+          updateSystemPreferencesCache(prefs);
         }
       )
       .subscribe();
@@ -341,8 +350,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   // Initialize app data (separate from audio engine creation)
   useEffect(() => {
     const initializeApp = async () => {
-      await loadChannels();
-      await loadTracks();
+      await loadChannelsFromCache();
+      // NOTE: We do NOT load all tracks at startup anymore.
+      // Track data is fetched on-demand when needed (e.g., when loading a channel's playlist).
       if (user) {
         await loadLastChannel();
         await incrementSessionCount();
@@ -360,10 +370,11 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     audioEngine.setCrossfadeEnabled(!isAdminMode);
   }, [audioEngine, isAdminMode]);
 
-  // Generate new playlist when channel or tracks change
+  // Generate new playlist when channel changes or is turned on
   // Note: Energy level changes are handled separately via setChannelEnergy
+  // Note: We do NOT depend on allTracks - tracks are fetched on-demand by generateNewPlaylist
   useEffect(() => {
-    if (activeChannel && allTracks.length > 0 && user) {
+    if (activeChannel && user) {
       const channelState = channelStates[activeChannel.id];
 
       // Don't generate playlist if channel isn't turned on yet
@@ -372,7 +383,6 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       }
 
       const energyLevel = channelState?.energyLevel || 'medium';
-      const key = `${activeChannel.id}-${energyLevel}`;
 
       // Only generate if we haven't generated for this channel+energy combo in the last 1 second
       const lastGen = lastPlaylistGeneration.current;
@@ -384,7 +394,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       lastPlaylistGeneration.current = { channelId: activeChannel.id, energyLevel, timestamp: now };
       generateNewPlaylist();
     }
-  }, [activeChannel, allTracks, user, channelStates]);
+  }, [activeChannel, user, channelStates]);
 
   // Load and play track when index changes or admin preview changes
   useEffect(() => {
@@ -658,11 +668,8 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const loadChannels = async () => {
-    const { data } = await supabase
-      .from('audio_channels')
-      .select('*')
-      .order('display_order');
+  const loadChannelsFromCache = async () => {
+    const data = await getAudioChannels();
     if (data) {
       setChannels(data);
 
@@ -681,6 +688,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Alias for external API compatibility
+  const loadChannels = loadChannelsFromCache;
+
   const loadTracks = async () => {
     const { data, error } = await supabase
       .from('audio_tracks')
@@ -698,18 +708,22 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const loadLastChannel = async () => {
     if (!user) return;
 
-    const { data: userPreference } = await supabase
-      .from('user_preferences')
-      .select('last_channel_id, channel_energy_levels, last_energy_level')
-      .eq('user_id', user.id)
-      .maybeSingle();
+    // Use cached user preferences
+    const userPreference = await getUserPreferences(user.id);
 
     if (userPreference?.last_channel_id) {
-      const { data: channel } = await supabase
-        .from('audio_channels')
-        .select('*')
-        .eq('id', userPreference.last_channel_id)
-        .single();
+      // Try to get channel from cache first (channels should already be loaded)
+      let channel = getChannelFromCache(userPreference.last_channel_id);
+      
+      // If not in cache, fetch from Supabase (fallback)
+      if (!channel) {
+        const { data } = await supabase
+          .from('audio_channels')
+          .select('*')
+          .eq('id', userPreference.last_channel_id)
+          .single();
+        channel = data;
+      }
 
       if (channel) {
         const savedEnergyLevels = userPreference.channel_energy_levels || {};
@@ -727,12 +741,13 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    const { data: firstChannel } = await supabase
-      .from('audio_channels')
-      .select('*')
-      .order('channel_number')
-      .limit(1)
-      .maybeSingle();
+    // Fallback: get first channel from cache
+    const cachedChannels = await getAudioChannels();
+    const firstChannel = cachedChannels.length > 0 
+      ? cachedChannels.reduce((min, ch) => 
+          (ch.channel_number || 999) < (min.channel_number || 999) ? ch : min
+        )
+      : null;
 
     if (firstChannel) {
       setActiveChannel(firstChannel);
@@ -755,18 +770,16 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
             onConflict: 'user_id'
           }
         );
+      // Invalidate user preferences cache after upsert
+      invalidateUserPreferences(user.id);
     }
   };
 
   const incrementSessionCount = async () => {
     if (!user) return;
 
-    const { data: currentPrefs } = await supabase
-      .from('user_preferences')
-      .select('session_count')
-      .eq('user_id', user.id)
-      .maybeSingle();
-
+    // Use cached user preferences (already fetched in loadLastChannel)
+    const currentPrefs = await getUserPreferences(user.id);
     const currentCount = currentPrefs?.session_count || 0;
 
     await supabase
@@ -780,6 +793,8 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
           onConflict: 'user_id'
         }
       );
+    // Invalidate user preferences cache after upsert
+    invalidateUserPreferences(user.id);
   };
 
   const saveLastChannel = async (channelId: string) => {
@@ -1771,7 +1786,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         [channelId]: { ...prev[channelId], energyLevel }
       }));
 
-      if (allTracks.length > 0 && user) {
+      if (user) {
         // Clear last loaded track so new playlist starts fresh
         lastLoadedTrackId.current = null;
 
@@ -1781,6 +1796,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         }
 
         // Pass energy level directly to avoid stale state
+        // Note: tracks are fetched on-demand, no need to wait for allTracks
         await generateNewPlaylist(energyLevel);
       }
     }

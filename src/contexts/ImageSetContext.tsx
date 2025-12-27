@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
+import { getActiveChannelImageSet, invalidateActiveChannelImageSet } from '../lib/supabaseDataCache';
 
 type ImageSet = {
   id: string;
@@ -109,12 +110,8 @@ export function ImageSetProvider({ children }: { children: ReactNode }) {
   };
 
   const loadActiveChannelSet = async () => {
-    const { data } = await supabase
-      .from('image_sets')
-      .select('id')
-      .eq('set_type', 'channel')
-      .eq('is_active_channel_set', true)
-      .maybeSingle();
+    // Use cached active channel image set
+    const data = await getActiveChannelImageSet();
 
     if (data) {
       setActiveChannelSetId(data.id);
@@ -159,6 +156,8 @@ export function ImageSetProvider({ children }: { children: ReactNode }) {
   };
 
   const refreshImageSets = async () => {
+    // Invalidate cache and reload
+    invalidateActiveChannelImageSet();
     await loadActiveChannelSet();
     if (selectedSlideshowSetId) {
       await loadSlideshowImages(selectedSlideshowSetId);
