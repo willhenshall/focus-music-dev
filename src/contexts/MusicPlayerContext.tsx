@@ -167,8 +167,8 @@ type MusicPlayerContextType = {
   playbackLoadingState: PlaybackLoadingState;
   dismissLoadingError: () => void;
   setSessionTimer: (active: boolean, remaining: number) => void;
-  toggleChannel: (channel: AudioChannel, turnOn: boolean, fromPlayer?: boolean) => Promise<void>;
-  setChannelEnergy: (channelId: string, energyLevel: 'low' | 'medium' | 'high') => void;
+  toggleChannel: (channel: AudioChannel, turnOn: boolean, fromPlayer?: boolean, channelImageUrl?: string) => Promise<void>;
+  setChannelEnergy: (channelId: string, energyLevel: 'low' | 'medium' | 'high', channelImageUrl?: string) => void;
   loadChannels: () => Promise<void>;
   setAdminPreview: (track: AudioTrack | null, autoPlay?: boolean) => void;
   toggleAdminPlayback: () => void;
@@ -1144,12 +1144,17 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   /**
    * Start the loading state machine for a new playback request.
    * Returns the requestId for this loading attempt.
+   * 
+   * @param channelImageUrl - The resolved channel image URL from the call site.
+   *   Pass this explicitly rather than relying on channel.image_url, because
+   *   newer channels may have images in image_set_images but not in the channel record.
    */
   const startPlaybackLoading = useCallback((
     triggerType: PlaybackLoadingTrigger,
     channel: AudioChannel,
     energyLevel: 'low' | 'medium' | 'high',
-    trackInfo?: { trackId?: string; trackName?: string; artistName?: string }
+    trackInfo?: { trackId?: string; trackName?: string; artistName?: string },
+    channelImageUrl?: string
   ): string => {
     const requestId = generateRequestId();
     const now = Date.now();
@@ -1163,6 +1168,17 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       }
     });
     oldAudioSourcesRef.current = currentAudioSources;
+    
+    // Resolve image URL: prefer explicit channelImageUrl, fall back to channel.image_url
+    const resolvedImageUrl = channelImageUrl || channel.image_url || undefined;
+    
+    // DEV-ONLY: Log whether channel image URL is present
+    if (import.meta.env.DEV) {
+      console.log('[LOADING MODAL] channelImageUrl present:', !!resolvedImageUrl, {
+        explicit: !!channelImageUrl,
+        fromChannel: !!channel.image_url,
+      });
+    }
     
     console.log('[LOADING MODAL] Starting loading state:', {
       requestId,
@@ -1193,7 +1209,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       requestId,
       channelId: channel.id,
       channelName: channel.channel_name,
-      channelImageUrl: channel.image_url || undefined,
+      channelImageUrl: resolvedImageUrl,
       energyLevel,
       trackId: trackInfo?.trackId,
       trackName: trackInfo?.trackName || 'Loading track...',
@@ -1552,7 +1568,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     };
   }, [audioEngine, playbackLoadingState.status, completePlaybackLoading]);
 
-  const toggleChannel = async (channel: AudioChannel, turnOn: boolean, fromPlayer: boolean = false) => {
+  const toggleChannel = async (channel: AudioChannel, turnOn: boolean, fromPlayer: boolean = false, channelImageUrl?: string) => {
     console.log('[DIAGNOSTIC] toggleChannel called:', {
       channelName: channel.channel_name,
       turnOn,
@@ -1571,7 +1587,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       
       // Start loading state immediately for instant visual feedback
       const energyLevel = channelStates[channel.id]?.energyLevel || 'medium';
-      startPlaybackLoading('channel_switch', channel, energyLevel);
+      startPlaybackLoading('channel_switch', channel, energyLevel, undefined, channelImageUrl);
       
       // Clear playlistChannelId immediately to prevent stale track display during transition
       setPlaylistChannelId(null);
@@ -1663,12 +1679,13 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const setChannelEnergy = async (channelId: string, energyLevel: 'low' | 'medium' | 'high') => {
+  const setChannelEnergy = async (channelId: string, energyLevel: 'low' | 'medium' | 'high', channelImageUrl?: string) => {
     const channel = channels.find(c => c.id === channelId);
     if (!channel) return;
 
     // Start loading state immediately for instant visual feedback
-    startPlaybackLoading('energy_change', channel, energyLevel);
+    // Pass channelImageUrl to preserve the current channel image during energy changes
+    startPlaybackLoading('energy_change', channel, energyLevel, undefined, channelImageUrl);
 
     if (user) {
       const { data: userPreference } = await supabase

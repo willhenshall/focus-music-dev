@@ -467,8 +467,10 @@ export function FocusProfileTabs({
                     onClick={() => {
                       if (!isActive) {
                         const energyLevel = channel.recommendedEnergyLevel || 'medium';
-                        setChannelEnergy(channel.id, energyLevel);
-                        toggleChannel(channel, true);
+                        // channel.image_url is already resolved via getChannelImage in topChannels mapping
+                        const imageUrl = channel.image_url || undefined;
+                        setChannelEnergy(channel.id, energyLevel, imageUrl);
+                        toggleChannel(channel, true, false, imageUrl);
                       }
                     }}
                     className={`w-full text-left bg-white rounded-xl shadow-md overflow-hidden transition-all hover:shadow-xl hover:-translate-y-1 ${

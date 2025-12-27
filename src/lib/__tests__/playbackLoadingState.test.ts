@@ -1537,3 +1537,152 @@ describe('DetectionRunPrevention', () => {
   });
 });
 
+/**
+ * Tests for channelImageUrl resolution in loading state.
+ * The loading modal should show the channel image if available.
+ * 
+ * Priority order:
+ * 1. Explicit channelImageUrl parameter (from call site using getChannelImage)
+ * 2. channel.image_url fallback
+ * 3. undefined (placeholder shown)
+ */
+describe('ChannelImageUrl Resolution', () => {
+  type MockChannel = {
+    id: string;
+    channel_name: string;
+    image_url: string | null;
+  };
+
+  type LoadingState = {
+    channelImageUrl?: string;
+    channelName?: string;
+  };
+
+  /**
+   * Simulates the resolution logic in startPlaybackLoading:
+   * const resolvedImageUrl = channelImageUrl || channel.image_url || undefined;
+   */
+  function resolveChannelImageUrl(
+    channel: MockChannel,
+    explicitImageUrl?: string
+  ): string | undefined {
+    return explicitImageUrl || channel.image_url || undefined;
+  }
+
+  /**
+   * Simulates modal rendering logic:
+   * If channelImageUrl exists → render <img>
+   * Else → render placeholder
+   */
+  function shouldRenderImage(state: LoadingState): boolean {
+    return !!state.channelImageUrl;
+  }
+
+  describe('Resolution Priority', () => {
+    it('should use explicit channelImageUrl when provided', () => {
+      const channel: MockChannel = {
+        id: 'ch-1',
+        channel_name: 'A.D.D.J.',
+        image_url: null, // Newer channel has no image_url in channel record
+      };
+      const explicitImageUrl = 'https://cdn.example.com/images/addj.jpg'; // From image_set_images
+
+      const result = resolveChannelImageUrl(channel, explicitImageUrl);
+      expect(result).toBe(explicitImageUrl);
+    });
+
+    it('should fall back to channel.image_url when no explicit URL provided', () => {
+      const channel: MockChannel = {
+        id: 'ch-2',
+        channel_name: 'Focus Flow',
+        image_url: 'https://cdn.example.com/channels/focus-flow.jpg',
+      };
+
+      const result = resolveChannelImageUrl(channel, undefined);
+      expect(result).toBe(channel.image_url);
+    });
+
+    it('should return undefined when neither explicit nor channel.image_url exists', () => {
+      const channel: MockChannel = {
+        id: 'ch-3',
+        channel_name: 'New Channel',
+        image_url: null,
+      };
+
+      const result = resolveChannelImageUrl(channel, undefined);
+      expect(result).toBeUndefined();
+    });
+
+    it('should prefer explicit URL over channel.image_url', () => {
+      const channel: MockChannel = {
+        id: 'ch-4',
+        channel_name: 'UltraDrone',
+        image_url: 'https://cdn.example.com/old-image.jpg', // Old image in channel record
+      };
+      const explicitImageUrl = 'https://cdn.example.com/new-image.jpg'; // New image from image set
+
+      const result = resolveChannelImageUrl(channel, explicitImageUrl);
+      expect(result).toBe(explicitImageUrl);
+    });
+  });
+
+  describe('Modal Rendering', () => {
+    it('should render image when channelImageUrl is present in loading state', () => {
+      const state: LoadingState = {
+        channelName: 'A.D.D.J.',
+        channelImageUrl: 'https://cdn.example.com/images/addj.jpg',
+      };
+
+      expect(shouldRenderImage(state)).toBe(true);
+    });
+
+    it('should render placeholder when channelImageUrl is undefined', () => {
+      const state: LoadingState = {
+        channelName: 'New Channel',
+        channelImageUrl: undefined,
+      };
+
+      expect(shouldRenderImage(state)).toBe(false);
+    });
+
+    it('should render placeholder when channelImageUrl is empty string', () => {
+      const state: LoadingState = {
+        channelName: 'Test Channel',
+        channelImageUrl: '',
+      };
+
+      expect(shouldRenderImage(state)).toBe(false);
+    });
+  });
+
+  describe('Newer Channels (A.D.D.J., UltraDrone)', () => {
+    it('should correctly resolve image for A.D.D.J. channel with image set', () => {
+      // Simulates: channel record has no image_url, but image_set_images has the URL
+      const addjChannel: MockChannel = {
+        id: 'addj-uuid',
+        channel_name: 'A.D.D.J.',
+        image_url: null,
+      };
+      const imageFromImageSet = 'https://cdn.example.com/image-sets/default/addj.jpg';
+
+      const result = resolveChannelImageUrl(addjChannel, imageFromImageSet);
+      expect(result).toBe(imageFromImageSet);
+      expect(shouldRenderImage({ channelImageUrl: result })).toBe(true);
+    });
+
+    it('should correctly resolve image for UltraDrone channel with image set', () => {
+      // Simulates: channel record has no image_url, but image_set_images has the URL
+      const ultradroneChannel: MockChannel = {
+        id: 'ultradrone-uuid',
+        channel_name: 'UltraDrone',
+        image_url: null,
+      };
+      const imageFromImageSet = 'https://cdn.example.com/image-sets/default/ultradrone.jpg';
+
+      const result = resolveChannelImageUrl(ultradroneChannel, imageFromImageSet);
+      expect(result).toBe(imageFromImageSet);
+      expect(shouldRenderImage({ channelImageUrl: result })).toBe(true);
+    });
+  });
+});
+

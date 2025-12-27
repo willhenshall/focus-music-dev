@@ -1635,8 +1635,9 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
                   onClick={() => {
                     if (!isActive) {
                       const savedLevel = savedEnergyLevels[channel.id] || 'medium';
-                      setChannelEnergy(channel.id, savedLevel);
-                      toggleChannel(channel, true);
+                      const imageUrl = getChannelImage(channel.id, channel.image_url) || undefined;
+                      setChannelEnergy(channel.id, savedLevel, imageUrl);
+                      toggleChannel(channel, true, false, imageUrl);
                     }
                   }}
                   className={viewMode === 'grid'
@@ -1726,8 +1727,9 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
                             // Activate the channel if not already active
                             if (!isActive) {
                               const savedLevel = savedEnergyLevels[channel.id] || 'medium';
-                              setChannelEnergy(channel.id, savedLevel);
-                              toggleChannel(channel, true);
+                              const imageUrl = getChannelImage(channel.id, channel.image_url) || undefined;
+                              setChannelEnergy(channel.id, savedLevel, imageUrl);
+                              toggleChannel(channel, true, false, imageUrl);
                             }
                             // Switch to grid view
                             saveViewMode('grid');
@@ -1770,7 +1772,7 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setChannelEnergy(channel.id, 'low');
+                                setChannelEnergy(channel.id, 'low', getChannelImage(channel.id, channel.image_url) || undefined);
                               }}
                               data-testid="energy-low"
                               data-selected={state?.energyLevel === 'low'}
@@ -1785,7 +1787,7 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setChannelEnergy(channel.id, 'medium');
+                                setChannelEnergy(channel.id, 'medium', getChannelImage(channel.id, channel.image_url) || undefined);
                               }}
                               data-testid="energy-medium"
                               data-selected={state?.energyLevel === 'medium'}
@@ -1800,7 +1802,7 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setChannelEnergy(channel.id, 'high');
+                                setChannelEnergy(channel.id, 'high', getChannelImage(channel.id, channel.image_url) || undefined);
                               }}
                               data-testid="energy-high"
                               data-selected={state?.energyLevel === 'high'}
@@ -1872,7 +1874,7 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                toggleChannel(channel, !isActuallyPlaying, true);
+                                toggleChannel(channel, !isActuallyPlaying, true, getChannelImage(channel.id, channel.image_url) || undefined);
                               }}
                               data-testid="channel-play-pause"
                               data-playing={isActuallyPlaying}

@@ -140,7 +140,7 @@ export function NowPlayingFooter({ onOpenSlideshow }: NowPlayingFooterProps) {
 
           {/* Play/Pause Button */}
           <button
-            onClick={() => isAdminMode ? toggleAdminPlayback() : toggleChannel(activeChannel!, !isPlaying, true)}
+            onClick={() => isAdminMode ? toggleAdminPlayback() : toggleChannel(activeChannel!, !isPlaying, true, channelImage || undefined)}
             data-testid="player-play-pause"
             data-playing={isPlaying}
             className={`w-12 h-12 rounded-full flex items-center justify-center transition-all shadow-md ${
