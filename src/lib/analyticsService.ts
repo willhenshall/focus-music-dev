@@ -228,6 +228,82 @@ export function trackTTFA(event: TTFAEvent, userId?: string): void {
 }
 
 /**
+ * HLS to MP3 Fallback event.
+ * Tracks when HLS loading fails and engine falls back to direct MP3.
+ */
+export interface HLSFallbackEvent {
+  trackId: string;
+  channelId?: string;
+  errorType: string;
+  errorDetails: string;
+  browser: string;
+  platform: string;
+  isMobile: boolean;
+  timestamp?: string;
+  userId?: string;
+}
+
+// Local storage for fallback events (for debugging and E2E testing)
+const hlsFallbackEventsStore: HLSFallbackEvent[] = [];
+
+/**
+ * Get all recorded HLS fallback events (for debugging/E2E).
+ */
+export function getHLSFallbackEvents(): HLSFallbackEvent[] {
+  return [...hlsFallbackEventsStore];
+}
+
+/**
+ * Clear all recorded HLS fallback events (for testing).
+ */
+export function clearHLSFallbackEvents(): void {
+  hlsFallbackEventsStore.length = 0;
+}
+
+/**
+ * Track HLS to MP3 fallback event.
+ * Records when HLS loading fails and engine falls back to direct MP3.
+ * 
+ * NOTE: This is currently LOCAL-ONLY. Events are stored in memory and
+ * exposed via window.__playerDebug.hlsFallbackEvents for debugging/E2E.
+ */
+export function trackHLSFallback(event: HLSFallbackEvent, userId?: string): void {
+  try {
+    // Add timestamp and userId to the event
+    const fullEvent: HLSFallbackEvent = {
+      ...event,
+      timestamp: new Date().toISOString(),
+      userId,
+    };
+
+    // Store locally
+    hlsFallbackEventsStore.push(fullEvent);
+
+    // Expose via window.__playerDebug for debugging/E2E
+    if (typeof window !== 'undefined') {
+      const debug = (window as any).__playerDebug;
+      if (debug) {
+        if (!debug.hlsFallbackEvents) {
+          debug.hlsFallbackEvents = [];
+        }
+        debug.hlsFallbackEvents.push(fullEvent);
+      }
+    }
+
+    // Log in dev mode only (single warning as specified)
+    if (import.meta.env.DEV) {
+      console.warn('[HLS FALLBACK] Falling back to MP3:', {
+        trackId: event.trackId,
+        errorType: event.errorType,
+        errorDetails: event.errorDetails,
+      });
+    }
+  } catch {
+    // Never throw - analytics should never break playback
+  }
+}
+
+/**
  * Get browser and platform info for TTFA tracking.
  */
 export function getBrowserInfo(): { browser: string; platform: string; isMobile: boolean } {

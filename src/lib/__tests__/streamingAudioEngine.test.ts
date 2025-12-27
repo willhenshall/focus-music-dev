@@ -6,6 +6,18 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+// Mock analyticsService BEFORE importing StreamingAudioEngine
+// This prevents the supabase import from throwing "Missing Supabase environment variables"
+vi.mock('../analyticsService', () => ({
+  trackHLSFallback: vi.fn(),
+  getBrowserInfo: vi.fn(() => ({
+    browser: 'Chrome',
+    platform: 'macOS',
+    isMobile: false,
+  })),
+}));
+
 import { StreamingAudioEngine } from '../streamingAudioEngine';
 import Hls from 'hls.js';
 
@@ -471,10 +483,8 @@ describe('StreamingAudioEngine Integration', () => {
       engine.destroy();
     });
 
-    // Test verifies HLS fatal error is properly handled and reported
-    // Note: The production code does NOT automatically fallback to MP3 on HLS failure.
-    // Instead, it throws an error that the caller must handle.
-    it('rejects loadTrack when HLS load fails with fatal error', async () => {
+    // Test verifies HLS fatal error triggers MP3 fallback
+    it('falls back to MP3 when HLS load fails with fatal error', async () => {
       vi.useFakeTimers();
 
       const adapter = createMockStorageAdapter();
@@ -483,20 +493,19 @@ describe('StreamingAudioEngine Integration', () => {
 
       // Stub pause to prevent jsdom warnings
       const audios = Array.from(document.querySelectorAll('audio')) as HTMLAudioElement[];
-      audios.forEach((a) => { a.pause = vi.fn(); });
-
-      // Track the error that will be thrown
-      let caughtError: Error | null = null;
-
-      // Start loading track and immediately attach a catch handler
-      // to prevent "unhandled rejection" warnings
-      const loadPromise = engine.loadTrack('test-track', 'file/path.mp3');
-
-      // Create a separate promise that catches the error for tracking
-      // This prevents the unhandled rejection warning
-      loadPromise.catch((err) => {
-        caughtError = err;
+      audios.forEach((a) => { 
+        a.pause = vi.fn();
+        // Mock successful canplaythrough for MP3 fallback
+        const originalLoad = a.load.bind(a);
+        a.load = vi.fn(() => {
+          originalLoad();
+          // Simulate canplaythrough event after load
+          setTimeout(() => a.dispatchEvent(new Event('canplaythrough')), 10);
+        });
       });
+
+      // Start loading track
+      const loadPromise = engine.loadTrack('test-track', 'file/path.mp3');
 
       // Wait for loadSource to be called on the HLS instance
       for (let i = 0; i < 20 && secondaryHls.loadSource.mock.calls.length === 0; i++) {
@@ -507,34 +516,160 @@ describe('StreamingAudioEngine Integration', () => {
       // Verify HLS was attempted
       expect(secondaryHls.loadSource).toHaveBeenCalled();
 
-      // Emit a fatal HLS error - this triggers the waitForHLSReady rejection
+      // Emit a fatal HLS error - this triggers the fallback
       secondaryHls.emit(Hls.Events.ERROR, {
         fatal: true,
         details: 'manifestLoadError',
         type: Hls.ErrorTypes.NETWORK_ERROR,
       });
 
-      // Advance timers and flush to allow error to propagate through the promise chain
-      await vi.advanceTimersByTimeAsync(100);
+      // Advance timers to allow fallback to complete
+      await vi.advanceTimersByTimeAsync(500);
       await flushPromises();
 
-      // Wait for the promise to settle
-      try {
-        await loadPromise;
-      } catch {
-        // Expected - error was caught
-      }
-
-      // Verify the error was thrown with correct message
-      expect(caughtError).not.toBeNull();
-      expect(caughtError?.message).toBe('HLS error: manifestLoadError');
+      // MP3 fallback should succeed
+      await loadPromise;
 
       // Verify that getHLSUrl was called (HLS was attempted)
       expect(adapter.getHLSUrl).toHaveBeenCalled();
+      
+      // Verify that getAudioUrl was called for MP3 fallback
+      expect(adapter.getAudioUrl).toHaveBeenCalled();
 
-      // Verify failure was recorded in circuit breaker
+      // Verify success was recorded (fallback worked)
+      expect(engine.getMetrics().successCount).toBe(1);
+
+      engine.destroy();
+      vi.useRealTimers();
+    });
+
+    // Test verifies that when both HLS AND MP3 fail, a meaningful error is thrown
+    it('throws meaningful error when both HLS and MP3 fail', async () => {
+      vi.useFakeTimers();
+
+      const adapter = createMockStorageAdapter();
+      // Make MP3 URL fetch also fail
+      adapter.getAudioUrl = vi.fn().mockRejectedValue(new Error('MP3 URL fetch failed'));
+      
+      const engine = new StreamingAudioEngine(adapter as any);
+      const [, secondaryHls] = (Hls as any).__instances;
+
+      // Stub pause to prevent jsdom warnings
+      const audios = Array.from(document.querySelectorAll('audio')) as HTMLAudioElement[];
+      audios.forEach((a) => { a.pause = vi.fn(); });
+
+      // Start loading track - catch handler to capture error without unhandled rejection
+      let caughtError: Error | null = null;
+      const loadPromise = engine.loadTrack('test-track', 'file/path.mp3').catch((err) => {
+        caughtError = err;
+        // Don't re-throw - we'll check caughtError manually
+      });
+
+      // Wait for loadSource to be called on the HLS instance
+      for (let i = 0; i < 20 && secondaryHls.loadSource.mock.calls.length === 0; i++) {
+        await vi.advanceTimersByTimeAsync(10);
+        await flushPromises();
+      }
+
+      // Emit a fatal HLS error
+      secondaryHls.emit(Hls.Events.ERROR, {
+        fatal: true,
+        details: 'manifestLoadError',
+        type: Hls.ErrorTypes.NETWORK_ERROR,
+      });
+
+      // Advance timers and flush
+      await vi.advanceTimersByTimeAsync(500);
+      await flushPromises();
+
+      // Wait for promise to settle
+      await loadPromise;
+
+      // Verify the error contains both failure reasons
+      expect(caughtError).not.toBeNull();
+      expect(caughtError?.message).toContain('HLS error');
+      expect(caughtError?.message).toContain('MP3 fallback error');
+
+      // Verify failure was recorded
       expect(engine.getMetrics().failureCount).toBe(1);
 
+      engine.destroy();
+      vi.useRealTimers();
+    });
+
+    // Test verifies stale requestId does not trigger fallback
+    it('does not fallback when request is superseded (stale requestId)', async () => {
+      vi.useFakeTimers();
+
+      const adapter = createMockStorageAdapter();
+      const engine = new StreamingAudioEngine(adapter as any);
+      const [, secondaryHls] = (Hls as any).__instances;
+
+      // Stub pause to prevent jsdom warnings and mock load for canplaythrough
+      const audios = Array.from(document.querySelectorAll('audio')) as HTMLAudioElement[];
+      audios.forEach((a) => { 
+        a.pause = vi.fn();
+        // Mock successful canplaythrough for MP3 fallback
+        const originalLoad = a.load.bind(a);
+        a.load = vi.fn(() => {
+          originalLoad();
+          // Simulate canplaythrough event after load
+          setTimeout(() => a.dispatchEvent(new Event('canplaythrough')), 10);
+        });
+      });
+
+      // Start first load - add catch handler to prevent unhandled rejection
+      let firstLoadError: Error | null = null;
+      const firstLoadPromise = engine.loadTrack('track-1', 'file/path1.mp3').catch((err) => {
+        firstLoadError = err;
+      });
+
+      // Wait for loadSource to be called
+      for (let i = 0; i < 20 && secondaryHls.loadSource.mock.calls.length === 0; i++) {
+        await vi.advanceTimersByTimeAsync(10);
+        await flushPromises();
+      }
+
+      // Start second load BEFORE first completes (simulating channel switch)
+      // This will change the activeLoadRequestId - add catch handler
+      const secondLoadPromise = engine.loadTrack('track-2', 'file/path2.mp3').catch(() => {
+        // Expected - second load may also fail, we don't care about it for this test
+      });
+      
+      // Let the second load progress
+      await vi.advanceTimersByTimeAsync(10);
+      await flushPromises();
+
+      // Now emit error for first HLS load (for track-1)
+      secondaryHls.emit(Hls.Events.ERROR, {
+        fatal: true,
+        details: 'manifestLoadError',
+        type: Hls.ErrorTypes.NETWORK_ERROR,
+      });
+
+      await vi.advanceTimersByTimeAsync(100);
+      await flushPromises();
+
+      // Wait for first load to settle (should reject quickly with superseded error)
+      await firstLoadPromise;
+
+      // First load should fail with "superseded" message, NOT trigger MP3 fallback
+      expect(firstLoadError).not.toBeNull();
+      expect(firstLoadError?.message).toContain('superseded');
+
+      // getAudioUrl should NOT have been called for track-1 fallback
+      // (track-2 will call getAudioUrl as part of its fallback)
+      const audioUrlCalls = (adapter.getAudioUrl as any).mock.calls;
+      const track1FallbackCalls = audioUrlCalls.filter((call: any[]) => 
+        call[0]?.includes('path1')
+      );
+      expect(track1FallbackCalls.length).toBe(0);
+
+      // Advance timers to let second load complete its MP3 fallback
+      await vi.advanceTimersByTimeAsync(500);
+      await flushPromises();
+      await secondLoadPromise;
+      
       engine.destroy();
       vi.useRealTimers();
     });
