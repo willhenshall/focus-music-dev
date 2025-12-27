@@ -98,11 +98,13 @@ import {
   getAudioChannels,
   getSystemPreferences,
   getActiveChannelImageSet,
+  getImageSetById,
   getUserPreferences,
   getUserProfile,
   invalidateAudioChannels,
   invalidateSystemPreferences,
   invalidateActiveChannelImageSet,
+  invalidateImageSetById,
   invalidateUserPreferences,
   invalidateUserProfile,
   clearAllCaches,
@@ -193,6 +195,28 @@ describe('supabaseDataCache', () => {
       expect(result2).toEqual([{ id: '2' }]);
       expect(getDebugFetchCounts().audio_channels).toBe(2);
     });
+
+    it('refetches when forceRefresh is true', async () => {
+      mockData.audio_channels = [{ id: '1', channel_name: 'Original' }];
+
+      // First call - populates cache
+      const result1 = await getAudioChannels();
+      expect(result1).toEqual([{ id: '1', channel_name: 'Original' }]);
+      expect(getDebugFetchCounts().audio_channels).toBe(1);
+
+      // Update mock data
+      mockData.audio_channels = [{ id: '1', channel_name: 'Updated' }];
+
+      // Second call without forceRefresh - should return cached
+      const result2 = await getAudioChannels();
+      expect(result2).toEqual([{ id: '1', channel_name: 'Original' }]);
+      expect(getDebugFetchCounts().audio_channels).toBe(1);
+
+      // Third call with forceRefresh - should fetch fresh data
+      const result3 = await getAudioChannels(true);
+      expect(result3).toEqual([{ id: '1', channel_name: 'Updated' }]);
+      expect(getDebugFetchCounts().audio_channels).toBe(2);
+    });
   });
 
   describe('getSystemPreferences', () => {
@@ -219,6 +243,28 @@ describe('supabaseDataCache', () => {
 
       const result2 = await getSystemPreferences();
       expect(result2?.show_audio_diagnostics).toBe(true);
+      expect(getDebugFetchCounts().system_preferences).toBe(2);
+    });
+
+    it('refetches when forceRefresh is true', async () => {
+      mockData.system_preferences = { id: 1, recommendation_visibility_sessions: 5 };
+
+      // First call - populates cache
+      const result1 = await getSystemPreferences();
+      expect(result1?.recommendation_visibility_sessions).toBe(5);
+      expect(getDebugFetchCounts().system_preferences).toBe(1);
+
+      // Update mock data
+      mockData.system_preferences = { id: 1, recommendation_visibility_sessions: 10 };
+
+      // Second call without forceRefresh - should return cached
+      const result2 = await getSystemPreferences();
+      expect(result2?.recommendation_visibility_sessions).toBe(5);
+      expect(getDebugFetchCounts().system_preferences).toBe(1);
+
+      // Third call with forceRefresh - should fetch fresh data
+      const result3 = await getSystemPreferences(true);
+      expect(result3?.recommendation_visibility_sessions).toBe(10);
       expect(getDebugFetchCounts().system_preferences).toBe(2);
     });
   });
@@ -260,6 +306,30 @@ describe('supabaseDataCache', () => {
       expect(result?.session_count).toBe(6);
       expect(getDebugFetchCounts().user_preferences).toBe(2);
     });
+
+    it('refetches when forceRefresh is true', async () => {
+      mockData.user_preferences = {
+        'user1': { last_channel_id: 'ch1', session_count: 5 },
+      };
+
+      // First call - populates cache
+      const result1 = await getUserPreferences('user1');
+      expect(result1?.session_count).toBe(5);
+      expect(getDebugFetchCounts().user_preferences).toBe(1);
+
+      // Update mock data
+      mockData.user_preferences['user1'] = { last_channel_id: 'ch1', session_count: 10 };
+
+      // Second call without forceRefresh - should return cached
+      const result2 = await getUserPreferences('user1');
+      expect(result2?.session_count).toBe(5);
+      expect(getDebugFetchCounts().user_preferences).toBe(1);
+
+      // Third call with forceRefresh - should fetch fresh data
+      const result3 = await getUserPreferences('user1', true);
+      expect(result3?.session_count).toBe(10);
+      expect(getDebugFetchCounts().user_preferences).toBe(2);
+    });
   });
 
   describe('getUserProfile', () => {
@@ -297,6 +367,86 @@ describe('supabaseDataCache', () => {
       const result = await getUserProfile('user1');
       expect(result?.display_name).toBe('New Name');
       expect(getDebugFetchCounts().user_profiles).toBe(2);
+    });
+
+    it('refetches when forceRefresh is true', async () => {
+      mockData.user_profiles = {
+        'user1': { id: 'user1', display_name: 'Original Name' },
+      };
+
+      // First call - populates cache
+      const result1 = await getUserProfile('user1');
+      expect(result1?.display_name).toBe('Original Name');
+      expect(getDebugFetchCounts().user_profiles).toBe(1);
+
+      // Update mock data
+      mockData.user_profiles['user1'] = { id: 'user1', display_name: 'Updated Name' };
+
+      // Second call without forceRefresh - should return cached
+      const result2 = await getUserProfile('user1');
+      expect(result2?.display_name).toBe('Original Name');
+      expect(getDebugFetchCounts().user_profiles).toBe(1);
+
+      // Third call with forceRefresh - should fetch fresh data
+      const result3 = await getUserProfile('user1', true);
+      expect(result3?.display_name).toBe('Updated Name');
+      expect(getDebugFetchCounts().user_profiles).toBe(2);
+    });
+  });
+
+  describe('getImageSetById', () => {
+    it('caches per image set ID', async () => {
+      // Note: The mock setup doesn't fully support getImageSetById lookup, 
+      // but this tests the basic caching pattern
+      mockData.image_sets = { id: 'set1', name: 'Test Set', set_type: 'slideshow' };
+
+      const result1 = await getImageSetById('set1');
+      expect(result1?.id).toBe('set1');
+      expect(getDebugFetchCounts().image_sets).toBe(1);
+
+      // Second call should return cached
+      const result2 = await getImageSetById('set1');
+      expect(result2?.id).toBe('set1');
+      expect(getDebugFetchCounts().image_sets).toBe(1); // No new fetch
+    });
+
+    it('refetches after invalidation', async () => {
+      mockData.image_sets = { id: 'set1', name: 'Original', set_type: 'slideshow' };
+
+      await getImageSetById('set1');
+      expect(getDebugFetchCounts().image_sets).toBe(1);
+
+      // Invalidate
+      invalidateImageSetById('set1');
+
+      // Update mock
+      mockData.image_sets = { id: 'set1', name: 'Updated', set_type: 'slideshow' };
+
+      const result = await getImageSetById('set1');
+      expect(result?.name).toBe('Updated');
+      expect(getDebugFetchCounts().image_sets).toBe(2);
+    });
+
+    it('refetches when forceRefresh is true', async () => {
+      mockData.image_sets = { id: 'set1', name: 'Original', set_type: 'slideshow' };
+
+      // First call - populates cache
+      const result1 = await getImageSetById('set1');
+      expect(result1?.name).toBe('Original');
+      expect(getDebugFetchCounts().image_sets).toBe(1);
+
+      // Update mock data
+      mockData.image_sets = { id: 'set1', name: 'Fresh', set_type: 'slideshow' };
+
+      // Second call without forceRefresh - should return cached
+      const result2 = await getImageSetById('set1');
+      expect(result2?.name).toBe('Original');
+      expect(getDebugFetchCounts().image_sets).toBe(1);
+
+      // Third call with forceRefresh - should fetch fresh data
+      const result3 = await getImageSetById('set1', true);
+      expect(result3?.name).toBe('Fresh');
+      expect(getDebugFetchCounts().image_sets).toBe(2);
     });
   });
 

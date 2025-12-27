@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
-import { getActiveChannelImageSet, invalidateActiveChannelImageSet } from '../lib/supabaseDataCache';
+import { getActiveChannelImageSet, getImageSetById, invalidateActiveChannelImageSet } from '../lib/supabaseDataCache';
 
 type ImageSet = {
   id: string;
@@ -94,13 +94,9 @@ export function ImageSetProvider({ children }: { children: ReactNode }) {
       setSlideshowEnabled(data.slideshow_enabled);
       setSlideshowDuration(data.slideshow_duration);
 
-      // Load the image set details
+      // Load the image set details using cache to prevent duplicate calls
       if (data.selected_slideshow_set_id) {
-        const { data: imageSet } = await supabase
-          .from('image_sets')
-          .select('id, name, set_type')
-          .eq('id', data.selected_slideshow_set_id)
-          .maybeSingle();
+        const imageSet = await getImageSetById(data.selected_slideshow_set_id);
 
         if (imageSet) {
           setActiveImageSet(imageSet);

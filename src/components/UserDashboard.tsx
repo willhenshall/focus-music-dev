@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useMusicPlayer } from '../contexts/MusicPlayerContext';
 import { useImageSet } from '../contexts/ImageSetContext';
 import { supabase } from '../lib/supabase';
+import { getUserPreferences, getSystemPreferences, invalidateUserPreferences } from '../lib/supabaseDataCache';
 import UserSlideshowTab from './UserSlideshowTab';
 import { BUILD_VERSION } from '../buildVersion';
 import { BrainTypeProfile } from './BrainTypeProfile';
@@ -246,15 +247,8 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
     if (!user?.id) return;
 
     try {
-      const { data, error } = await supabase
-        .from('user_preferences')
-        .select('auto_hide_tab_navigation')
-        .eq('user_id', user.id)
-        .maybeSingle();
-
-      if (error && !error.message.includes('No rows found')) {
-        throw error;
-      }
+      // Use cached user preferences to avoid duplicate Supabase calls
+      const data = await getUserPreferences(user.id);
 
       if (data && data.auto_hide_tab_navigation !== null) {
         setAutoHideNavEnabled(data.auto_hide_tab_navigation);
@@ -301,11 +295,8 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
   const loadSavedEnergyLevels = async () => {
     if (!user?.id) return;
 
-    const { data } = await supabase
-      .from('user_preferences')
-      .select('channel_energy_levels')
-      .eq('user_id', user.id)
-      .maybeSingle();
+    // Use cached user preferences to avoid duplicate Supabase calls
+    const data = await getUserPreferences(user.id);
 
     if (data?.channel_energy_levels) {
       setSavedEnergyLevels(data.channel_energy_levels);
@@ -315,11 +306,8 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
   const loadViewMode = async () => {
     if (!user?.id) return;
 
-    const { data } = await supabase
-      .from('user_preferences')
-      .select('channel_view_mode')
-      .eq('user_id', user.id)
-      .maybeSingle();
+    // Use cached user preferences to avoid duplicate Supabase calls
+    const data = await getUserPreferences(user.id);
 
     if (data?.channel_view_mode) {
       setViewMode(data.channel_view_mode as ViewMode);
@@ -340,15 +328,16 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
       );
 
     if (error) {
+      console.error('Failed to save view mode:', error);
     }
+
+    // Invalidate cache after mutation
+    invalidateUserPreferences(user.id);
   };
 
   const loadRecommendationVisibilityThreshold = async () => {
-    const { data } = await supabase
-      .from('system_preferences')
-      .select('recommendation_visibility_sessions')
-      .eq('id', 1)
-      .maybeSingle();
+    // Use cached system preferences to avoid duplicate Supabase calls
+    const data = await getSystemPreferences();
 
     if (data?.recommendation_visibility_sessions !== undefined) {
       setRecommendationVisibilitySessions(data.recommendation_visibility_sessions);
@@ -358,11 +347,8 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
   const loadSessionCount = async () => {
     if (!user?.id) return;
 
-    const { data } = await supabase
-      .from('user_preferences')
-      .select('session_count')
-      .eq('user_id', user.id)
-      .maybeSingle();
+    // Use cached user preferences to avoid duplicate Supabase calls
+    const data = await getUserPreferences(user.id);
 
     const count = data?.session_count || 0;
     setSessionCount(count);

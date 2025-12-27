@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { UserBellSettings } from '../UserBellSettings';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { getUserPreferences, invalidateUserPreferences } from '../../lib/supabaseDataCache';
 
 export function SettingsTimerSounds() {
   const { user } = useAuth();
@@ -18,15 +19,8 @@ export function SettingsTimerSounds() {
 
     try {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('user_preferences')
-        .select('auto_hide_tab_navigation')
-        .eq('user_id', user.id)
-        .maybeSingle();
-
-      if (error && !error.message.includes('No rows found')) {
-        throw error;
-      }
+      // Use cached user preferences to avoid duplicate Supabase calls
+      const data = await getUserPreferences(user.id);
 
       if (data && data.auto_hide_tab_navigation !== null) {
         setAutoHideNav(data.auto_hide_tab_navigation);
@@ -53,6 +47,9 @@ export function SettingsTimerSounds() {
         );
 
       if (error) throw error;
+
+      // Invalidate cache after mutation
+      invalidateUserPreferences(user.id);
 
       setSaveStatus('saved');
       setTimeout(() => setSaveStatus('idle'), 2000);

@@ -3,6 +3,7 @@ import { Settings, Check, AlertCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { BellSoundLibrary } from './BellSoundLibrary';
+import { getSystemPreferences, invalidateSystemPreferences } from '../lib/supabaseDataCache';
 
 export function TimerBellSettings() {
   const { user } = useAuth();
@@ -19,13 +20,8 @@ export function TimerBellSettings() {
     setError('');
 
     try {
-      const { data, error: fetchError } = await supabase
-        .from('system_preferences')
-        .select('recommendation_visibility_sessions')
-        .eq('id', 1)
-        .maybeSingle();
-
-      if (fetchError) throw fetchError;
+      // Use cached system preferences to avoid duplicate Supabase calls
+      const data = await getSystemPreferences();
 
       if (data) {
         setRecommendationSessions(data.recommendation_visibility_sessions || 5);
@@ -53,6 +49,9 @@ export function TimerBellSettings() {
         .eq('id', 1);
 
       if (updateError) throw updateError;
+
+      // Invalidate cache after mutation
+      invalidateSystemPreferences();
 
       setSaveStatus('Settings saved successfully!');
       setTimeout(() => setSaveStatus(''), 3000);
