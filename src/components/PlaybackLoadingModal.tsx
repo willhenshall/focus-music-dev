@@ -40,6 +40,7 @@ export function PlaybackLoadingModal() {
     isError: boolean;
     errorMessage?: string;
     audibleStarted?: boolean;
+    fromPlaying?: boolean;
   } | null>(null);
 
   const isLoading = playbackLoadingState.status === 'loading';
@@ -72,6 +73,7 @@ export function PlaybackLoadingModal() {
         isError,
         errorMessage: playbackLoadingState.errorMessage,
         audibleStarted: playbackLoadingState.audibleStarted,
+        fromPlaying: playbackLoadingState.fromPlaying,
       };
     } else if (isVisible && !isFadingOut) {
       // State changed to idle/playing - start fade-out
@@ -125,6 +127,7 @@ export function PlaybackLoadingModal() {
         isError,
         errorMessage: playbackLoadingState.errorMessage,
         audibleStarted: playbackLoadingState.audibleStarted,
+        fromPlaying: playbackLoadingState.fromPlaying,
       };
 
   const {
@@ -134,6 +137,7 @@ export function PlaybackLoadingModal() {
     trackName,
     artistName,
     audibleStarted,
+    fromPlaying,
   } = displayContent;
 
   const hasTrackInfo = trackName && trackName !== 'Loading track...';
@@ -222,9 +226,11 @@ export function PlaybackLoadingModal() {
               )}
             </div>
 
-            {/* Header: Changing to + Channel name + Energy pill */}
+            {/* Header: Dynamic headline + Channel name + Energy pill */}
             <div className="flex flex-col items-center">
-              <span className="text-xs text-slate-400">Changing to</span>
+              <span className="text-xs text-slate-400" data-testid="loading-modal-headline">
+                {fromPlaying ? 'Changing to' : 'Loading…'}
+              </span>
               <h2 className="text-lg font-bold text-slate-900 text-center truncate max-w-[250px] mt-0.5">
                 {channelName || 'Loading...'}
               </h2>

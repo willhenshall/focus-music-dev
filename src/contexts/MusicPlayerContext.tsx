@@ -64,6 +64,9 @@ export type PlaybackLoadingState = {
   artistName?: string;
   startedAt?: number;
   triggerType?: PlaybackLoadingTrigger;
+  // True if audio was playing when this loading state was triggered
+  // Used to determine modal headline: "Changing to" (true) vs "Loading..." (false)
+  fromPlaying?: boolean;
   // Set when first audible audio is detected (may be before modal dismisses)
   firstAudibleAt?: number;
   // True when first audible audio detected but modal still visible (ritual overlay mode)
@@ -1196,13 +1199,16 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
    * @param channelImageUrl - The resolved channel image URL from the call site.
    *   Pass this explicitly rather than relying on channel.image_url, because
    *   newer channels may have images in image_set_images but not in the channel record.
+   * @param fromPlaying - Whether audio was playing when this loading was triggered.
+   *   Used to determine modal headline: "Changing to" (true) vs "Loading..." (false)
    */
   const startPlaybackLoading = useCallback((
     triggerType: PlaybackLoadingTrigger,
     channel: AudioChannel,
     energyLevel: 'low' | 'medium' | 'high',
     trackInfo?: { trackId?: string; trackName?: string; artistName?: string },
-    channelImageUrl?: string
+    channelImageUrl?: string,
+    fromPlaying?: boolean
   ): string => {
     const requestId = generateRequestId();
     const now = Date.now();
@@ -1273,6 +1279,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       artistName: trackInfo?.artistName,
       startedAt: now,
       triggerType,
+      fromPlaying: fromPlaying ?? false,
     });
     
     // Set a timeout to transition to error state if audio never starts
@@ -1649,8 +1656,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       preloadSingleChannelImage(channelImageUrl || channel.image_url, channel.channel_name);
       
       // Start loading state immediately for instant visual feedback
+      // Pass current isPlaying state to determine modal headline ("Loading..." vs "Changing to")
       const energyLevel = channelStates[channel.id]?.energyLevel || 'medium';
-      startPlaybackLoading('channel_switch', channel, energyLevel, undefined, channelImageUrl);
+      startPlaybackLoading('channel_switch', channel, energyLevel, undefined, channelImageUrl, isPlaying);
       
       // Clear playlistChannelId immediately to prevent stale track display during transition
       setPlaylistChannelId(null);
@@ -1757,7 +1765,8 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     
     // Start loading state immediately for instant visual feedback
     // Pass channelImageUrl to preserve the current channel image during energy changes
-    startPlaybackLoading('energy_change', channel, energyLevel, undefined, channelImageUrl);
+    // Pass current isPlaying state to determine modal headline ("Loading..." vs "Changing to")
+    startPlaybackLoading('energy_change', channel, energyLevel, undefined, channelImageUrl, isPlaying);
 
     if (user) {
       const { data: userPreference } = await supabase

@@ -1683,3 +1683,196 @@ describe('ChannelImageUrl Resolution', () => {
   });
 });
 
+/**
+ * Tests for dynamic loading modal headline.
+ * 
+ * The headline should show:
+ * - "Loading…" when audio was NOT playing when the loading state was triggered
+ * - "Changing to" when audio WAS playing when the loading state was triggered
+ * 
+ * This is a purely presentational decision based on the `fromPlaying` flag
+ * stored in the loading state at trigger time.
+ */
+describe('DynamicLoadingModalHeadline', () => {
+  type LoadingStateWithFromPlaying = {
+    status: 'idle' | 'loading' | 'playing' | 'error';
+    fromPlaying?: boolean;
+    channelName?: string;
+    energyLevel: 'low' | 'medium' | 'high';
+  };
+
+  /**
+   * Simulates the headline selection logic in PlaybackLoadingModal:
+   * {fromPlaying ? 'Changing to' : 'Loading…'}
+   */
+  function getHeadlineText(state: LoadingStateWithFromPlaying): string {
+    // Only return headline for loading state (not error/idle/playing)
+    if (state.status !== 'loading') {
+      return '';
+    }
+    return state.fromPlaying ? 'Changing to' : 'Loading…';
+  }
+
+  /**
+   * Simulates the startPlaybackLoading call that captures isPlaying at trigger time.
+   */
+  function startLoading(
+    isPlayingAtTrigger: boolean,
+    channelName: string,
+    energyLevel: 'low' | 'medium' | 'high'
+  ): LoadingStateWithFromPlaying {
+    return {
+      status: 'loading',
+      fromPlaying: isPlayingAtTrigger,
+      channelName,
+      energyLevel,
+    };
+  }
+
+  describe('Headline Selection Logic', () => {
+    it('should show "Loading…" when audio was NOT playing (fresh start)', () => {
+      const state = startLoading(false, 'Focus Flow', 'medium');
+      expect(getHeadlineText(state)).toBe('Loading…');
+    });
+
+    it('should show "Changing to" when audio WAS playing (channel switch)', () => {
+      const state = startLoading(true, 'Deep Work', 'high');
+      expect(getHeadlineText(state)).toBe('Changing to');
+    });
+
+    it('should show "Loading…" when paused and selecting new channel', () => {
+      // User had paused audio, then clicks a different channel
+      const state = startLoading(false, 'Creative Flow', 'low');
+      expect(getHeadlineText(state)).toBe('Loading…');
+    });
+
+    it('should show "Changing to" when playing and changing energy level', () => {
+      // User is playing and clicks a different energy level
+      const state = startLoading(true, 'Focus Flow', 'high');
+      expect(getHeadlineText(state)).toBe('Changing to');
+    });
+
+    it('should show "Loading…" when paused and changing energy level', () => {
+      // User had paused audio, then clicks a different energy level
+      const state = startLoading(false, 'Focus Flow', 'low');
+      expect(getHeadlineText(state)).toBe('Loading…');
+    });
+  });
+
+  describe('Edge Cases', () => {
+    it('should default to "Loading…" when fromPlaying is undefined', () => {
+      // Handles case where fromPlaying wasn't set (fallback to false)
+      const state: LoadingStateWithFromPlaying = {
+        status: 'loading',
+        fromPlaying: undefined,
+        channelName: 'Test Channel',
+        energyLevel: 'medium',
+      };
+      // undefined is falsy, so should show "Loading…"
+      expect(getHeadlineText(state)).toBe('Loading…');
+    });
+
+    it('should return empty string for non-loading states', () => {
+      const idleState: LoadingStateWithFromPlaying = { status: 'idle', energyLevel: 'medium' };
+      const playingState: LoadingStateWithFromPlaying = { status: 'playing', energyLevel: 'medium' };
+      const errorState: LoadingStateWithFromPlaying = { status: 'error', energyLevel: 'medium' };
+
+      expect(getHeadlineText(idleState)).toBe('');
+      expect(getHeadlineText(playingState)).toBe('');
+      expect(getHeadlineText(errorState)).toBe('');
+    });
+  });
+
+  describe('User Scenarios', () => {
+    it('Scenario: Fresh app load → click channel → shows "Loading…"', () => {
+      // App just loaded, nothing playing, user clicks a channel
+      const isPlayingWhenTriggered = false;
+      const state = startLoading(isPlayingWhenTriggered, 'Focus Flow', 'medium');
+      expect(getHeadlineText(state)).toBe('Loading…');
+    });
+
+    it('Scenario: Playing → click different channel → shows "Changing to"', () => {
+      // User is listening to Focus Flow, clicks Deep Work
+      const isPlayingWhenTriggered = true;
+      const state = startLoading(isPlayingWhenTriggered, 'Deep Work', 'high');
+      expect(getHeadlineText(state)).toBe('Changing to');
+    });
+
+    it('Scenario: Pause → click different channel → shows "Loading…"', () => {
+      // User paused playback, then clicks a different channel
+      const isPlayingWhenTriggered = false;
+      const state = startLoading(isPlayingWhenTriggered, 'Creative Flow', 'low');
+      expect(getHeadlineText(state)).toBe('Loading…');
+    });
+
+    it('Scenario: Playing → click different energy → shows "Changing to"', () => {
+      // User is listening at medium energy, clicks high energy
+      const isPlayingWhenTriggered = true;
+      const state = startLoading(isPlayingWhenTriggered, 'Focus Flow', 'high');
+      expect(getHeadlineText(state)).toBe('Changing to');
+    });
+
+    it('Scenario: Pause → click different energy → shows "Loading…"', () => {
+      // User paused playback at medium energy, clicks low energy
+      const isPlayingWhenTriggered = false;
+      const state = startLoading(isPlayingWhenTriggered, 'Focus Flow', 'low');
+      expect(getHeadlineText(state)).toBe('Loading…');
+    });
+  });
+
+  describe('State Machine Integration', () => {
+    class ExtendedStateMachine {
+      private state: LoadingStateWithFromPlaying = { status: 'idle', energyLevel: 'medium' };
+
+      getState() { return { ...this.state }; }
+
+      startLoading(
+        channelName: string,
+        energyLevel: 'low' | 'medium' | 'high',
+        fromPlaying: boolean
+      ) {
+        this.state = {
+          status: 'loading',
+          channelName,
+          energyLevel,
+          fromPlaying,
+        };
+      }
+
+      getHeadline(): string {
+        if (this.state.status !== 'loading') return '';
+        return this.state.fromPlaying ? 'Changing to' : 'Loading…';
+      }
+    }
+
+    it('should preserve fromPlaying through state transitions', () => {
+      const machine = new ExtendedStateMachine();
+
+      // Start loading from paused state
+      machine.startLoading('Focus Flow', 'medium', false);
+      expect(machine.getHeadline()).toBe('Loading…');
+
+      // Switch channel while "playing" (simulated)
+      machine.startLoading('Deep Work', 'high', true);
+      expect(machine.getHeadline()).toBe('Changing to');
+
+      // Switch energy while paused
+      machine.startLoading('Deep Work', 'low', false);
+      expect(machine.getHeadline()).toBe('Loading…');
+    });
+
+    it('should capture fromPlaying at trigger time, not change mid-load', () => {
+      const machine = new ExtendedStateMachine();
+
+      // User clicks channel while paused → headline is "Loading…"
+      machine.startLoading('Focus Flow', 'medium', false);
+      const headlineAtStart = machine.getHeadline();
+
+      // Even if external isPlaying changes, headline should stay the same
+      // (fromPlaying was captured at trigger time)
+      expect(headlineAtStart).toBe('Loading…');
+      expect(machine.getState().fromPlaying).toBe(false);
+    });
+  });
+});
+
