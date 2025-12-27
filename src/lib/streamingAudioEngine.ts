@@ -1898,6 +1898,19 @@ export class StreamingAudioEngine implements IAudioEngine {
     }
   }
 
+  /**
+   * Backwards-compatible shim for older tests/callers.
+   * prewarmTrack used to exist as a perf optimisation; in the streaming engine
+   * it is unnecessary or handled elsewhere.
+   */
+  public async prewarmTrack(
+    _trackId: string,
+    _filePath: string,
+    _options?: { preferHLS?: boolean; startLevel?: number }
+  ): Promise<void> {
+    return;
+  }
+
   destroy(): void {
     // Stop metrics loop
     if (this.metricsUpdateFrame) {
