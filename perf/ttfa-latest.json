@@ -1,0 +1,38 @@
+[
+  {
+    "requestId": "1766885811323-5u0qa49",
+    "triggerType": "channel_change",
+    "clickAt": 12875.5,
+    "channelId": "f933de56-bbf3-471c-be37-72cb7be70f0d",
+    "channelName": "A.D.D.J.",
+    "energyLevel": "low",
+    "playlistReadyAt": 13113.20000000298,
+    "trackLoadStartAt": 13117,
+    "sourceSelectedAt": 13228.5,
+    "manifestParsedAt": 13292.90000000596,
+    "firstAudioAt": 14073.20000000298,
+    "ttfaMs": 1198,
+    "success": true,
+    "timestamp": "2025-12-28T01:36:52.521Z",
+    "audioType": "hls",
+    "trackId": "149604",
+    "trackName": "HERACLES",
+    "artistName": "DJ IBG"
+  },
+  {
+    "requestId": "1766885816371-gzvw2bq",
+    "triggerType": "energy_change",
+    "clickAt": 17924.10000000149,
+    "channelId": "f933de56-bbf3-471c-be37-72cb7be70f0d",
+    "channelName": "A.D.D.J.",
+    "energyLevel": "low",
+    "playlistReadyAt": 18229.90000000596,
+    "trackLoadStartAt": 18466.10000000149,
+    "sourceSelectedAt": 18466.30000000447,
+    "manifestParsedAt": 18470.70000000298,
+    "ttfaMs": 10001,
+    "success": false,
+    "error": "loading_timeout",
+    "timestamp": "2025-12-28T01:37:06.373Z"
+  }
+]
