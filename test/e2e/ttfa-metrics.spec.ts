@@ -645,6 +645,140 @@ test.describe('TTFA Metrics - Performance Validation', () => {
   });
 });
 
+test.describe('TTFA Metrics - No False Negatives Regression', () => {
+  test.skip(!hasTestCredentials, 'Skipping: TEST_USER_EMAIL and TEST_USER_PASSWORD not set');
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/', { waitUntil: 'networkidle' });
+    await loginAsUser(page);
+    await navigateToChannelsIfNeeded(page);
+    await page.waitForTimeout(1000);
+    await clearPerfEvents(page);
+  });
+
+  /**
+   * REGRESSION TEST: No requestId should have both success and failure events
+   * 
+   * This test verifies the fix for the false negative bug where:
+   * - Audio starts successfully (success event recorded)
+   * - But timeout callback also fires (failure event recorded)
+   * - Resulting in BOTH success and failure for the same requestId
+   */
+  test('no requestId has both success and loading_timeout error (false negative regression)', async ({ page }) => {
+    const channelCards = page.locator('[data-channel-id]');
+    const count = await channelCards.count();
+    expect(count).toBeGreaterThan(0);
+
+    // Start playback multiple times to exercise the race condition window
+    for (let i = 0; i < 2; i++) {
+      const startedAt = Date.now();
+      
+      if (i === 0) {
+        // First iteration: start playback on first channel
+        await startPlaybackOnChannel(page, channelCards.first());
+      } else {
+        // Subsequent iterations: switch energy levels
+        const energyButtons = ['low', 'medium', 'high'];
+        for (const level of energyButtons) {
+          const btn = page.locator(`[data-testid="energy-${level}"]`);
+          const isVisible = await btn.isVisible({ timeout: 1000 }).catch(() => false);
+          if (isVisible) {
+            const isActive = await btn.getAttribute('data-active').catch(() => null);
+            if (isActive !== 'true') {
+              await btn.click();
+              break;
+            }
+          }
+        }
+      }
+      
+      // Wait for audio to be truly playing
+      await waitForAudioTrulyPlaying(page, 45000);
+      
+      // Wait for TTFA event to be recorded
+      await page.waitForTimeout(1000);
+    }
+
+    // Get all events
+    const events = await getPerfEvents(page);
+    expect(events.length).toBeGreaterThan(0);
+    
+    // CRITICAL ASSERTION: Check that no requestId appears with both success and failure
+    const eventsByRequestId = new Map<string, TTFAEvent[]>();
+    events.forEach(e => {
+      const existing = eventsByRequestId.get(e.requestId) || [];
+      existing.push(e);
+      eventsByRequestId.set(e.requestId, existing);
+    });
+    
+    // Each requestId should have at most ONE event
+    eventsByRequestId.forEach((evts, requestId) => {
+      expect(evts.length).toBe(1);
+      
+      // Additionally, verify the event has a valid terminal state
+      const evt = evts[0];
+      if (evt.success === true) {
+        // Success events should NOT have error field
+        expect(evt.error).toBeUndefined();
+        expect(evt.ttfaMs).toBeDefined();
+        expect(evt.ttfaMs).toBeGreaterThan(0);
+      } else if (evt.success === false) {
+        // Failure events should have error field
+        expect(evt.error).toBeDefined();
+      }
+    });
+    
+    // Additional check: for successful events, ensure no loading_timeout error exists
+    const successfulRequestIds = events
+      .filter(e => e.success === true)
+      .map(e => e.requestId);
+    
+    const failedEvents = events.filter(e => e.success === false);
+    
+    // None of the successful requestIds should also appear in failed events
+    for (const successId of successfulRequestIds) {
+      const conflictingFailure = failedEvents.find(f => f.requestId === successId);
+      expect(conflictingFailure).toBeUndefined();
+    }
+    
+    console.log('✓ REGRESSION TEST PASSED: No false negatives detected');
+    console.log(`  Total events: ${events.length}`);
+    console.log(`  Unique requestIds: ${eventsByRequestId.size}`);
+    console.log(`  Successes: ${events.filter(e => e.success).length}`);
+    console.log(`  Failures: ${failedEvents.length}`);
+  });
+
+  /**
+   * Verify that the isTerminal API is exposed and works correctly in E2E.
+   */
+  test('isTerminal API correctly reports terminal state', async ({ page }) => {
+    const channelCards = page.locator('[data-channel-id]');
+    const startedAt = Date.now();
+    
+    await startPlaybackOnChannel(page, channelCards.first());
+    await waitForAudioTrulyPlaying(page, 45000);
+    
+    // Wait for TTFA event
+    const event = await waitForTTFAEvent(page, 'channel_change', startedAt, 30000);
+    
+    // Check that the requestId is terminal
+    const isTerminal = await page.evaluate((requestId) => {
+      const perf = (window as any).__playerPerf;
+      return perf?.isTerminal?.(requestId) ?? false;
+    }, event.requestId);
+    
+    expect(isTerminal).toBe(true);
+    
+    // Check that a non-existent requestId is not terminal
+    const isNonExistentTerminal = await page.evaluate(() => {
+      const perf = (window as any).__playerPerf;
+      return perf?.isTerminal?.('non-existent-request-id') ?? false;
+    });
+    
+    expect(isNonExistentTerminal).toBe(false);
+  });
+});
+
 test.describe('TTFA Metrics - Console Logging', () => {
   test.skip(!hasTestCredentials, 'Skipping: TEST_USER_EMAIL and TEST_USER_PASSWORD not set');
 
