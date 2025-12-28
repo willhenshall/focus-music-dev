@@ -170,6 +170,7 @@ export class StreamingAudioEngine implements IAudioEngine {
   private onTrackEnd: AudioEngineCallbacks['onTrackEnd'] | null = null;
   private onDiagnosticsUpdate: AudioEngineCallbacks['onDiagnosticsUpdate'] | null = null;
   private onError: AudioEngineCallbacks['onError'] | null = null;
+  private onPerfMark: AudioEngineCallbacks['onPerfMark'] | null = null;
   
   // Metrics
   private metrics: AudioMetrics;
@@ -533,6 +534,11 @@ export class StreamingAudioEngine implements IAudioEngine {
         hasMultipleQualities: data.levels.length > 1,
         isCellular: this.isCellular,
       });
+      
+      // [TTFA INSTRUMENTATION] Notify that HLS manifest was parsed
+      if (this.onPerfMark) {
+        this.onPerfMark('manifestParsedAt', 'hls');
+      }
       
       // Warn if only single quality available (no ABR possible)
       if (data.levels.length === 1) {
@@ -1107,6 +1113,7 @@ export class StreamingAudioEngine implements IAudioEngine {
     if (callbacks.onTrackEnd) this.onTrackEnd = callbacks.onTrackEnd;
     if (callbacks.onDiagnosticsUpdate) this.onDiagnosticsUpdate = callbacks.onDiagnosticsUpdate;
     if (callbacks.onError) this.onError = callbacks.onError;
+    if (callbacks.onPerfMark) this.onPerfMark = callbacks.onPerfMark;
   }
 
   setCrossfadeEnabled(enabled: boolean): void {
@@ -1206,6 +1213,11 @@ export class StreamingAudioEngine implements IAudioEngine {
     requestId?: string
   ): Promise<void> {
     console.log('[STREAMING ENGINE] Loading HLS track:', trackId);
+    
+    // [TTFA INSTRUMENTATION] Notify that HLS source was selected
+    if (this.onPerfMark) {
+      this.onPerfMark('sourceSelectedAt', 'hls');
+    }
     
     const hlsAdapter = this.storageAdapter as HLSStorageAdapter;
     
@@ -1338,6 +1350,11 @@ export class StreamingAudioEngine implements IAudioEngine {
     metadata?: TrackMetadata
   ): Promise<void> {
     console.log('[STREAMING ENGINE] Loading direct MP3 track:', trackId);
+    
+    // [TTFA INSTRUMENTATION] Notify that MP3 source was selected
+    if (this.onPerfMark) {
+      this.onPerfMark('sourceSelectedAt', 'mp3');
+    }
     
     const url = await this.storageAdapter.getAudioUrl(filePath);
     

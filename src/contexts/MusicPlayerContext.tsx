@@ -19,6 +19,16 @@ import {
   invalidateUserPreferences,
   updateSystemPreferencesCache,
 } from '../lib/supabaseDataCache';
+import {
+  perfStart,
+  perfMark,
+  perfSuccess,
+  perfFail,
+  getPerfEvents,
+  clearPerfEvents,
+  getSummary,
+  type TTFATriggerType,
+} from '../lib/playerPerf';
 
 // ============================================================================
 // PLAYBACK LOADING STATE MACHINE (for loading modal + TTFA)
@@ -300,6 +310,13 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       onError: (error, category, canRetry) => {
         console.error(`Audio error [${category}]:`, error.message, canRetry ? '(retrying)' : '(fatal)');
       },
+      // [TTFA INSTRUMENTATION] Handle perf marks from audio engine
+      onPerfMark: (markType, _audioType) => {
+        const requestId = activeLoadingRequestIdRef.current;
+        if (requestId) {
+          perfMark(requestId, markType);
+        }
+      },
     });
 
     setAudioEngine(engine);
@@ -485,6 +502,11 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         // Load new track using file_path (storage adapter will handle URL generation)
         if (!track.file_path) {
           throw new Error(`Track ${track.track_id} missing file_path`);
+        }
+
+        // [TTFA INSTRUMENTATION] Mark track load start
+        if (activeLoadingRequestIdRef.current) {
+          perfMark(activeLoadingRequestIdRef.current, 'trackLoadStartAt');
         }
 
         await audioEngine.loadTrack(track.track_id, track.file_path, {
@@ -1021,6 +1043,11 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       setPlaylist(generatedTracks);
       setPlaylistChannelId(activeChannel.id);
       setCurrentTrackIndex(0);
+      
+      // [TTFA INSTRUMENTATION] Mark playlist ready when first track is available
+      if (generatedTracks.length > 0 && activeLoadingRequestIdRef.current) {
+        perfMark(activeLoadingRequestIdRef.current, 'playlistReadyAt');
+      }
 
       // Force track reload by clearing lastLoadedTrackId
       lastLoadedTrackId.current = null;
@@ -1116,6 +1143,11 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     setPlaylist(orderedTracks);
     setPlaylistChannelId(activeChannel.id);
     setCurrentTrackIndex(0);
+    
+    // [TTFA INSTRUMENTATION] Mark playlist ready when first track is available
+    if (orderedTracks.length > 0 && activeLoadingRequestIdRef.current) {
+      perfMark(activeLoadingRequestIdRef.current, 'playlistReadyAt');
+    }
 
     await supabase.from('playlists').insert({
       user_id: user.id,
@@ -1213,6 +1245,22 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     const requestId = generateRequestId();
     const now = Date.now();
     
+    // [TTFA INSTRUMENTATION] Start perf tracking for this request
+    const perfTriggerType: TTFATriggerType = triggerType === 'channel_switch' 
+      ? 'channel_change' 
+      : triggerType === 'energy_change' 
+        ? 'energy_change' 
+        : fromPlaying ? 'resume' : 'play';
+    
+    perfStart({
+      requestId,
+      triggerType: perfTriggerType,
+      clickAt: performance.now(),
+      channelId: channel.id,
+      channelName: channel.channel_name,
+      energyLevel,
+    });
+    
     // Capture current audio sources BEFORE starting load
     // These are the "old" sources that should be ignored during detection
     // [RESUME BUG FIX] Include ALL audio sources (even paused ones) to prevent
@@ -1287,6 +1335,10 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     loadingTimeoutRef.current = setTimeout(() => {
       if (activeLoadingRequestIdRef.current === requestId) {
         console.warn('[LOADING MODAL] Timeout - no new audio detected, transitioning to error');
+        
+        // [TTFA INSTRUMENTATION] Record timeout failure
+        perfFail(requestId, 'loading_timeout');
+        
         setPlaybackLoadingState(prev => ({
           ...prev,
           status: 'error',
@@ -1377,6 +1429,18 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     const startedAt = playbackLoadingState.startedAt || now;
     const elapsedMs = now - startedAt;
     const ttfaMs = elapsedMs;
+    
+    // [TTFA INSTRUMENTATION] Record success with firstAudioAt mark
+    perfMark(requestId, 'firstAudioAt', performance.now());
+    perfSuccess(requestId, {
+      channelId: playbackLoadingState.channelId,
+      channelName: playbackLoadingState.channelName,
+      energyLevel: playbackLoadingState.energyLevel,
+      trackId: playbackLoadingState.trackId,
+      trackName: playbackLoadingState.trackName,
+      artistName: playbackLoadingState.artistName,
+      audioType: isStreamingEngine ? 'hls' : 'mp3',
+    });
     
     console.log('[LOADING MODAL] First audio detected:', {
       requestId,
@@ -2099,6 +2163,13 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         // Playback loading state (for loading modal + TTFA testing)
         getPlaybackLoadingState: () => playbackLoadingState,
         getActiveLoadingRequestId: () => activeLoadingRequestIdRef.current,
+        
+        // [TTFA INSTRUMENTATION] Performance metrics API
+        perf: {
+          events: getPerfEvents,
+          clear: clearPerfEvents,
+          summary: getSummary,
+        },
       };
     }
   }, [currentTrack, currentTrackIndex, isPlaying, playlist, activeChannel, channelStates, isAdminMode, audioMetrics, audioEngine, engineType, isStreamingEngine, playbackLoadingState]);
