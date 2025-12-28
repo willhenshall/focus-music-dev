@@ -27,6 +27,7 @@ import {
   getPerfEvents,
   clearPerfEvents,
   getSummary,
+  isTerminal,
   type TTFATriggerType,
 } from '../lib/playerPerf';
 
@@ -1333,20 +1334,31 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     // Set a timeout to transition to error state if audio never starts
     // This prevents the modal from being stuck forever
     loadingTimeoutRef.current = setTimeout(() => {
-      if (activeLoadingRequestIdRef.current === requestId) {
-        console.warn('[LOADING MODAL] Timeout - no new audio detected, transitioning to error');
-        
-        // [TTFA INSTRUMENTATION] Record timeout failure
-        perfFail(requestId, 'loading_timeout');
-        
-        setPlaybackLoadingState(prev => ({
-          ...prev,
-          status: 'error',
-          errorMessage: 'No track available for this channel/energy. Try another energy level.',
-          errorReason: 'NO_TRACK_OR_AUDIO_TIMEOUT',
-        }));
-        // Do NOT auto-dismiss - user must click dismiss button
+      // Guard 1: Check if this is still the active request
+      if (activeLoadingRequestIdRef.current !== requestId) {
+        return;
       }
+      
+      // Guard 2: Check if the event is already terminal (success was already recorded)
+      // This prevents false negatives where timeout fires after audio started
+      if (isTerminal(requestId)) {
+        console.log('[LOADING MODAL] Timeout ignored - requestId already terminal:', requestId);
+        return;
+      }
+      
+      console.warn('[LOADING MODAL] Timeout - no new audio detected, transitioning to error');
+      
+      // [TTFA INSTRUMENTATION] Record timeout failure
+      // perfFail also checks terminal state internally, but we check above for clarity
+      perfFail(requestId, 'loading_timeout');
+      
+      setPlaybackLoadingState(prev => ({
+        ...prev,
+        status: 'error',
+        errorMessage: 'No track available for this channel/energy. Try another energy level.',
+        errorReason: 'NO_TRACK_OR_AUDIO_TIMEOUT',
+      }));
+      // Do NOT auto-dismiss - user must click dismiss button
     }, MAX_LOADING_TIMEOUT_MS);
     
     return requestId;
@@ -1422,6 +1434,17 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       return;
     }
     
+    // [FIX: TTFA FALSE NEGATIVES] Clear error timeout FIRST, before recording success
+    // This ensures the timeout callback cannot fire between our checks and perfSuccess()
+    if (loadingTimeoutRef.current) {
+      clearTimeout(loadingTimeoutRef.current);
+      loadingTimeoutRef.current = null;
+    }
+    
+    // Mark TTFA as fired for this request (prevent duplicate fires)
+    // Set this early to prevent any re-entrant calls
+    ttfaFiredForRequestRef.current = requestId;
+    
     // Get configurable modal duration from system preferences (fallback to default)
     const minVisibleMs = systemPreferences?.playback_loading_modal_duration_ms ?? DEFAULT_MODAL_VISIBLE_MS;
     
@@ -1431,6 +1454,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     const ttfaMs = elapsedMs;
     
     // [TTFA INSTRUMENTATION] Record success with firstAudioAt mark
+    // perfSuccess() will mark the event as terminal, preventing any timeout from creating a failure
     perfMark(requestId, 'firstAudioAt', performance.now());
     perfSuccess(requestId, {
       channelId: playbackLoadingState.channelId,
@@ -1449,15 +1473,6 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       minVisibleMs,
       channelName: playbackLoadingState.channelName,
     });
-    
-    // Clear error timeout since audio started successfully
-    if (loadingTimeoutRef.current) {
-      clearTimeout(loadingTimeoutRef.current);
-      loadingTimeoutRef.current = null;
-    }
-    
-    // Mark TTFA as fired for this request (prevent duplicate fires)
-    ttfaFiredForRequestRef.current = requestId;
     
     // Record first audible timestamp and set audibleStarted for ritual overlay mode
     // Modal becomes non-blocking (pointer-events: none) when audibleStarted is true

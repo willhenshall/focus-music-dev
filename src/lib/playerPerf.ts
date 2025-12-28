@@ -96,6 +96,13 @@ const events: TTFAEvent[] = [];
  */
 const activeEvents = new Map<string, TTFAEvent>();
 
+/**
+ * Set of requestIds that have reached a terminal state (success or failure).
+ * Once a requestId is in this set, no further mutations are allowed.
+ * This prevents race conditions where timeout and success detection fire concurrently.
+ */
+const terminalEvents = new Set<string>();
+
 // ============================================================================
 // CORE API
 // ============================================================================
@@ -160,14 +167,29 @@ export function perfMark(requestId: string, mark: TTFAMarkKey, value?: number): 
  * Mark a TTFA event as successful.
  * Computes ttfaMs from clickAt to now (or firstAudioAt if provided).
  * 
+ * Once an event is marked as success, it becomes terminal and cannot be
+ * changed to failure. This prevents race conditions with timeout callbacks.
+ * 
  * @param requestId - The requestId of the active event
  * @param payload - Optional additional data to merge into the event
+ * @returns true if the event was successfully marked, false if already terminal or not found
  */
-export function perfSuccess(requestId: string, payload?: Partial<TTFAEvent>): void {
+export function perfSuccess(requestId: string, payload?: Partial<TTFAEvent>): boolean {
+  // Terminal guard: if already finalized, do nothing
+  if (terminalEvents.has(requestId)) {
+    if (import.meta.env.DEV) {
+      console.log('[TTFA:GUARD] perfSuccess ignored - requestId already terminal:', requestId);
+    }
+    return false;
+  }
+
   const event = activeEvents.get(requestId);
   if (!event) {
-    return;
+    return false;
   }
+
+  // Mark as terminal FIRST (before any async or external calls could race)
+  terminalEvents.add(requestId);
 
   // Mark completion time
   const now = performance.now();
@@ -193,20 +215,37 @@ export function perfSuccess(requestId: string, payload?: Partial<TTFAEvent>): vo
 
   // Log the structured TTFA event (single line JSON for easy parsing)
   console.log('[TTFA]', JSON.stringify(event));
+  
+  return true;
 }
 
 /**
  * Mark a TTFA event as failed.
  * 
+ * If the event has already been marked as success (terminal), this is a no-op.
+ * This prevents race conditions where timeout callbacks fire after success.
+ * 
  * @param requestId - The requestId of the active event
  * @param error - Error message describing the failure
  * @param payload - Optional additional data to merge into the event
+ * @returns true if the event was marked as failed, false if already terminal or not found
  */
-export function perfFail(requestId: string, error: string, payload?: Partial<TTFAEvent>): void {
+export function perfFail(requestId: string, error: string, payload?: Partial<TTFAEvent>): boolean {
+  // Terminal guard: if already finalized, do nothing
+  if (terminalEvents.has(requestId)) {
+    if (import.meta.env.DEV) {
+      console.log('[TTFA:GUARD] perfFail ignored - requestId already terminal:', requestId);
+    }
+    return false;
+  }
+
   const event = activeEvents.get(requestId);
   if (!event) {
-    return;
+    return false;
   }
+
+  // Mark as terminal FIRST (before any async or external calls could race)
+  terminalEvents.add(requestId);
 
   // Mark failure
   const now = performance.now();
@@ -229,6 +268,8 @@ export function perfFail(requestId: string, error: string, payload?: Partial<TTF
 
   // Log the structured TTFA event (single line JSON for easy parsing)
   console.log('[TTFA]', JSON.stringify(event));
+  
+  return true;
 }
 
 /**
@@ -239,10 +280,22 @@ export function getPerfEvents(): TTFAEvent[] {
 }
 
 /**
- * Clear all completed TTFA events.
+ * Clear all completed TTFA events and terminal state tracking.
  */
 export function clearPerfEvents(): void {
   events.length = 0;
+  terminalEvents.clear();
+}
+
+/**
+ * Check if a requestId has reached a terminal state (success or failure).
+ * Once terminal, no further mutations are possible for that requestId.
+ * 
+ * @param requestId - The requestId to check
+ * @returns true if the event is terminal, false otherwise
+ */
+export function isTerminal(requestId: string): boolean {
+  return terminalEvents.has(requestId);
 }
 
 /**
@@ -373,6 +426,7 @@ if (typeof window !== 'undefined') {
     latest: getLatestEvent,
     summary: getSummary,
     getActive: getActiveEvent,
+    isTerminal: isTerminal,
   };
 }
 
