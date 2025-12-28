@@ -331,5 +331,168 @@ test.describe('Playback Network Trace', () => {
       slowestCount: summary.slowestRequests.length,
     });
   });
+
+  test('should print [PLAYBACK_TRACE_SUMMARY] after each trace', async ({ page }) => {
+    // Collect console messages
+    const consoleLogs: string[] = [];
+    page.on('console', msg => {
+      consoleLogs.push(msg.text());
+    });
+
+    // Login
+    await page.goto('/');
+    await loginAsUser(page, TEST_USER_EMAIL!, TEST_USER_PASSWORD!);
+    
+    await page.waitForTimeout(2000);
+    await navigateToChannelsIfNeeded(page);
+    
+    const apiAvailable = await isTraceApiAvailable(page);
+    if (!apiAvailable) {
+      test.skip(true, 'Trace API not available (production build)');
+      return;
+    }
+    
+    await clearTraces(page);
+    
+    // Start playback
+    const firstChannel = page.locator('[data-channel-id]').first();
+    await firstChannel.click();
+    await waitForAudioPlaying(page, 30000);
+    await page.waitForTimeout(1000);
+    
+    // Check for [PLAYBACK_TRACE_SUMMARY] in console logs
+    const summaryLog = consoleLogs.find(log => log.includes('[PLAYBACK_TRACE_SUMMARY]'));
+    expect(summaryLog).toBeDefined();
+    
+    // Verify summary contains expected sections
+    expect(summaryLog).toContain('TTFA:');
+    expect(summaryLog).toContain('Network:');
+    
+    console.log('[TEST] Found [PLAYBACK_TRACE_SUMMARY] in console logs');
+  });
+
+  test('should have downloadLatest function that does not throw', async ({ page }) => {
+    // Login
+    await page.goto('/');
+    await loginAsUser(page, TEST_USER_EMAIL!, TEST_USER_PASSWORD!);
+    
+    await page.waitForTimeout(2000);
+    await navigateToChannelsIfNeeded(page);
+    
+    const apiAvailable = await isTraceApiAvailable(page);
+    if (!apiAvailable) {
+      test.skip(true, 'Trace API not available (production build)');
+      return;
+    }
+    
+    // Start playback to generate a trace
+    await clearTraces(page);
+    const firstChannel = page.locator('[data-channel-id]').first();
+    await firstChannel.click();
+    await waitForAudioPlaying(page, 30000);
+    await page.waitForTimeout(500);
+    
+    // Verify trace exists
+    const trace = await getLatestTrace(page);
+    expect(trace).not.toBeNull();
+    
+    // Call downloadLatest and verify it returns true (success) without throwing
+    const downloadResult = await page.evaluate(() => {
+      try {
+        const traceApi = (window as any).__playbackTrace;
+        if (traceApi?.downloadLatest) {
+          return traceApi.downloadLatest();
+        }
+        return null;
+      } catch (e) {
+        return `error: ${e}`;
+      }
+    });
+    
+    expect(downloadResult).toBe(true);
+    console.log('[TEST] downloadLatest() called successfully');
+  });
+
+  test('should have downloadAll function that does not throw', async ({ page }) => {
+    // Login
+    await page.goto('/');
+    await loginAsUser(page, TEST_USER_EMAIL!, TEST_USER_PASSWORD!);
+    
+    await page.waitForTimeout(2000);
+    await navigateToChannelsIfNeeded(page);
+    
+    const apiAvailable = await isTraceApiAvailable(page);
+    if (!apiAvailable) {
+      test.skip(true, 'Trace API not available (production build)');
+      return;
+    }
+    
+    // Start playback to generate a trace
+    await clearTraces(page);
+    const firstChannel = page.locator('[data-channel-id]').first();
+    await firstChannel.click();
+    await waitForAudioPlaying(page, 30000);
+    await page.waitForTimeout(500);
+    
+    // Verify trace exists
+    const traces = await getAllTraces(page);
+    expect(traces.length).toBeGreaterThan(0);
+    
+    // Call downloadAll and verify it returns true (success) without throwing
+    const downloadResult = await page.evaluate(() => {
+      try {
+        const traceApi = (window as any).__playbackTrace;
+        if (traceApi?.downloadAll) {
+          return traceApi.downloadAll();
+        }
+        return null;
+      } catch (e) {
+        return `error: ${e}`;
+      }
+    });
+    
+    expect(downloadResult).toBe(true);
+    console.log('[TEST] downloadAll() called successfully');
+  });
+
+  test('should expose warnings function in trace API', async ({ page }) => {
+    // Login
+    await page.goto('/');
+    await loginAsUser(page, TEST_USER_EMAIL!, TEST_USER_PASSWORD!);
+    
+    await page.waitForTimeout(2000);
+    await navigateToChannelsIfNeeded(page);
+    
+    const apiAvailable = await isTraceApiAvailable(page);
+    if (!apiAvailable) {
+      test.skip(true, 'Trace API not available (production build)');
+      return;
+    }
+    
+    // Start playback to generate a trace
+    await clearTraces(page);
+    const firstChannel = page.locator('[data-channel-id]').first();
+    await firstChannel.click();
+    await waitForAudioPlaying(page, 30000);
+    await page.waitForTimeout(500);
+    
+    // Call warnings function and verify it returns an array
+    const warnings = await page.evaluate(() => {
+      const traceApi = (window as any).__playbackTrace;
+      return traceApi?.warnings?.() ?? null;
+    });
+    
+    expect(warnings).not.toBeNull();
+    expect(Array.isArray(warnings)).toBe(true);
+    
+    // Each warning should have type, message, severity
+    warnings.forEach((warning: any) => {
+      expect(typeof warning.type).toBe('string');
+      expect(typeof warning.message).toBe('string');
+      expect(['warning', 'error']).toContain(warning.severity);
+    });
+    
+    console.log('[TEST] warnings() returns array with', warnings.length, 'warnings');
+  });
 });
 
