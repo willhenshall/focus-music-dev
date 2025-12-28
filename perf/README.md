@@ -131,3 +131,99 @@ interface TTFAEvent {
 5. Pause → change energy → see another `[TTFA]` log line
 6. Run `window.__playerPerf.summary()` for stats
 
+---
+
+## Playback Network Trace
+
+Network trace instrumentation that captures all HTTP requests during playback startup.
+
+### Key Files
+
+- `src/lib/playbackNetworkTrace.ts` - Runtime instrumentation API
+- `test/e2e/playback-network-trace.spec.ts` - E2E test for trace system
+- `perf/playback-trace-report.cjs` - CLI script to analyze trace data
+
+### How It Works
+
+1. **Automatic Capture**: All fetch requests are captured during active traces
+2. **Structured Output**: After each trace, a human-readable summary is logged to console
+3. **Dev Access**: In dev mode, access via:
+   ```javascript
+   window.__playbackTrace.latest()         // Get most recent trace
+   window.__playbackTrace.traces()         // Get all completed traces
+   window.__playbackTrace.warnings()       // Get heuristic warnings for latest trace
+   window.__playbackTrace.downloadLatest() // Download latest trace as JSON file
+   window.__playbackTrace.downloadAll()    // Download all traces as JSON file
+   window.__playbackTrace.printSummary()   // Print human-readable summary to console
+   window.__playbackTrace.clear()          // Clear all traces
+   ```
+
+### Console Output
+
+After each playback attempt, you'll see two log entries:
+
+1. **Raw JSON** (`[PLAYBACK_TRACE]`): Machine-readable data for parsing
+2. **Human Summary** (`[PLAYBACK_TRACE_SUMMARY]`): 5-15 line formatted report:
+
+```
+╭──────────────────────────────────────────────────────────────╮
+│ PLAYBACK TRACE SUMMARY                                       │
+├──────────────────────────────────────────────────────────────┤
+│ ✅ SUCCESS  TTFA: 1234ms     requestId: abc12345...
+│ Trigger: channel_change   Channel: Focus Flow
+│ Energy: high              Engine: streaming
+├──────────────────────────────────────────────────────────────┤
+│ Network: 15 requests, 850ms total
+│   api.supabase.co                    8 reqs     450ms
+│   r2.cloudflarestorage.com           7 reqs     400ms
+├──────────────────────────────────────────────────────────────┤
+│ Slowest Requests:
+│   GET  /rest/v1/audio_tracks                         180ms
+│   GET  /rest/v1/slot_strategies                      120ms
+├──────────────────────────────────────────────────────────────┤
+│ ⚠️  Warnings (1):
+│   ⚠️ Multiple user_preferences calls (2x) - consider caching
+╰──────────────────────────────────────────────────────────────╯
+```
+
+### Exporting Trace Data
+
+**One-click browser export:**
+```javascript
+window.__playbackTrace.downloadLatest()  // Downloads playback-trace-<timestamp>.json
+window.__playbackTrace.downloadAll()     // Downloads playback-traces-all-<timestamp>.json
+```
+
+### Generating CLI Reports
+
+```bash
+# Move downloaded file to perf directory first
+mv ~/Downloads/playback-trace-*.json perf/playback-trace-latest.json
+
+# Generate report
+npm run playback:report
+
+# Or analyze a specific file
+node perf/playback-trace-report.cjs path/to/trace.json
+```
+
+### Heuristic Warnings
+
+The trace system automatically detects common performance issues:
+
+| Warning Type | Description |
+|-------------|-------------|
+| `duplicate_user_preferences` | Multiple user_preferences calls (should be cached) |
+| `audio_tracks_select_all` | Using `select=*` on audio_tracks (fetch only needed columns) |
+| `analytics_before_audio` | Analytics calls blocking fast start |
+| `duplicate_slot_strategy` | Multiple slot_strategies fetches |
+
+### Manual Verification Workflow
+
+1. Run `npm run dev`
+2. Click a channel to start playback
+3. See `[PLAYBACK_TRACE_SUMMARY]` in console
+4. Run `window.__playbackTrace.downloadLatest()` in console
+5. Move downloaded file: `mv ~/Downloads/playback-trace-*.json perf/playback-trace-latest.json`
+6. Run `npm run playback:report`
+

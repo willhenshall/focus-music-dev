@@ -23,6 +23,10 @@ import {
   clearAllTraces,
   getOverallSummary,
   parseUrl,
+  detectWarnings,
+  generateTraceSummaryText,
+  downloadLatest,
+  downloadAll,
   type NetworkEvent,
   type TraceMeta,
 } from '../playbackNetworkTrace';
@@ -219,7 +223,7 @@ describe('playbackNetworkTrace', () => {
       expect(traces.length).toBe(10);
       
       // Verify each trace has its own event
-      traces.forEach((trace, i) => {
+      traces.forEach((trace) => {
         expect(trace.events.length).toBe(1);
       });
     });
@@ -413,6 +417,240 @@ describe('playbackNetworkTrace', () => {
       const trace = getTrace(requestId);
       expect(trace?.events[0].status).toBe('ERR');
       expect(trace?.events[0].errorMessage).toBe('Network timeout');
+    });
+  });
+
+  describe('detectWarnings', () => {
+    it('should detect duplicate user_preferences calls', () => {
+      const requestId = 'req-warn-1';
+      
+      beginTrace(requestId);
+      recordNetworkEventToAll(createNetworkEvent({
+        url: 'https://api.supabase.co/rest/v1/user_preferences',
+        pathname: '/rest/v1/user_preferences',
+      }));
+      recordNetworkEventToAll(createNetworkEvent({
+        url: 'https://api.supabase.co/rest/v1/user_preferences',
+        pathname: '/rest/v1/user_preferences',
+      }));
+      endTrace(requestId, { outcome: 'success', ttfaMs: 500 });
+      
+      const trace = getTrace(requestId);
+      const warnings = detectWarnings(trace!);
+      
+      expect(warnings.length).toBeGreaterThan(0);
+      expect(warnings.some(w => w.type === 'duplicate_user_preferences')).toBe(true);
+    });
+
+    it('should detect audio_tracks?select=* pattern', () => {
+      const requestId = 'req-warn-2';
+      
+      beginTrace(requestId);
+      recordNetworkEventToAll(createNetworkEvent({
+        url: 'https://api.supabase.co/rest/v1/audio_tracks?select=*',
+        pathname: '/rest/v1/audio_tracks',
+      }));
+      endTrace(requestId, { outcome: 'success', ttfaMs: 500 });
+      
+      const trace = getTrace(requestId);
+      const warnings = detectWarnings(trace!);
+      
+      expect(warnings.some(w => w.type === 'audio_tracks_select_all')).toBe(true);
+    });
+
+    it('should detect duplicate slot_strategies calls', () => {
+      const requestId = 'req-warn-3';
+      
+      beginTrace(requestId);
+      recordNetworkEventToAll(createNetworkEvent({
+        url: 'https://api.supabase.co/rest/v1/slot_strategies',
+        pathname: '/rest/v1/slot_strategies',
+      }));
+      recordNetworkEventToAll(createNetworkEvent({
+        url: 'https://api.supabase.co/rest/v1/slot_strategies',
+        pathname: '/rest/v1/slot_strategies',
+      }));
+      endTrace(requestId, { outcome: 'success', ttfaMs: 500 });
+      
+      const trace = getTrace(requestId);
+      const warnings = detectWarnings(trace!);
+      
+      expect(warnings.some(w => w.type === 'duplicate_slot_strategy')).toBe(true);
+    });
+
+    it('should return empty array when no warnings', () => {
+      const requestId = 'req-warn-4';
+      
+      beginTrace(requestId);
+      recordNetworkEventToAll(createNetworkEvent({
+        url: 'https://cdn.com/audio/track.mp3',
+        pathname: '/audio/track.mp3',
+      }));
+      endTrace(requestId, { outcome: 'success', ttfaMs: 500 });
+      
+      const trace = getTrace(requestId);
+      const warnings = detectWarnings(trace!);
+      
+      // Should have no heuristic warnings for a simple CDN request
+      expect(warnings.filter(w => w.type !== 'analytics_before_audio').length).toBe(0);
+    });
+  });
+
+  describe('generateTraceSummaryText', () => {
+    it('should return a human-readable summary string', () => {
+      const requestId = 'req-summary-text';
+      
+      beginTrace(requestId, {
+        triggerType: 'channel_change',
+        channelName: 'Focus Flow',
+        energyLevel: 'high',
+      });
+      recordNetworkEventToAll(createNetworkEvent({
+        url: 'https://api.supabase.co/rest/v1/channels',
+        hostname: 'api.supabase.co',
+        pathname: '/rest/v1/channels',
+        durationMs: 150,
+      }));
+      endTrace(requestId, { outcome: 'success', ttfaMs: 800 });
+      
+      const trace = getTrace(requestId);
+      const text = generateTraceSummaryText(trace!);
+      
+      expect(text).toContain('SUCCESS');
+      expect(text).toContain('TTFA:');
+      expect(text).toContain('800ms');
+      expect(text).toContain('channel_change');
+      expect(text).toContain('Focus Flow');
+      expect(text).toContain('Network:');
+      expect(text).toContain('1 requests');
+    });
+
+    it('should include warnings in summary text', () => {
+      const requestId = 'req-summary-text-warn';
+      
+      beginTrace(requestId);
+      recordNetworkEventToAll(createNetworkEvent({
+        url: 'https://api.supabase.co/rest/v1/user_preferences',
+        pathname: '/rest/v1/user_preferences',
+      }));
+      recordNetworkEventToAll(createNetworkEvent({
+        url: 'https://api.supabase.co/rest/v1/user_preferences',
+        pathname: '/rest/v1/user_preferences',
+      }));
+      endTrace(requestId, { outcome: 'success', ttfaMs: 500 });
+      
+      const trace = getTrace(requestId);
+      const text = generateTraceSummaryText(trace!);
+      
+      expect(text).toContain('Warnings:');
+      expect(text).toContain('user_preferences');
+    });
+
+    it('should handle failure outcome', () => {
+      const requestId = 'req-summary-text-fail';
+      
+      beginTrace(requestId);
+      endTrace(requestId, { outcome: 'fail', reason: 'timeout' });
+      
+      const trace = getTrace(requestId);
+      const text = generateTraceSummaryText(trace!);
+      
+      expect(text).toContain('FAIL');
+    });
+  });
+
+  describe('downloadLatest', () => {
+    it('should return false when no traces exist', () => {
+      clearAllTraces();
+      const result = downloadLatest();
+      expect(result).toBe(false);
+    });
+
+    it('should create a blob and trigger download when traces exist', () => {
+      const requestId = 'req-download';
+      beginTrace(requestId);
+      endTrace(requestId, { outcome: 'success', ttfaMs: 500 });
+      
+      // Mock document.createElement and other DOM methods
+      const mockClick = vi.fn();
+      const mockAppendChild = vi.fn();
+      const mockRemoveChild = vi.fn();
+      
+      const mockAnchor = {
+        href: '',
+        download: '',
+        style: { display: '' },
+        click: mockClick,
+      };
+      
+      vi.spyOn(document, 'createElement').mockReturnValue(mockAnchor as unknown as HTMLAnchorElement);
+      vi.spyOn(document.body, 'appendChild').mockImplementation(mockAppendChild);
+      vi.spyOn(document.body, 'removeChild').mockImplementation(mockRemoveChild);
+      vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test-url');
+      vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+      
+      const result = downloadLatest();
+      
+      expect(result).toBe(true);
+      expect(mockClick).toHaveBeenCalled();
+      expect(mockAnchor.download).toContain('playback-trace-');
+      expect(mockAnchor.download).toContain('.json');
+    });
+  });
+
+  describe('downloadAll', () => {
+    it('should return false when no traces exist', () => {
+      clearAllTraces();
+      const result = downloadAll();
+      expect(result).toBe(false);
+    });
+
+    it('should create a blob with all traces when traces exist', () => {
+      // Create multiple traces
+      beginTrace('req-all-1');
+      endTrace('req-all-1', { outcome: 'success', ttfaMs: 300 });
+      beginTrace('req-all-2');
+      endTrace('req-all-2', { outcome: 'success', ttfaMs: 400 });
+      
+      const mockClick = vi.fn();
+      const mockAnchor = {
+        href: '',
+        download: '',
+        style: { display: '' },
+        click: mockClick,
+      };
+      
+      vi.spyOn(document, 'createElement').mockReturnValue(mockAnchor as unknown as HTMLAnchorElement);
+      vi.spyOn(document.body, 'appendChild').mockImplementation(() => document.body);
+      vi.spyOn(document.body, 'removeChild').mockImplementation(() => document.body);
+      vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test-url-all');
+      vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+      
+      const result = downloadAll();
+      
+      expect(result).toBe(true);
+      expect(mockClick).toHaveBeenCalled();
+      expect(mockAnchor.download).toContain('playback-traces-all-');
+    });
+  });
+
+  describe('summarizeTrace includes method and pathname in slowestRequests', () => {
+    it('should include method and pathname in slowest requests', () => {
+      const requestId = 'req-slow-detail';
+      
+      beginTrace(requestId);
+      recordNetworkEventToAll(createNetworkEvent({
+        method: 'POST',
+        url: 'https://api.supabase.co/rest/v1/rpc/my_function',
+        pathname: '/rest/v1/rpc/my_function',
+        durationMs: 500,
+      }));
+      endTrace(requestId, { outcome: 'success', ttfaMs: 600 });
+      
+      const summary = summarizeTrace(requestId);
+      
+      expect(summary?.slowestRequests[0].method).toBe('POST');
+      expect(summary?.slowestRequests[0].pathname).toBe('/rest/v1/rpc/my_function');
     });
   });
 });
