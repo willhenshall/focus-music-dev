@@ -36,6 +36,22 @@ import {
 } from '../lib/playbackNetworkTrace';
 
 // ============================================================================
+// CONSTANTS
+// ============================================================================
+
+/**
+ * Minimal select fields for audio_tracks queries during playback.
+ * [PHASE 2 OPTIMIZATION] Avoid select=* to reduce network payload.
+ * These fields are required for:
+ * - Playback: track_id, file_path, hls_path, hls_cdn_url
+ * - Display: track_name, artist_name
+ * - Analytics: duration_seconds
+ * - State: metadata (contains track_id), id, channel_id
+ * - Filtering: deleted_at (used in .is() clauses)
+ */
+const AUDIO_TRACK_PLAYBACK_FIELDS = 'id, track_id, track_name, artist_name, file_path, hls_path, hls_cdn_url, duration_seconds, metadata, channel_id, deleted_at';
+
+// ============================================================================
 // PLAYBACK LOADING STATE MACHINE (for loading modal + TTFA)
 // ============================================================================
 
@@ -519,19 +535,10 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
           artistName: track.artist_name,
         });
 
-        // Start analytics for non-admin tracks
+        // [PHASE 2 OPTIMIZATION] Analytics is now deferred until after first audio
+        // Set play start time here for accurate duration calculation, but don't call trackPlayStart yet
         if (!isAdminMode && track.track_id) {
           playStartTimeRef.current = Date.now();
-          const eventId = await trackPlayStart(
-            track.track_id,
-            track.duration_seconds || 0,
-            user?.id,
-            activeChannel?.id,
-            currentSessionId || undefined
-          );
-          if (eventId) {
-            setCurrentPlayEventId(eventId);
-          }
         }
 
         // Auto-play if should be playing or if autoPlay was requested
@@ -919,9 +926,10 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       });
 
       if (result) {
+        // [PHASE 2 OPTIMIZATION] Use minimal select instead of select('*')
         const { data: track } = await supabase
           .from('audio_tracks')
-          .select('*')
+          .select(AUDIO_TRACK_PLAYBACK_FIELDS)
           .eq('id', result.id)
           .is('deleted_at', null)
           .maybeSingle();
@@ -1026,9 +1034,10 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       }
 
       if (firstResult) {
+        // [PHASE 2 OPTIMIZATION] Use minimal select instead of select('*')
         const { data: firstTrack } = await supabase
           .from('audio_tracks')
-          .select('*')
+          .select(AUDIO_TRACK_PLAYBACK_FIELDS)
           .eq('id', firstResult.id)
           .is('deleted_at', null)
           .maybeSingle();
@@ -1094,9 +1103,10 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
           if (abortController.signal.aborted || currentGenerationId !== playlistGenerationId.current) break;
 
           if (result) {
+            // [PHASE 2 OPTIMIZATION] Use minimal select instead of select('*')
             const { data: track } = await supabase
               .from('audio_tracks')
-              .select('*')
+              .select(AUDIO_TRACK_PLAYBACK_FIELDS)
               .eq('id', result.id)
               .is('deleted_at', null)
               .maybeSingle();
@@ -1110,11 +1120,15 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         }
       })();
 
-      await supabase.from('playlists').insert({
+      // [PHASE 2 OPTIMIZATION] Defer playlist insert to background (non-blocking)
+      // This removes playlists INSERT from TTFA critical path
+      supabase.from('playlists').insert({
         user_id: user.id,
         channel_id: activeChannel.id,
         energy_level: energyLevel,
         track_sequence: generatedTracks.map(t => t.metadata?.track_id).filter(Boolean),
+      }).catch(error => {
+        console.error('[DEFERRED_ANALYTICS] playlists insert failed:', error);
       });
 
       return;
@@ -1129,9 +1143,10 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
 
     // Fetch the specific tracks from the database
+    // [PHASE 2 OPTIMIZATION] Use minimal select instead of select('*')
     const { data: playlistTracks, error } = await supabase
       .from('audio_tracks')
-      .select('*')
+      .select(AUDIO_TRACK_PLAYBACK_FIELDS)
       .in('track_id', playlistResponse.trackIds)
       .is('deleted_at', null);
 
@@ -1154,11 +1169,15 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       perfMark(activeLoadingRequestIdRef.current, 'playlistReadyAt');
     }
 
-    await supabase.from('playlists').insert({
+    // [PHASE 2 OPTIMIZATION] Defer playlist insert to background (non-blocking)
+    // This removes playlists INSERT from TTFA critical path
+    supabase.from('playlists').insert({
       user_id: user.id,
       channel_id: activeChannel.id,
       energy_level: energyLevel,
       track_sequence: playlistResponse.trackIds,
+    }).catch(error => {
+      console.error('[DEFERRED_ANALYTICS] playlists insert failed:', error);
     });
   };
 
@@ -1493,6 +1512,27 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       channelName: playbackLoadingState.channelName,
     });
     
+    // [PHASE 2 OPTIMIZATION] Fire deferred analytics AFTER first audio
+    // This removes analytics from the TTFA critical path
+    if (!isAdminMode && playbackLoadingState.trackId && user?.id) {
+      const currentTrackForAnalytics = playlist[currentTrackIndex];
+      if (currentTrackForAnalytics?.track_id) {
+        trackPlayStart(
+          currentTrackForAnalytics.track_id,
+          currentTrackForAnalytics.duration_seconds || 0,
+          user.id,
+          activeChannel?.id,
+          currentSessionId || undefined
+        ).then(eventId => {
+          if (eventId) {
+            setCurrentPlayEventId(eventId);
+          }
+        }).catch(error => {
+          console.error('[DEFERRED_ANALYTICS] trackPlayStart failed:', error);
+        });
+      }
+    }
+    
     // Record first audible timestamp and set audibleStarted for ritual overlay mode
     // Modal becomes non-blocking (pointer-events: none) when audibleStarted is true
     setPlaybackLoadingState(prev => ({
@@ -1782,24 +1822,31 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
           ? preloadSlotStrategy(channel.id, energyLevel)
           : Promise.resolve(null);
 
-        // Run saveLastChannel and session creation in parallel with preload
+        // [PHASE 2 OPTIMIZATION] Defer session creation to after first audio
+        // Only run critical path items: saveLastChannel and slot strategy preload
         await Promise.all([
           saveLastChannel(channel.id),
           preloadPromise,
-          supabase
-            .from('listening_sessions')
-            .insert({
-              user_id: user.id,
-              channel_id: channel.id,
-              energy_level: energyLevel,
-              started_at: new Date().toISOString(),
-            })
-            .select()
-            .single()
-            .then(({ data }) => {
-              if (data) setCurrentSessionId(data.id);
-            })
         ]);
+        
+        // [PHASE 2 OPTIMIZATION] Create listening session in background (non-blocking)
+        // This removes listening_sessions INSERT from TTFA critical path
+        supabase
+          .from('listening_sessions')
+          .insert({
+            user_id: user.id,
+            channel_id: channel.id,
+            energy_level: energyLevel,
+            started_at: new Date().toISOString(),
+          })
+          .select()
+          .single()
+          .then(({ data }) => {
+            if (data) setCurrentSessionId(data.id);
+          })
+          .catch(error => {
+            console.error('[DEFERRED_ANALYTICS] listening_sessions insert failed:', error);
+          });
 
         // Check if channel uses restart_session mode and clear state BEFORE turning on
         const playbackContinuation = strategyConfig?.playbackContinuation;
@@ -1867,16 +1914,15 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     startPlaybackLoading('energy_change', channel, energyLevel, undefined, channelImageUrl, isPlaying);
 
     if (user) {
-      const { data: userPreference } = await supabase
-        .from('user_preferences')
-        .select('channel_energy_levels')
-        .eq('user_id', user.id)
-        .maybeSingle();
-
-      const energyLevels = userPreference?.channel_energy_levels || {};
+      // [PHASE 2 OPTIMIZATION] Use cached user preferences instead of direct Supabase query
+      // This eliminates duplicate user_preferences reads per playback request
+      const cachedPrefs = await getUserPreferences(user.id);
+      const energyLevels = { ...(cachedPrefs?.channel_energy_levels || {}) };
       energyLevels[channelId] = energyLevel;
 
-      await supabase
+      // Non-blocking write - don't await, just fire and forget
+      // The cache will be updated on next read if needed
+      supabase
         .from('user_preferences')
         .upsert(
           {
@@ -1888,7 +1934,14 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
           {
             onConflict: 'user_id'
           }
-        );
+        )
+        .then(() => {
+          // Invalidate cache after successful write so next read gets fresh data
+          invalidateUserPreferences(user.id);
+        })
+        .catch((error) => {
+          console.error('[setChannelEnergy] Failed to save user preferences:', error);
+        });
     }
 
     if (activeChannel?.id !== channelId) {
@@ -1916,9 +1969,12 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       setIsPlaying(true, 'setChannelEnergy: switching to different channel');
 
       if (user) {
-        await saveLastChannel(channelId);
+        // [PHASE 2 OPTIMIZATION] Defer saveLastChannel to background (non-blocking)
+        saveLastChannel(channelId);
 
-        const { data } = await supabase
+        // [PHASE 2 OPTIMIZATION] Defer session creation to background (non-blocking)
+        // This removes listening_sessions INSERT from TTFA critical path
+        supabase
           .from('listening_sessions')
           .insert({
             user_id: user.id,
@@ -1927,9 +1983,13 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
             started_at: new Date().toISOString(),
           })
           .select()
-          .single();
-
-        if (data) setCurrentSessionId(data.id);
+          .single()
+          .then(({ data }) => {
+            if (data) setCurrentSessionId(data.id);
+          })
+          .catch(error => {
+            console.error('[DEFERRED_ANALYTICS] listening_sessions insert failed:', error);
+          });
       }
     } else {
       // Same channel, just changing energy level
