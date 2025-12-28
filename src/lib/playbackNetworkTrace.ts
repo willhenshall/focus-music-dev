@@ -466,22 +466,53 @@ export function detectWarnings(trace: PlaybackTrace): TraceWarning[] {
     });
   }
 
-  // 3. Analytics RPC before audio (track_play_events, listening_sessions)
-  const analyticsEvents = events.filter(e => 
-    e.pathname.includes('track_play_events') || 
-    e.pathname.includes('listening_sessions') ||
-    e.pathname.includes('rpc/update_track')
-  );
-  if (analyticsEvents.length > 0 && trace.outcome?.outcome === 'success') {
-    // Check if analytics happened before TTFA completed
+  // 3. Analytics RPC before audio (track_play_events only)
+  // [PHASE 2] After optimization, track_play_events should NOT appear before first audio
+  if (trace.outcome?.outcome === 'success') {
     const ttfaMs = trace.outcome.ttfaMs || 0;
-    const earlyAnalytics = analyticsEvents.filter(e => 
+    
+    // 3a. track_play_events before audio (should be 0 after Phase 2)
+    const trackPlayEvents = events.filter(e => 
+      e.pathname.includes('track_play_events') ||
+      e.pathname.includes('rpc/update_track')
+    );
+    const earlyTrackPlay = trackPlayEvents.filter(e => 
       (e.ts - trace.startedAt) < ttfaMs
     );
-    if (earlyAnalytics.length > 0) {
+    if (earlyTrackPlay.length > 0) {
       warnings.push({
         type: 'analytics_before_audio',
-        message: `Analytics calls (${earlyAnalytics.length}x) fired before first audio - consider deferring`,
+        message: `track_play_events (${earlyTrackPlay.length}x) fired before first audio - should be deferred`,
+        severity: 'warning',
+      });
+    }
+    
+    // 3b. listening_sessions before audio (should be 0 after Phase 2)
+    const sessionEvents = events.filter(e => 
+      e.pathname.includes('listening_sessions')
+    );
+    const earlySessions = sessionEvents.filter(e => 
+      (e.ts - trace.startedAt) < ttfaMs
+    );
+    if (earlySessions.length > 0) {
+      warnings.push({
+        type: 'listening_session_before_audio',
+        message: `listening_sessions (${earlySessions.length}x) fired before first audio - should be deferred`,
+        severity: 'warning',
+      });
+    }
+    
+    // 3c. playlists INSERT before audio (should be 0 after Phase 2)
+    const playlistEvents = events.filter(e => 
+      e.pathname.includes('/rest/v1/playlists') && e.method === 'POST'
+    );
+    const earlyPlaylists = playlistEvents.filter(e => 
+      (e.ts - trace.startedAt) < ttfaMs
+    );
+    if (earlyPlaylists.length > 0) {
+      warnings.push({
+        type: 'playlist_insert_before_audio',
+        message: `playlists INSERT (${earlyPlaylists.length}x) fired before first audio - should be deferred`,
         severity: 'warning',
       });
     }
