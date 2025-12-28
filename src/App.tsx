@@ -2,6 +2,10 @@ import { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { MusicPlayerProvider } from './contexts/MusicPlayerContext';
 import { ImageSetProvider } from './contexts/ImageSetContext';
+
+// DEV-only: Install fetch patch for playback network tracing
+// This import self-initializes and is a no-op in production
+import './lib/devFetchPatch';
 import { NowPlayingFooter } from './components/NowPlayingFooter';
 import { SlideshowOverlay } from './components/SlideshowOverlay';
 import { LandingPage } from './components/LandingPage';
