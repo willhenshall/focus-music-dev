@@ -115,6 +115,29 @@ async function ensurePlaying(page: Page, label: string): Promise<void> {
   await pollUntil(page, (s) => s?.playbackState === "playing" && Boolean(s?.currentTrackId), 45_000, `playing state (${label})`);
 }
 
+/**
+ * Verify the "No Track Available" modal does NOT appear when audio is actually playing.
+ * This is a helper that checks for the error modal state over a time window.
+ */
+async function verifyNoErrorModal(page: Page, durationMs = 15000): Promise<void> {
+  const startTime = Date.now();
+  
+  while (Date.now() - startTime < durationMs) {
+    // Check if error modal is visible
+    const errorModal = page.locator('[data-testid="playback-loading-modal"][data-status="error"]');
+    const isErrorVisible = await errorModal.isVisible({ timeout: 100 }).catch(() => false);
+    
+    if (isErrorVisible) {
+      // Get the modal text for diagnostic
+      const modalText = await errorModal.textContent().catch(() => "unknown");
+      throw new Error(`"No Track Available" error modal appeared while audio was playing. Modal text: ${modalText}`);
+    }
+    
+    // Wait 500ms before next check
+    await page.waitForTimeout(500);
+  }
+}
+
 test.describe("Slot Sequencer Playback Stall - Desktop", () => {
   test.setTimeout(180_000);
   test.skip(!hasTestCredentials, "Skipping: TEST_USER_EMAIL and TEST_USER_PASSWORD not set");
@@ -123,6 +146,87 @@ test.describe("Slot Sequencer Playback Stall - Desktop", () => {
     await forceStreamingEngine(page);
     await loginAsUser(page);
     await navigateToChannelsIfNeeded(page);
+  });
+
+  /**
+   * Regression test for "No Track Available" modal appearing incorrectly.
+   * 
+   * BUG: After hard reload, slot-sequence channels would show "No Track Available" modal
+   * even though audio was playing successfully. This was caused by the first-audio detection
+   * logic incorrectly filtering out blob URLs from HLS audio elements that were initialized
+   * but hadn't loaded content yet.
+   * 
+   * FIX: Only capture oldAudioSources for audio elements with valid duration (> 0, not NaN).
+   */
+  test("slot-sequencer channel does not show error modal when audio plays successfully (regression)", async ({ page }) => {
+    // Step 1: Hard reload to ensure fresh state (like a user would)
+    await page.reload({ waitUntil: "networkidle" });
+    await navigateToChannelsIfNeeded(page);
+    
+    // Step 2: Select a slot-sequence channel (The Drop or Deep)
+    const channelName = await selectSlotChannel(page);
+    console.log(`Testing slot-sequence channel: ${channelName}`);
+    
+    // Step 3: Start playback by clicking the play button
+    const activeCard = page.locator("[data-channel-id]").filter({
+      has: page.locator('[data-testid="energy-selector"]'),
+    }).first();
+    const playPauseButton = activeCard.locator('[data-testid="channel-play-pause"]').first();
+    await expect(playPauseButton).toBeVisible({ timeout: 20000 });
+    await playPauseButton.click({ force: true });
+    
+    // Step 4: Wait for audio to be playing
+    await ensurePlaying(page, `${channelName} initial`);
+    
+    // Step 5: Verify no error modal appears for the next 15 seconds
+    // The bug would cause the modal to appear ~10 seconds after starting playback
+    await verifyNoErrorModal(page, 15000);
+    
+    // Step 6: Verify audio is still playing
+    await expect(page.locator('[data-testid="player-play-pause"]')).toHaveAttribute("data-playing", "true", {
+      timeout: 5000,
+    });
+    
+    console.log(`SUCCESS: ${channelName} played without spurious "No Track Available" modal`);
+  });
+
+  /**
+   * Extended regression test: verify error modal doesn't appear on energy changes after reload.
+   * The bug also manifested on the first ~2 energy changes after hard reload.
+   */
+  test("slot-sequencer energy changes do not show error modal (regression)", async ({ page }) => {
+    // Step 1: Hard reload to ensure fresh state
+    await page.reload({ waitUntil: "networkidle" });
+    await navigateToChannelsIfNeeded(page);
+    
+    // Step 2: Select a slot-sequence channel
+    const channelName = await selectSlotChannel(page);
+    console.log(`Testing energy changes on: ${channelName}`);
+    
+    // Step 3: Start playback
+    const activeCard = page.locator("[data-channel-id]").filter({
+      has: page.locator('[data-testid="energy-selector"]'),
+    }).first();
+    const playPauseButton = activeCard.locator('[data-testid="channel-play-pause"]').first();
+    await expect(playPauseButton).toBeVisible({ timeout: 20000 });
+    await playPauseButton.click({ force: true });
+    await ensurePlaying(page, `${channelName} initial`);
+    
+    // Step 4: Change energy levels and verify no error modal appears each time
+    const energies: Array<"low" | "medium" | "high"> = ["low", "high", "medium"];
+    
+    for (const energy of energies) {
+      console.log(`Changing to energy: ${energy}`);
+      await setEnergy(page, energy);
+      
+      // Wait for audio to be playing with new energy
+      await ensurePlaying(page, `${channelName} / ${energy}`);
+      
+      // Verify no error modal for 12 seconds (timeout was 10s in the bug)
+      await verifyNoErrorModal(page, 12000);
+      
+      console.log(`SUCCESS: ${energy} energy played without error modal`);
+    }
   });
 
   test("slot-sequencer channel reaches playing across energy changes", async ({ page }) => {

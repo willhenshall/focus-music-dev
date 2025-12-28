@@ -1,0 +1,793 @@
+devFetchPatch.ts:54 [DEV] Fetch patch installed for playback network tracing
+MusicPlayerContext.tsx:309 [AUDIO ENGINE] Creating audio engine {engineType: 'streaming', useStreaming: true, shouldOnlyHappenOnce: 'once in production, twice in dev due to StrictMode'}
+storageAdapters.ts:362 [STORAGE ADAPTER] Creating adapter with config: {backend: 'cloudfront', cdnDomain: 'pub-16f9274cf01948468de2d5af8a6fdb23.r2.dev', allEnvVars: {…}}
+storageAdapters.ts:373 [STORAGE ADAPTER] Creating CloudFront adapter with domain: pub-16f9274cf01948468de2d5af8a6fdb23.r2.dev
+MusicPlayerContext.tsx:178 [AUDIO ENGINE] Creating StreamingAudioEngine (HLS-based)
+streamingAudioEngine.ts:221 [STREAMING ENGINE] Initializing {useNativeHLS: false, useHLSJS: true, isIOS: false}
+streamingAudioEngine.ts:490 [AUDIO][CELLBUG][HLS] Creating HLS instance {fragTimeout: 20000, fragRetries: 6, levelTimeout: 10000, manifestTimeout: 10000, initialBandwidthEstimate: 500000, …}
+streamingAudioEngine.ts:490 [AUDIO][CELLBUG][HLS] Creating HLS instance {fragTimeout: 20000, fragRetries: 6, levelTimeout: 10000, manifestTimeout: 10000, initialBandwidthEstimate: 500000, …}
+streamingAudioEngine.ts:759 [AUDIO][CELLBUG][NETWORK] Connection updated {effectiveType: '4g', connectionType: undefined, downlink: 1.6, isSlowEffectiveType: false, isSlowDownlink: false, …}
+MusicPlayerContext.tsx:364 [AUDIO ENGINE] Destroying audio engine (should only happen on unmount or engine switch)
+MusicPlayerContext.tsx:309 [AUDIO ENGINE] Creating audio engine {engineType: 'streaming', useStreaming: true, shouldOnlyHappenOnce: 'once in production, twice in dev due to StrictMode'}
+storageAdapters.ts:362 [STORAGE ADAPTER] Creating adapter with config: {backend: 'cloudfront', cdnDomain: 'pub-16f9274cf01948468de2d5af8a6fdb23.r2.dev', allEnvVars: {…}}
+storageAdapters.ts:373 [STORAGE ADAPTER] Creating CloudFront adapter with domain: pub-16f9274cf01948468de2d5af8a6fdb23.r2.dev
+MusicPlayerContext.tsx:178 [AUDIO ENGINE] Creating StreamingAudioEngine (HLS-based)
+streamingAudioEngine.ts:221 [STREAMING ENGINE] Initializing {useNativeHLS: false, useHLSJS: true, isIOS: false}
+streamingAudioEngine.ts:490 [AUDIO][CELLBUG][HLS] Creating HLS instance {fragTimeout: 20000, fragRetries: 6, levelTimeout: 10000, manifestTimeout: 10000, initialBandwidthEstimate: 500000, …}
+streamingAudioEngine.ts:490 [AUDIO][CELLBUG][HLS] Creating HLS instance {fragTimeout: 20000, fragRetries: 6, levelTimeout: 10000, manifestTimeout: 10000, initialBandwidthEstimate: 500000, …}
+streamingAudioEngine.ts:759 [AUDIO][CELLBUG][NETWORK] Connection updated {effectiveType: '4g', connectionType: undefined, downlink: 1.6, isSlowEffectiveType: false, isSlowDownlink: false, …}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: false, currentlyPlaying: false, hasBuffer: false, isInLoadingState: false, hasActiveLoadingRequest: false, …}
+MusicPlayerContext.tsx:754 [IMAGE PRELOAD] Channels loaded: 39 - NOT preloading all images (lazy loading)
+MusicPlayerContext.tsx:754 [IMAGE PRELOAD] Channels loaded: 39 - NOT preloading all images (lazy loading)
+MusicPlayerContext.tsx:754 [IMAGE PRELOAD] Channels loaded: 39 - NOT preloading all images (lazy loading)
+MusicPlayerContext.tsx:754 [IMAGE PRELOAD] Channels loaded: 39 - NOT preloading all images (lazy loading)
+MusicPlayerContext.tsx:754 [IMAGE PRELOAD] Channels loaded: 39 - NOT preloading all images (lazy loading)
+MusicPlayerContext.tsx:754 [IMAGE PRELOAD] Channels loaded: 39 - NOT preloading all images (lazy loading)
+MusicPlayerContext.tsx:743 [IMAGE PRELOAD] Preloading single channel image for modal: The Drop
+playerPerf.ts:131 [TTFA:START] {"requestId":"1766941880369-w04rmu9","triggerType":"energy_change","channelName":"The Drop","energyLevel":"low"}
+playbackNetworkTrace.ts:152 [PLAYBACK_TRACE:BEGIN] {"requestId":"1766941880369-w04rmu9","triggerType":"energy_change","channelId":"c9446d4f-a799-4617-adce-f15f9aa3bc65","channelName":"The Drop","energyLevel":"low","engineType":"streaming"}
+MusicPlayerContext.tsx:1311 [LOADING MODAL] Captured old audio sources: {count: 2, sources: Array(2)}
+MusicPlayerContext.tsx:1321 [LOADING MODAL] channelImageUrl present: true {explicit: true, fromChannel: true}
+MusicPlayerContext.tsx:1327 [LOADING MODAL] Starting loading state: {requestId: '1766941880369-w04rmu9', channelName: 'The Drop', energyLevel: 'low', triggerType: 'energy_change', oldAudioSources: 2}
+MusicPlayerContext.tsx:1777 [DIAGNOSTIC] toggleChannel called: {channelName: 'The Drop', turnOn: true, fromPlayer: false, currentIsPlaying: false, activeChannelId: '0d93d121-b8fe-42f5-97e9-59ccfab19e92'}
+playerPerf.ts:131 [TTFA:START] {"requestId":"1766941880370-cpik83z","triggerType":"channel_change","channelName":"The Drop","energyLevel":"medium"}
+playbackNetworkTrace.ts:152 [PLAYBACK_TRACE:BEGIN] {"requestId":"1766941880370-cpik83z","triggerType":"channel_change","channelId":"c9446d4f-a799-4617-adce-f15f9aa3bc65","channelName":"The Drop","energyLevel":"medium","engineType":"streaming"}
+MusicPlayerContext.tsx:1311 [LOADING MODAL] Captured old audio sources: {count: 2, sources: Array(2)}
+MusicPlayerContext.tsx:1321 [LOADING MODAL] channelImageUrl present: true {explicit: true, fromChannel: true}
+MusicPlayerContext.tsx:1327 [LOADING MODAL] Starting loading state: {requestId: '1766941880370-cpik83z', channelName: 'The Drop', energyLevel: 'medium', triggerType: 'channel_switch', oldAudioSources: 2}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: false, currentlyPlaying: false, hasBuffer: false, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+MusicPlayerContext.tsx:1632 [FIRST AUDIO] Starting detection for requestId: 1766941880370-cpik83z {oldSourcesCount: 2}
+MusicPlayerContext.tsx:247 [setIsPlaying] true {reason: 'setChannelEnergy: switching to different channel', stack: '    at setChannelEnergy (http://localhost:5174/src…ts/MusicPlayerContext.tsx?t=1766941782211:1210:7)'}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: false, hasBuffer: false, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+PlaybackLoadingModal.tsx:105 [PlaybackLoadingModal] Modal visible: {requestId: '1766941880370-cpik83z', channelName: 'The Drop', status: 'loading'}
+MusicPlayerContext.tsx:247 [setIsPlaying] true {reason: 'toggleChannel: turning ON channel', stack: '    at toggleChannel (http://localhost:5174/src/co…ts/MusicPlayerContext.tsx?t=1766941782211:1155:7)'}
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941880370-cpik83z","mark":"playlistReadyAt","elapsedMs":961}
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941880370-cpik83z","mark":"trackLoadStartAt","elapsedMs":965}
+MusicPlayerContext.tsx:620 [SYNC EFFECT] Skipping - track is loading
+MusicPlayerContext.tsx:1632 [FIRST AUDIO] Starting detection for requestId: 1766941880370-cpik83z {oldSourcesCount: 2}
+streamingAudioEngine.ts:1215 [STREAMING ENGINE] Loading HLS track: 144553
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941880370-cpik83z","mark":"sourceSelectedAt","elapsedMs":1084}
+MusicPlayerContext.tsx:1130 Uncaught (in promise) TypeError: supabase.from(...).insert(...).catch is not a function
+    at generateNewPlaylist (MusicPlayerContext.tsx:1130:10)
+generateNewPlaylist @ MusicPlayerContext.tsx:1130
+await in generateNewPlaylist
+(anonymous) @ MusicPlayerContext.tsx:450
+commitHookEffectListMount @ chunk-6W5FFVKH.js?v=023cf795:16915
+commitPassiveMountOnFiber @ chunk-6W5FFVKH.js?v=023cf795:18156
+commitPassiveMountEffects_complete @ chunk-6W5FFVKH.js?v=023cf795:18129
+commitPassiveMountEffects_begin @ chunk-6W5FFVKH.js?v=023cf795:18119
+commitPassiveMountEffects @ chunk-6W5FFVKH.js?v=023cf795:18109
+flushPassiveEffectsImpl @ chunk-6W5FFVKH.js?v=023cf795:19490
+flushPassiveEffects @ chunk-6W5FFVKH.js?v=023cf795:19447
+commitRootImpl @ chunk-6W5FFVKH.js?v=023cf795:19416
+commitRoot @ chunk-6W5FFVKH.js?v=023cf795:19277
+performSyncWorkOnRoot @ chunk-6W5FFVKH.js?v=023cf795:18895
+flushSyncCallbacks @ chunk-6W5FFVKH.js?v=023cf795:9119
+(anonymous) @ chunk-6W5FFVKH.js?v=023cf795:18627
+streamingAudioEngine.ts:531 [AUDIO][CELLBUG][HLS] Manifest parsed {levelCount: 4, levels: Array(4), hasMultipleQualities: true, isCellular: false}
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941880370-cpik83z","mark":"manifestParsedAt","elapsedMs":1139}
+streamingAudioEngine.ts:570 [AUDIO][CELLBUG][HLS] Level switched {previousLevel: -1, newLevel: 3, tierName: 'premium', bitrate: 192000, bitrateKbps: 192, …}
+MusicPlayerContext.tsx:620 [SYNC EFFECT] Skipping - track is loading
+MusicPlayerContext.tsx:545 [loadAndPlay] Auto-play check: {isPlaying: true, shouldAutoPlayRef: true, willAutoPlay: true, trackId: '144553'}
+MusicPlayerContext.tsx:552 [loadAndPlay] Starting playback...
+MusicPlayerContext.tsx:247 [setIsPlaying] true {reason: 'loadAndPlay: auto-play after track load', stack: '    at loadAndPlay (http://localhost:5174/src/cont…ts/MusicPlayerContext.tsx?t=1766941782211:319:11)'}
+streamingAudioEngine.ts:424 [AUDIO][CELLBUG][EVENT] Playing event - playback resumed {currentTime: 0.000425, duration: 288.51960500000007, wasStalled: false, wasWaiting: false, stallRecoveryAttempts: 0}
+MusicPlayerContext.tsx:556 [loadAndPlay] Playback started successfully
+streamingAudioEngine.ts:759 [AUDIO][CELLBUG][NETWORK] Connection updated {effectiveType: '4g', connectionType: undefined, downlink: 1.6, isSlowEffectiveType: false, isSlowDownlink: false, …}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+streamingAudioEngine.ts:759 [AUDIO][CELLBUG][NETWORK] Connection updated {effectiveType: '4g', connectionType: undefined, downlink: 1.6, isSlowEffectiveType: false, isSlowDownlink: false, …}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+streamingAudioEngine.ts:759 [AUDIO][CELLBUG][NETWORK] Connection updated {effectiveType: '4g', connectionType: undefined, downlink: 1.6, isSlowEffectiveType: false, isSlowDownlink: false, …}
+installHook.js:1 [LOADING MODAL] Timeout - no new audio detected, transitioning to error
+overrideMethod @ installHook.js:1
+(anonymous) @ MusicPlayerContext.tsx:1381
+setTimeout
+(anonymous) @ MusicPlayerContext.tsx:1368
+toggleChannel @ MusicPlayerContext.tsx:1799
+onClick @ UserDashboard.tsx:1645
+callCallback2 @ chunk-6W5FFVKH.js?v=023cf795:3674
+invokeGuardedCallbackDev @ chunk-6W5FFVKH.js?v=023cf795:3699
+invokeGuardedCallback @ chunk-6W5FFVKH.js?v=023cf795:3733
+invokeGuardedCallbackAndCatchFirstError @ chunk-6W5FFVKH.js?v=023cf795:3736
+executeDispatch @ chunk-6W5FFVKH.js?v=023cf795:7014
+processDispatchQueueItemsInOrder @ chunk-6W5FFVKH.js?v=023cf795:7034
+processDispatchQueue @ chunk-6W5FFVKH.js?v=023cf795:7043
+dispatchEventsForPlugins @ chunk-6W5FFVKH.js?v=023cf795:7051
+(anonymous) @ chunk-6W5FFVKH.js?v=023cf795:7174
+batchedUpdates$1 @ chunk-6W5FFVKH.js?v=023cf795:18913
+batchedUpdates @ chunk-6W5FFVKH.js?v=023cf795:3579
+dispatchEventForPluginEventSystem @ chunk-6W5FFVKH.js?v=023cf795:7173
+dispatchEventWithEnableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay @ chunk-6W5FFVKH.js?v=023cf795:5478
+dispatchEvent @ chunk-6W5FFVKH.js?v=023cf795:5472
+dispatchDiscreteEvent @ chunk-6W5FFVKH.js?v=023cf795:5449
+playerPerf.ts:270 [TTFA] {"requestId":"1766941880370-cpik83z","triggerType":"channel_change","clickAt":5238.20000000298,"channelId":"c9446d4f-a799-4617-adce-f15f9aa3bc65","channelName":"The Drop","energyLevel":"medium","playlistReadyAt":6199.20000000298,"trackLoadStartAt":6203.20000000298,"sourceSelectedAt":6322.39999999851,"manifestParsedAt":6377,"ttfaMs":10004,"success":false,"error":"loading_timeout","timestamp":"2025-12-28T17:11:30.374Z"}
+playbackNetworkTrace.ts:194 [PLAYBACK_TRACE] {"requestId":"1766941880370-cpik83z","outcome":"fail","reason":"loading_timeout","traceDurationMs":10004,"networkSummary":{"totalRequests":35,"totalNetworkMs":4716,"byHostname":{"xewajlyswijmjxuajhif.supabase.co":{"count":34,"totalMs":4597},"pub-16f9274cf01948468de2d5af8a6fdb23.r2.dev":{"count":1,"totalMs":119}}},"topSlowRequests":[{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Uptempo","durationMs":246,"method":"GET","pathname":"/rest/v1/audio_tracks"},{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Uptempo","durationMs":223,"method":"GET","pathname":"/rest/v1/audio_tracks"},{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Uptempo","durationMs":217,"method":"GET","pathname":"/rest/v1/audio_tracks"},{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/slot_definitions?select=*&strategy_id=eq.a4d6e882-329f-422e-baad-910eb2b88ae8&order=index.asc","durationMs":212,"method":"GET","pathname":"/rest/v1/slot_definitions"},{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Uptempo","durationMs":208,"method":"GET","pathname":"/rest/v1/audio_tracks"}],"endpointsByCount":{"/rest/v1/user_preferences":3,"/rest/v1/slot_strategies":2,"/rest/v1/listening_sessions":2,"/rest/v1/slot_definitions":2,"/rest/v1/slot_rule_groups":2,"/rest/v1/slot_boosts":2,"/rest/v1/user_playback_state":4,"/rest/v1/audio_tracks":17,"/hls/144553/master.m3u8":1},"meta":{"triggerType":"channel_change","channelId":"c9446d4f-a799-4617-adce-f15f9aa3bc65","channelName":"The Drop","energyLevel":"medium","engineType":"streaming"}}
+playbackNetworkTrace.ts:635 [PLAYBACK_TRACE_SUMMARY]
+╭──────────────────────────────────────────────────────────────╮
+│ PLAYBACK TRACE SUMMARY                                       │
+├──────────────────────────────────────────────────────────────┤
+│ ❌ FAIL  TTFA: N/A        requestId: 17669418...
+│ Trigger: channel_change  Channel: The Drop
+│ Energy: medium           Engine: streaming
+├──────────────────────────────────────────────────────────────┤
+│ Network: 35 requests, 4.72s total
+│   xewajlyswijmjxuajhif.supaba...  34 reqs     4.60s
+│   pub-16f9274cf01948468de2d5a...   1 reqs     119ms
+├──────────────────────────────────────────────────────────────┤
+│ Slowest Requests:
+│   GET  /rest/v1/audio_tracks                     246ms
+│   GET  /rest/v1/audio_tracks                     223ms
+│   GET  /rest/v1/audio_tracks                     217ms
+│   GET  /rest/v1/slot_definitions                 212ms
+│   GET  /rest/v1/audio_tracks                     208ms
+├──────────────────────────────────────────────────────────────┤
+│ Endpoint Counts:
+│   /rest/v1/audio_tracks                               17x
+│   /rest/v1/user_playback_state                         4x
+│   /rest/v1/user_preferences                            3x
+│   /rest/v1/slot_strategies                             2x
+│   /rest/v1/listening_sessions                          2x
+├──────────────────────────────────────────────────────────────┤
+│ ⚠️  Warnings (2):
+│   ⚠️ Multiple user_preferences calls (3x) - consider caching
+│   ⚠️ Multiple slot_strategy fetches (4x) - use cache
+╰──────────────────────────────────────────────────────────────╯
+PlaybackLoadingModal.tsx:105 [PlaybackLoadingModal] Modal visible: {requestId: '1766941880370-cpik83z', channelName: 'The Drop', status: 'error'}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: false, hasActiveLoadingRequest: true, …}
+streamingAudioEngine.ts:759 [AUDIO][CELLBUG][NETWORK] Connection updated {effectiveType: '4g', connectionType: undefined, downlink: 1.6, isSlowEffectiveType: false, isSlowDownlink: false, …}
+MusicPlayerContext.tsx:1596 [LOADING MODAL] User dismissed error state
+PlaybackLoadingModal.tsx:105 [PlaybackLoadingModal] Modal visible: {requestId: undefined, channelName: undefined, status: 'idle'}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: false, hasActiveLoadingRequest: false, …}
+streamingAudioEngine.ts:759 [AUDIO][CELLBUG][NETWORK] Connection updated {effectiveType: '4g', connectionType: undefined, downlink: 1.6, isSlowEffectiveType: false, isSlowDownlink: false, …}
+playerPerf.ts:131 [TTFA:START] {"requestId":"1766941900559-u42bkff","triggerType":"energy_change","channelName":"The Drop","energyLevel":"high"}
+playbackNetworkTrace.ts:152 [PLAYBACK_TRACE:BEGIN] {"requestId":"1766941900559-u42bkff","triggerType":"energy_change","channelId":"c9446d4f-a799-4617-adce-f15f9aa3bc65","channelName":"The Drop","energyLevel":"high","engineType":"streaming"}
+MusicPlayerContext.tsx:1311 [LOADING MODAL] Captured old audio sources: {count: 2, sources: Array(2)}
+MusicPlayerContext.tsx:1321 [LOADING MODAL] channelImageUrl present: true {explicit: true, fromChannel: true}
+MusicPlayerContext.tsx:1327 [LOADING MODAL] Starting loading state: {requestId: '1766941900559-u42bkff', channelName: 'The Drop', energyLevel: 'high', triggerType: 'energy_change', oldAudioSources: 2}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+MusicPlayerContext.tsx:1632 [FIRST AUDIO] Starting detection for requestId: 1766941900559-u42bkff {oldSourcesCount: 2}
+PlaybackLoadingModal.tsx:105 [PlaybackLoadingModal] Modal visible: {requestId: '1766941900559-u42bkff', channelName: 'The Drop', status: 'loading'}
+MusicPlayerContext.tsx:1998 [setChannelEnergy] Same channel energy change: {channelId: 'c9446d4f-a799-4617-adce-f15f9aa3bc65', energyLevel: 'high', wasPlaying: true, reason: 'User clicked energy button - will start playback'}
+MusicPlayerContext.tsx:247 [setIsPlaying] true {reason: 'setChannelEnergy: user clicked energy button (resume fix)', stack: '    at setChannelEnergy (http://localhost:5174/src…ts/MusicPlayerContext.tsx?t=1766941782211:1239:9)'}
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941900559-u42bkff","mark":"playlistReadyAt","elapsedMs":923}
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941900559-u42bkff","mark":"trackLoadStartAt","elapsedMs":927}
+MusicPlayerContext.tsx:620 [SYNC EFFECT] Skipping - track is loading
+MusicPlayerContext.tsx:1632 [FIRST AUDIO] Starting detection for requestId: 1766941900559-u42bkff {oldSourcesCount: 2}
+streamingAudioEngine.ts:1215 [STREAMING ENGINE] Loading HLS track: 94143
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941900559-u42bkff","mark":"sourceSelectedAt","elapsedMs":1014}
+MusicPlayerContext.tsx:1130 Uncaught (in promise) TypeError: supabase.from(...).insert(...).catch is not a function
+    at generateNewPlaylist (MusicPlayerContext.tsx:1130:10)
+    at async setChannelEnergy (MusicPlayerContext.tsx:2024:9)
+generateNewPlaylist @ MusicPlayerContext.tsx:1130
+await in generateNewPlaylist
+setChannelEnergy @ MusicPlayerContext.tsx:2024
+await in setChannelEnergy
+onClick @ UserDashboard.tsx:1814
+callCallback2 @ chunk-6W5FFVKH.js?v=023cf795:3674
+invokeGuardedCallbackDev @ chunk-6W5FFVKH.js?v=023cf795:3699
+invokeGuardedCallback @ chunk-6W5FFVKH.js?v=023cf795:3733
+invokeGuardedCallbackAndCatchFirstError @ chunk-6W5FFVKH.js?v=023cf795:3736
+executeDispatch @ chunk-6W5FFVKH.js?v=023cf795:7014
+processDispatchQueueItemsInOrder @ chunk-6W5FFVKH.js?v=023cf795:7034
+processDispatchQueue @ chunk-6W5FFVKH.js?v=023cf795:7043
+dispatchEventsForPlugins @ chunk-6W5FFVKH.js?v=023cf795:7051
+(anonymous) @ chunk-6W5FFVKH.js?v=023cf795:7174
+batchedUpdates$1 @ chunk-6W5FFVKH.js?v=023cf795:18913
+batchedUpdates @ chunk-6W5FFVKH.js?v=023cf795:3579
+dispatchEventForPluginEventSystem @ chunk-6W5FFVKH.js?v=023cf795:7173
+dispatchEventWithEnableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay @ chunk-6W5FFVKH.js?v=023cf795:5478
+dispatchEvent @ chunk-6W5FFVKH.js?v=023cf795:5472
+dispatchDiscreteEvent @ chunk-6W5FFVKH.js?v=023cf795:5449
+streamingAudioEngine.ts:531 [AUDIO][CELLBUG][HLS] Manifest parsed {levelCount: 4, levels: Array(4), hasMultipleQualities: true, isCellular: false}
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941900559-u42bkff","mark":"manifestParsedAt","elapsedMs":1067}
+streamingAudioEngine.ts:570 [AUDIO][CELLBUG][HLS] Level switched {previousLevel: 3, newLevel: 3, tierName: 'premium', bitrate: 192000, bitrateKbps: 192, …}
+MusicPlayerContext.tsx:620 [SYNC EFFECT] Skipping - track is loading
+MusicPlayerContext.tsx:545 [loadAndPlay] Auto-play check: {isPlaying: true, shouldAutoPlayRef: true, willAutoPlay: true, trackId: '94143'}
+MusicPlayerContext.tsx:552 [loadAndPlay] Starting playback...
+MusicPlayerContext.tsx:247 [setIsPlaying] true {reason: 'loadAndPlay: auto-play after track load', stack: '    at loadAndPlay (http://localhost:5174/src/cont…ts/MusicPlayerContext.tsx?t=1766941782211:319:11)'}
+streamingAudioEngine.ts:1797 [STREAMING AUDIO] Starting crossfade {oldElement: 'SECONDARY', newElement: 'PRIMARY', oldSrc: '195ae663-028a-42ac-affc-723028987f0c', newSrc: 'd1c2eaaf-3711-445b-b3ad-326382c92a64', oldVolume: 0.7, …}
+streamingAudioEngine.ts:424 [AUDIO][CELLBUG][EVENT] Playing event - playback resumed {currentTime: 0, duration: 196.54285900000008, wasStalled: false, wasWaiting: false, stallRecoveryAttempts: 0}
+streamingAudioEngine.ts:1809 [STREAMING AUDIO] New track play() succeeded
+MusicPlayerContext.tsx:556 [loadAndPlay] Playback started successfully
+streamingAudioEngine.ts:759 [AUDIO][CELLBUG][NETWORK] Connection updated {effectiveType: '4g', connectionType: undefined, downlink: 1.6, isSlowEffectiveType: false, isSlowDownlink: false, …}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+streamingAudioEngine.ts:759 [AUDIO][CELLBUG][NETWORK] Connection updated {effectiveType: '4g', connectionType: undefined, downlink: 1.6, isSlowEffectiveType: false, isSlowDownlink: false, …}
+streamingAudioEngine.ts:1834 [STREAMING AUDIO] Crossfade complete, cleaning up old track {oldAudioPaused: false, oldAudioVolume: 0, newAudioPaused: false, newAudioVolume: 0.7}
+streamingAudioEngine.ts:1848 [STREAMING AUDIO] Destroying old HLS instance
+streamingAudioEngine.ts:1861 [STREAMING AUDIO] Old audio cleanup complete {oldAudioPaused: true, oldAudioSrc: 'http://localhost:5174/'}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+streamingAudioEngine.ts:759 [AUDIO][CELLBUG][NETWORK] Connection updated {effectiveType: '4g', connectionType: undefined, downlink: 1.6, isSlowEffectiveType: false, isSlowDownlink: false, …}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+streamingAudioEngine.ts:759 [AUDIO][CELLBUG][NETWORK] Connection updated {effectiveType: '4g', connectionType: undefined, downlink: 1.6, isSlowEffectiveType: false, isSlowDownlink: false, …}
+installHook.js:1 [LOADING MODAL] Timeout - no new audio detected, transitioning to error
+overrideMethod @ installHook.js:1
+(anonymous) @ MusicPlayerContext.tsx:1381
+setTimeout
+(anonymous) @ MusicPlayerContext.tsx:1368
+setChannelEnergy @ MusicPlayerContext.tsx:1914
+onClick @ UserDashboard.tsx:1814
+callCallback2 @ chunk-6W5FFVKH.js?v=023cf795:3674
+invokeGuardedCallbackDev @ chunk-6W5FFVKH.js?v=023cf795:3699
+invokeGuardedCallback @ chunk-6W5FFVKH.js?v=023cf795:3733
+invokeGuardedCallbackAndCatchFirstError @ chunk-6W5FFVKH.js?v=023cf795:3736
+executeDispatch @ chunk-6W5FFVKH.js?v=023cf795:7014
+processDispatchQueueItemsInOrder @ chunk-6W5FFVKH.js?v=023cf795:7034
+processDispatchQueue @ chunk-6W5FFVKH.js?v=023cf795:7043
+dispatchEventsForPlugins @ chunk-6W5FFVKH.js?v=023cf795:7051
+(anonymous) @ chunk-6W5FFVKH.js?v=023cf795:7174
+batchedUpdates$1 @ chunk-6W5FFVKH.js?v=023cf795:18913
+batchedUpdates @ chunk-6W5FFVKH.js?v=023cf795:3579
+dispatchEventForPluginEventSystem @ chunk-6W5FFVKH.js?v=023cf795:7173
+dispatchEventWithEnableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay @ chunk-6W5FFVKH.js?v=023cf795:5478
+dispatchEvent @ chunk-6W5FFVKH.js?v=023cf795:5472
+dispatchDiscreteEvent @ chunk-6W5FFVKH.js?v=023cf795:5449
+playerPerf.ts:270 [TTFA] {"requestId":"1766941900559-u42bkff","triggerType":"energy_change","clickAt":25427.10000000149,"channelId":"c9446d4f-a799-4617-adce-f15f9aa3bc65","channelName":"The Drop","energyLevel":"high","playlistReadyAt":26350.29999999702,"trackLoadStartAt":26354,"sourceSelectedAt":26441.20000000298,"manifestParsedAt":26494.10000000149,"ttfaMs":10003,"success":false,"error":"loading_timeout","timestamp":"2025-12-28T17:11:50.562Z"}
+playbackNetworkTrace.ts:194 [PLAYBACK_TRACE] {"requestId":"1766941900559-u42bkff","outcome":"fail","reason":"loading_timeout","traceDurationMs":10003,"networkSummary":{"totalRequests":26,"totalNetworkMs":3517,"byHostname":{"xewajlyswijmjxuajhif.supabase.co":{"count":25,"totalMs":3430},"pub-16f9274cf01948468de2d5af8a6fdb23.r2.dev":{"count":1,"totalMs":87}}},"topSlowRequests":[{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Uptempo","durationMs":247,"method":"GET","pathname":"/rest/v1/audio_tracks"},{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Uptempo","durationMs":235,"method":"GET","pathname":"/rest/v1/audio_tracks"},{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Uptempo","durationMs":220,"method":"GET","pathname":"/rest/v1/audio_tracks"},{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Uptempo","durationMs":219,"method":"GET","pathname":"/rest/v1/audio_tracks"},{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Uptempo","durationMs":199,"method":"GET","pathname":"/rest/v1/audio_tracks"}],"endpointsByCount":{"/rest/v1/user_preferences":2,"/rest/v1/slot_strategies":1,"/rest/v1/slot_rule_groups":1,"/rest/v1/slot_definitions":1,"/rest/v1/slot_boosts":1,"/rest/v1/user_playback_state":3,"/rest/v1/audio_tracks":16,"/hls/94143/master.m3u8":1},"meta":{"triggerType":"energy_change","channelId":"c9446d4f-a799-4617-adce-f15f9aa3bc65","channelName":"The Drop","energyLevel":"high","engineType":"streaming"}}
+playbackNetworkTrace.ts:635 [PLAYBACK_TRACE_SUMMARY]
+╭──────────────────────────────────────────────────────────────╮
+│ PLAYBACK TRACE SUMMARY                                       │
+├──────────────────────────────────────────────────────────────┤
+│ ❌ FAIL  TTFA: N/A        requestId: 17669419...
+│ Trigger: energy_change   Channel: The Drop
+│ Energy: high             Engine: streaming
+├──────────────────────────────────────────────────────────────┤
+│ Network: 26 requests, 3.52s total
+│   xewajlyswijmjxuajhif.supaba...  25 reqs     3.43s
+│   pub-16f9274cf01948468de2d5a...   1 reqs      87ms
+├──────────────────────────────────────────────────────────────┤
+│ Slowest Requests:
+│   GET  /rest/v1/audio_tracks                     247ms
+│   GET  /rest/v1/audio_tracks                     235ms
+│   GET  /rest/v1/audio_tracks                     220ms
+│   GET  /rest/v1/audio_tracks                     219ms
+│   GET  /rest/v1/audio_tracks                     199ms
+├──────────────────────────────────────────────────────────────┤
+│ Endpoint Counts:
+│   /rest/v1/audio_tracks                               16x
+│   /rest/v1/user_playback_state                         3x
+│   /rest/v1/user_preferences                            2x
+│   /rest/v1/slot_strategies                             1x
+│   /rest/v1/slot_rule_groups                            1x
+├──────────────────────────────────────────────────────────────┤
+│ ⚠️  Warnings (2):
+│   ⚠️ Multiple user_preferences calls (2x) - consider caching
+│   ⚠️ Multiple slot_strategy fetches (2x) - use cache
+╰──────────────────────────────────────────────────────────────╯
+PlaybackLoadingModal.tsx:105 [PlaybackLoadingModal] Modal visible: {requestId: '1766941900559-u42bkff', channelName: 'The Drop', status: 'error'}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: false, hasActiveLoadingRequest: true, …}
+MusicPlayerContext.tsx:1596 [LOADING MODAL] User dismissed error state
+PlaybackLoadingModal.tsx:105 [PlaybackLoadingModal] Modal visible: {requestId: undefined, channelName: undefined, status: 'idle'}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: false, hasActiveLoadingRequest: false, …}
+streamingAudioEngine.ts:759 [AUDIO][CELLBUG][NETWORK] Connection updated {effectiveType: '4g', connectionType: undefined, downlink: 1.6, isSlowEffectiveType: false, isSlowDownlink: false, …}
+playerPerf.ts:131 [TTFA:START] {"requestId":"1766941915365-8ekwety","triggerType":"energy_change","channelName":"The Drop","energyLevel":"low"}
+playbackNetworkTrace.ts:152 [PLAYBACK_TRACE:BEGIN] {"requestId":"1766941915365-8ekwety","triggerType":"energy_change","channelId":"c9446d4f-a799-4617-adce-f15f9aa3bc65","channelName":"The Drop","energyLevel":"low","engineType":"streaming"}
+MusicPlayerContext.tsx:1311 [LOADING MODAL] Captured old audio sources: {count: 2, sources: Array(2)}
+MusicPlayerContext.tsx:1321 [LOADING MODAL] channelImageUrl present: true {explicit: true, fromChannel: true}
+MusicPlayerContext.tsx:1327 [LOADING MODAL] Starting loading state: {requestId: '1766941915365-8ekwety', channelName: 'The Drop', energyLevel: 'low', triggerType: 'energy_change', oldAudioSources: 2}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+MusicPlayerContext.tsx:1632 [FIRST AUDIO] Starting detection for requestId: 1766941915365-8ekwety {oldSourcesCount: 2}
+PlaybackLoadingModal.tsx:105 [PlaybackLoadingModal] Modal visible: {requestId: '1766941915365-8ekwety', channelName: 'The Drop', status: 'loading'}
+MusicPlayerContext.tsx:1998 [setChannelEnergy] Same channel energy change: {channelId: 'c9446d4f-a799-4617-adce-f15f9aa3bc65', energyLevel: 'low', wasPlaying: true, reason: 'User clicked energy button - will start playback'}
+MusicPlayerContext.tsx:247 [setIsPlaying] true {reason: 'setChannelEnergy: user clicked energy button (resume fix)', stack: '    at setChannelEnergy (http://localhost:5174/src…ts/MusicPlayerContext.tsx?t=1766941782211:1239:9)'}
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941915365-8ekwety","mark":"playlistReadyAt","elapsedMs":619}
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941915365-8ekwety","mark":"trackLoadStartAt","elapsedMs":623}
+MusicPlayerContext.tsx:620 [SYNC EFFECT] Skipping - track is loading
+streamingAudioEngine.ts:1215 [STREAMING ENGINE] Loading HLS track: 144553
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941915365-8ekwety","mark":"sourceSelectedAt","elapsedMs":627}
+streamingAudioEngine.ts:1247 [STREAMING AUDIO] Re-attaching HLS to audio element
+MusicPlayerContext.tsx:1632 [FIRST AUDIO] Starting detection for requestId: 1766941915365-8ekwety {oldSourcesCount: 2}
+streamingAudioEngine.ts:531 [AUDIO][CELLBUG][HLS] Manifest parsed {levelCount: 4, levels: Array(4), hasMultipleQualities: true, isCellular: false}
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941915365-8ekwety","mark":"manifestParsedAt","elapsedMs":729}
+MusicPlayerContext.tsx:1130 Uncaught (in promise) TypeError: supabase.from(...).insert(...).catch is not a function
+    at generateNewPlaylist (MusicPlayerContext.tsx:1130:10)
+    at async setChannelEnergy (MusicPlayerContext.tsx:2024:9)
+generateNewPlaylist @ MusicPlayerContext.tsx:1130
+await in generateNewPlaylist
+setChannelEnergy @ MusicPlayerContext.tsx:2024
+await in setChannelEnergy
+onClick @ UserDashboard.tsx:1784
+callCallback2 @ chunk-6W5FFVKH.js?v=023cf795:3674
+invokeGuardedCallbackDev @ chunk-6W5FFVKH.js?v=023cf795:3699
+invokeGuardedCallback @ chunk-6W5FFVKH.js?v=023cf795:3733
+invokeGuardedCallbackAndCatchFirstError @ chunk-6W5FFVKH.js?v=023cf795:3736
+executeDispatch @ chunk-6W5FFVKH.js?v=023cf795:7014
+processDispatchQueueItemsInOrder @ chunk-6W5FFVKH.js?v=023cf795:7034
+processDispatchQueue @ chunk-6W5FFVKH.js?v=023cf795:7043
+dispatchEventsForPlugins @ chunk-6W5FFVKH.js?v=023cf795:7051
+(anonymous) @ chunk-6W5FFVKH.js?v=023cf795:7174
+batchedUpdates$1 @ chunk-6W5FFVKH.js?v=023cf795:18913
+batchedUpdates @ chunk-6W5FFVKH.js?v=023cf795:3579
+dispatchEventForPluginEventSystem @ chunk-6W5FFVKH.js?v=023cf795:7173
+dispatchEventWithEnableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay @ chunk-6W5FFVKH.js?v=023cf795:5478
+dispatchEvent @ chunk-6W5FFVKH.js?v=023cf795:5472
+dispatchDiscreteEvent @ chunk-6W5FFVKH.js?v=023cf795:5449
+streamingAudioEngine.ts:570 [AUDIO][CELLBUG][HLS] Level switched {previousLevel: 3, newLevel: 3, tierName: 'premium', bitrate: 192000, bitrateKbps: 192, …}
+MusicPlayerContext.tsx:620 [SYNC EFFECT] Skipping - track is loading
+MusicPlayerContext.tsx:545 [loadAndPlay] Auto-play check: {isPlaying: true, shouldAutoPlayRef: true, willAutoPlay: true, trackId: '144553'}
+MusicPlayerContext.tsx:552 [loadAndPlay] Starting playback...
+MusicPlayerContext.tsx:247 [setIsPlaying] true {reason: 'loadAndPlay: auto-play after track load', stack: '    at loadAndPlay (http://localhost:5174/src/cont…ts/MusicPlayerContext.tsx?t=1766941782211:319:11)'}
+streamingAudioEngine.ts:1797 [STREAMING AUDIO] Starting crossfade {oldElement: 'PRIMARY', newElement: 'SECONDARY', oldSrc: 'd1c2eaaf-3711-445b-b3ad-326382c92a64', newSrc: '078ddcdd-2fda-45c2-999a-bc1912ca4627', oldVolume: 0.7, …}
+streamingAudioEngine.ts:424 [AUDIO][CELLBUG][EVENT] Playing event - playback resumed {currentTime: 0.001899, duration: 288.51960500000007, wasStalled: false, wasWaiting: false, stallRecoveryAttempts: 0}
+streamingAudioEngine.ts:1809 [STREAMING AUDIO] New track play() succeeded
+MusicPlayerContext.tsx:556 [loadAndPlay] Playback started successfully
+streamingAudioEngine.ts:759 [AUDIO][CELLBUG][NETWORK] Connection updated {effectiveType: '4g', connectionType: undefined, downlink: 1.6, isSlowEffectiveType: false, isSlowDownlink: false, …}
+MusicPlayerContext.tsx:1688 [FIRST AUDIO] Detected! New track audio playing: {requestId: '1766941915365-8ekwety', src: '078ddcdd-2fda-45c2-999a-bc1912ca4627', currentTime: 0.079247}
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941915365-8ekwety","mark":"firstAudioAt","elapsedMs":1382}
+playerPerf.ts:217 [TTFA] {"requestId":"1766941915365-8ekwety","triggerType":"energy_change","clickAt":40233.20000000298,"channelId":"c9446d4f-a799-4617-adce-f15f9aa3bc65","channelName":"The Drop","energyLevel":"low","playlistReadyAt":40852.39999999851,"trackLoadStartAt":40856.60000000149,"sourceSelectedAt":40860.39999999851,"manifestParsedAt":40961.89999999851,"firstAudioAt":41615.5,"ttfaMs":1382,"success":true,"timestamp":"2025-12-28T17:11:56.748Z","audioType":"hls","trackId":"144553","trackName":"The Colors Of The Horizon(DynamicIllusionRemix)_v3","artistName":"Dreaming Cooper & Unusual Cosmic Process"}
+playbackNetworkTrace.ts:194 [PLAYBACK_TRACE] {"requestId":"1766941915365-8ekwety","outcome":"success","ttfaMs":1382,"traceDurationMs":1382,"networkSummary":{"totalRequests":12,"totalNetworkMs":1654,"byHostname":{"xewajlyswijmjxuajhif.supabase.co":{"count":12,"totalMs":1654}}},"topSlowRequests":[{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Uptempo","durationMs":271,"method":"GET","pathname":"/rest/v1/audio_tracks"},{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Uptempo","durationMs":185,"method":"GET","pathname":"/rest/v1/audio_tracks"},{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Uptempo","durationMs":175,"method":"GET","pathname":"/rest/v1/audio_tracks"},{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Uptempo","durationMs":174,"method":"GET","pathname":"/rest/v1/audio_tracks"},{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/user_preferences?select=last_channel_id%2Cchannel_energy_levels%2Clast_energy_level%2Csession_count%2Cauto_hide_tab_navigation%2Cchannel_view_mode&user_id=eq.e073383a-7d22-40ef-86da-bb6566a33965","durationMs":121,"method":"GET","pathname":"/rest/v1/user_preferences"}],"endpointsByCount":{"/rest/v1/user_preferences":2,"/rest/v1/user_playback_state":3,"/rest/v1/audio_tracks":7},"meta":{"triggerType":"energy_change","channelId":"c9446d4f-a799-4617-adce-f15f9aa3bc65","channelName":"The Drop","energyLevel":"low","engineType":"streaming"}}
+playbackNetworkTrace.ts:635 [PLAYBACK_TRACE_SUMMARY]
+╭──────────────────────────────────────────────────────────────╮
+│ PLAYBACK TRACE SUMMARY                                       │
+├──────────────────────────────────────────────────────────────┤
+│ ✅ SUCCESS  TTFA: 1.38s      requestId: 17669419...
+│ Trigger: energy_change   Channel: The Drop
+│ Energy: low              Engine: streaming
+├──────────────────────────────────────────────────────────────┤
+│ Network: 12 requests, 1.65s total
+│   xewajlyswijmjxuajhif.supaba...  12 reqs     1.65s
+├──────────────────────────────────────────────────────────────┤
+│ Slowest Requests:
+│   GET  /rest/v1/audio_tracks                     271ms
+│   GET  /rest/v1/audio_tracks                     185ms
+│   GET  /rest/v1/audio_tracks                     175ms
+│   GET  /rest/v1/audio_tracks                     174ms
+│   GET  /rest/v1/user_preferences                 121ms
+├──────────────────────────────────────────────────────────────┤
+│ Endpoint Counts:
+│   /rest/v1/audio_tracks                                7x
+│   /rest/v1/user_playback_state                         3x
+│   /rest/v1/user_preferences                            2x
+├──────────────────────────────────────────────────────────────┤
+│ ⚠️  Warnings (1):
+│   ⚠️ Multiple user_preferences calls (2x) - consider caching
+╰──────────────────────────────────────────────────────────────╯
+MusicPlayerContext.tsx:1507 [LOADING MODAL] First audio detected: {requestId: '1766941915365-8ekwety', ttfaMs: 1382, elapsedMs: 1382, minVisibleMs: 2900, channelName: 'The Drop'}
+MusicPlayerContext.tsx:1552 [LOADING MODAL] Scheduling delayed dismiss in 1518 ms
+MusicPlayerContext.tsx:1632 [FIRST AUDIO] Starting detection for requestId: 1766941915365-8ekwety {oldSourcesCount: 2}
+MusicPlayerContext.tsx:1688 [FIRST AUDIO] Detected! New track audio playing: {requestId: '1766941915365-8ekwety', src: '078ddcdd-2fda-45c2-999a-bc1912ca4627', currentTime: 0.133213}
+MusicPlayerContext.tsx:1468 [LOADING MODAL] TTFA already fired for requestId: 1766941915365-8ekwety
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+streamingAudioEngine.ts:759 [AUDIO][CELLBUG][NETWORK] Connection updated {effectiveType: '4g', connectionType: undefined, downlink: 1.6, isSlowEffectiveType: false, isSlowDownlink: false, …}
+streamingAudioEngine.ts:1834 [STREAMING AUDIO] Crossfade complete, cleaning up old track {oldAudioPaused: false, oldAudioVolume: 0, newAudioPaused: false, newAudioVolume: 0.7}
+streamingAudioEngine.ts:1848 [STREAMING AUDIO] Destroying old HLS instance
+streamingAudioEngine.ts:1861 [STREAMING AUDIO] Old audio cleanup complete {oldAudioPaused: true, oldAudioSrc: 'http://localhost:5174/'}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+streamingAudioEngine.ts:759 [AUDIO][CELLBUG][NETWORK] Connection updated {effectiveType: '4g', connectionType: undefined, downlink: 1.6, isSlowEffectiveType: false, isSlowDownlink: false, …}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+MusicPlayerContext.tsx:1562 [LOADING MODAL] Delayed dismiss firing for requestId: 1766941915365-8ekwety
+MusicPlayerContext.tsx:1415 [LOADING MODAL] Dismissing modal: {requestId: '1766941915365-8ekwety', ttfaMs: 1382}
+analyticsService.ts:215 [TTFA] Recorded event (local-only): {requestId: '1766941915365-8ekwety', ttfaMs: 1382, channelName: 'The Drop', energyLevel: 'low', trackName: 'The Colors Of The Horizon(DynamicIllusionRemix)_v3', …}
+PlaybackLoadingModal.tsx:105 [PlaybackLoadingModal] Modal visible: {requestId: '1766941915365-8ekwety', channelName: 'The Drop', status: 'playing'}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: false, hasActiveLoadingRequest: true, …}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: false, hasActiveLoadingRequest: false, …}
+MusicPlayerContext.tsx:743 [IMAGE PRELOAD] Preloading single channel image for modal: The Deep
+playerPerf.ts:131 [TTFA:START] {"requestId":"1766941921899-tb1rxfy","triggerType":"energy_change","channelName":"The Deep","energyLevel":"medium"}
+playbackNetworkTrace.ts:152 [PLAYBACK_TRACE:BEGIN] {"requestId":"1766941921899-tb1rxfy","triggerType":"energy_change","channelId":"0d93d121-b8fe-42f5-97e9-59ccfab19e92","channelName":"The Deep","energyLevel":"medium","engineType":"streaming"}
+MusicPlayerContext.tsx:1311 [LOADING MODAL] Captured old audio sources: {count: 2, sources: Array(2)}
+MusicPlayerContext.tsx:1321 [LOADING MODAL] channelImageUrl present: true {explicit: true, fromChannel: true}
+MusicPlayerContext.tsx:1327 [LOADING MODAL] Starting loading state: {requestId: '1766941921899-tb1rxfy', channelName: 'The Deep', energyLevel: 'medium', triggerType: 'energy_change', oldAudioSources: 2}
+MusicPlayerContext.tsx:1777 [DIAGNOSTIC] toggleChannel called: {channelName: 'The Deep', turnOn: true, fromPlayer: false, currentIsPlaying: true, activeChannelId: 'c9446d4f-a799-4617-adce-f15f9aa3bc65'}
+playerPerf.ts:131 [TTFA:START] {"requestId":"1766941921900-yzx04zx","triggerType":"channel_change","channelName":"The Deep","energyLevel":"medium"}
+playbackNetworkTrace.ts:152 [PLAYBACK_TRACE:BEGIN] {"requestId":"1766941921900-yzx04zx","triggerType":"channel_change","channelId":"0d93d121-b8fe-42f5-97e9-59ccfab19e92","channelName":"The Deep","energyLevel":"medium","engineType":"streaming"}
+MusicPlayerContext.tsx:1311 [LOADING MODAL] Captured old audio sources: {count: 2, sources: Array(2)}
+MusicPlayerContext.tsx:1321 [LOADING MODAL] channelImageUrl present: true {explicit: true, fromChannel: true}
+MusicPlayerContext.tsx:1327 [LOADING MODAL] Starting loading state: {requestId: '1766941921900-yzx04zx', channelName: 'The Deep', energyLevel: 'medium', triggerType: 'channel_switch', oldAudioSources: 2}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+MusicPlayerContext.tsx:1632 [FIRST AUDIO] Starting detection for requestId: 1766941921900-yzx04zx {oldSourcesCount: 2}
+PlaybackLoadingModal.tsx:105 [PlaybackLoadingModal] Modal visible: {requestId: '1766941921900-yzx04zx', channelName: 'The Deep', status: 'loading'}
+MusicPlayerContext.tsx:247 [setIsPlaying] true {reason: 'setChannelEnergy: switching to different channel', stack: '    at setChannelEnergy (http://localhost:5174/src…ts/MusicPlayerContext.tsx?t=1766941782211:1210:7)'}
+MusicPlayerContext.tsx:247 [setIsPlaying] true {reason: 'toggleChannel: turning ON channel', stack: '    at toggleChannel (http://localhost:5174/src/co…ts/MusicPlayerContext.tsx?t=1766941782211:1155:7)'}
+streamingAudioEngine.ts:759 [AUDIO][CELLBUG][NETWORK] Connection updated {effectiveType: '4g', connectionType: undefined, downlink: 1.6, isSlowEffectiveType: false, isSlowDownlink: false, …}
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941921900-yzx04zx","mark":"playlistReadyAt","elapsedMs":989}
+MusicPlayerContext.tsx:620 [SYNC EFFECT] Skipping - track is loading
+MusicPlayerContext.tsx:1632 [FIRST AUDIO] Starting detection for requestId: 1766941921900-yzx04zx {oldSourcesCount: 2}
+MusicPlayerContext.tsx:1130 Uncaught (in promise) TypeError: supabase.from(...).insert(...).catch is not a function
+    at generateNewPlaylist (MusicPlayerContext.tsx:1130:10)
+generateNewPlaylist @ MusicPlayerContext.tsx:1130
+await in generateNewPlaylist
+(anonymous) @ MusicPlayerContext.tsx:450
+commitHookEffectListMount @ chunk-6W5FFVKH.js?v=023cf795:16915
+commitPassiveMountOnFiber @ chunk-6W5FFVKH.js?v=023cf795:18156
+commitPassiveMountEffects_complete @ chunk-6W5FFVKH.js?v=023cf795:18129
+commitPassiveMountEffects_begin @ chunk-6W5FFVKH.js?v=023cf795:18119
+commitPassiveMountEffects @ chunk-6W5FFVKH.js?v=023cf795:18109
+flushPassiveEffectsImpl @ chunk-6W5FFVKH.js?v=023cf795:19490
+flushPassiveEffects @ chunk-6W5FFVKH.js?v=023cf795:19447
+(anonymous) @ chunk-6W5FFVKH.js?v=023cf795:19328
+workLoop @ chunk-6W5FFVKH.js?v=023cf795:197
+flushWork @ chunk-6W5FFVKH.js?v=023cf795:176
+performWorkUntilDeadline @ chunk-6W5FFVKH.js?v=023cf795:384
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941921900-yzx04zx","mark":"trackLoadStartAt","elapsedMs":1200}
+streamingAudioEngine.ts:1215 [STREAMING ENGINE] Loading HLS track: 77893
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941921900-yzx04zx","mark":"sourceSelectedAt","elapsedMs":1260}
+streamingAudioEngine.ts:1247 [STREAMING AUDIO] Re-attaching HLS to audio element
+streamingAudioEngine.ts:531 [AUDIO][CELLBUG][HLS] Manifest parsed {levelCount: 4, levels: Array(4), hasMultipleQualities: true, isCellular: false}
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941921900-yzx04zx","mark":"manifestParsedAt","elapsedMs":1308}
+MusicPlayerContext.tsx:620 [SYNC EFFECT] Skipping - track is loading
+streamingAudioEngine.ts:570 [AUDIO][CELLBUG][HLS] Level switched {previousLevel: 3, newLevel: 3, tierName: 'premium', bitrate: 192000, bitrateKbps: 192, …}
+streamingAudioEngine.ts:759 [AUDIO][CELLBUG][NETWORK] Connection updated {effectiveType: '4g', connectionType: undefined, downlink: 1.6, isSlowEffectiveType: false, isSlowDownlink: false, …}
+MusicPlayerContext.tsx:545 [loadAndPlay] Auto-play check: {isPlaying: true, shouldAutoPlayRef: true, willAutoPlay: true, trackId: '77893'}
+MusicPlayerContext.tsx:552 [loadAndPlay] Starting playback...
+MusicPlayerContext.tsx:247 [setIsPlaying] true {reason: 'loadAndPlay: auto-play after track load', stack: '    at loadAndPlay (http://localhost:5174/src/cont…ts/MusicPlayerContext.tsx?t=1766941782211:319:11)'}
+streamingAudioEngine.ts:1797 [STREAMING AUDIO] Starting crossfade {oldElement: 'SECONDARY', newElement: 'PRIMARY', oldSrc: '078ddcdd-2fda-45c2-999a-bc1912ca4627', newSrc: '79cc0e90-25b5-4549-9567-ecfd686f1266', oldVolume: 0.7, …}
+streamingAudioEngine.ts:424 [AUDIO][CELLBUG][EVENT] Playing event - playback resumed {currentTime: 0.000227, duration: 321.0161710000001, wasStalled: false, wasWaiting: false, stallRecoveryAttempts: 0}
+streamingAudioEngine.ts:1809 [STREAMING AUDIO] New track play() succeeded
+MusicPlayerContext.tsx:556 [loadAndPlay] Playback started successfully
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+MusicPlayerContext.tsx:1688 [FIRST AUDIO] Detected! New track audio playing: {requestId: '1766941921900-yzx04zx', src: '79cc0e90-25b5-4549-9567-ecfd686f1266', currentTime: 0.074981}
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941921900-yzx04zx","mark":"firstAudioAt","elapsedMs":1947}
+playerPerf.ts:217 [TTFA] {"requestId":"1766941921900-yzx04zx","triggerType":"channel_change","clickAt":46768,"channelId":"0d93d121-b8fe-42f5-97e9-59ccfab19e92","channelName":"The Deep","energyLevel":"medium","playlistReadyAt":47757.39999999851,"trackLoadStartAt":47968.29999999702,"sourceSelectedAt":48028,"manifestParsedAt":48075.79999999702,"firstAudioAt":48715.10000000149,"ttfaMs":1947,"success":true,"timestamp":"2025-12-28T17:12:03.847Z","audioType":"hls","trackId":"77893","trackName":"The Flow I_A","artistName":"Jule Grasz"}
+playbackNetworkTrace.ts:194 [PLAYBACK_TRACE] {"requestId":"1766941921900-yzx04zx","outcome":"success","ttfaMs":1947,"traceDurationMs":1947,"networkSummary":{"totalRequests":30,"totalNetworkMs":3655,"byHostname":{"xewajlyswijmjxuajhif.supabase.co":{"count":29,"totalMs":3595},"pub-16f9274cf01948468de2d5af8a6fdb23.r2.dev":{"count":1,"totalMs":60}}},"topSlowRequests":[{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Alpha+Chill","durationMs":218,"method":"GET","pathname":"/rest/v1/audio_tracks"},{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Alpha+Chill","durationMs":183,"method":"GET","pathname":"/rest/v1/audio_tracks"},{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Alpha+Chill","durationMs":177,"method":"GET","pathname":"/rest/v1/audio_tracks"},{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Alpha+Chill","durationMs":176,"method":"GET","pathname":"/rest/v1/audio_tracks"},{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Alpha+Chill","durationMs":170,"method":"GET","pathname":"/rest/v1/audio_tracks"}],"endpointsByCount":{"/rest/v1/user_preferences":4,"/rest/v1/slot_strategies":2,"/rest/v1/listening_sessions":2,"/rest/v1/slot_rule_groups":2,"/rest/v1/slot_definitions":2,"/rest/v1/slot_boosts":2,"/rest/v1/user_playback_state":3,"/rest/v1/audio_tracks":10,"/rest/v1/track_play_events":1,"/rest/v1/rpc/update_track_analytics_summary":1,"/hls/77893/master.m3u8":1},"meta":{"triggerType":"channel_change","channelId":"0d93d121-b8fe-42f5-97e9-59ccfab19e92","channelName":"The Deep","energyLevel":"medium","engineType":"streaming"}}
+playbackNetworkTrace.ts:635 [PLAYBACK_TRACE_SUMMARY]
+╭──────────────────────────────────────────────────────────────╮
+│ PLAYBACK TRACE SUMMARY                                       │
+├──────────────────────────────────────────────────────────────┤
+│ ✅ SUCCESS  TTFA: 1.95s      requestId: 17669419...
+│ Trigger: channel_change  Channel: The Deep
+│ Energy: medium           Engine: streaming
+├──────────────────────────────────────────────────────────────┤
+│ Network: 30 requests, 3.65s total
+│   xewajlyswijmjxuajhif.supaba...  29 reqs     3.60s
+│   pub-16f9274cf01948468de2d5a...   1 reqs      60ms
+├──────────────────────────────────────────────────────────────┤
+│ Slowest Requests:
+│   GET  /rest/v1/audio_tracks                     218ms
+│   GET  /rest/v1/audio_tracks                     183ms
+│   GET  /rest/v1/audio_tracks                     177ms
+│   GET  /rest/v1/audio_tracks                     176ms
+│   GET  /rest/v1/audio_tracks                     170ms
+├──────────────────────────────────────────────────────────────┤
+│ Endpoint Counts:
+│   /rest/v1/audio_tracks                               10x
+│   /rest/v1/user_preferences                            4x
+│   /rest/v1/user_playback_state                         3x
+│   /rest/v1/slot_strategies                             2x
+│   /rest/v1/listening_sessions                          2x
+├──────────────────────────────────────────────────────────────┤
+│ ⚠️  Warnings (4):
+│   ⚠️ Multiple user_preferences calls (4x) - consider caching
+│   ⚠️ track_play_events (2x) fired before first audio - shoul
+│   ⚠️ listening_sessions (2x) fired before first audio - shou
+│   ⚠️ Multiple slot_strategy fetches (4x) - use cache
+╰──────────────────────────────────────────────────────────────╯
+MusicPlayerContext.tsx:1507 [LOADING MODAL] First audio detected: {requestId: '1766941921900-yzx04zx', ttfaMs: 1947, elapsedMs: 1947, minVisibleMs: 2900, channelName: 'The Deep'}
+MusicPlayerContext.tsx:1552 [LOADING MODAL] Scheduling delayed dismiss in 953 ms
+MusicPlayerContext.tsx:1632 [FIRST AUDIO] Starting detection for requestId: 1766941921900-yzx04zx {oldSourcesCount: 2}
+streamingAudioEngine.ts:759 [AUDIO][CELLBUG][NETWORK] Connection updated {effectiveType: '4g', connectionType: undefined, downlink: 1.6, isSlowEffectiveType: false, isSlowDownlink: false, …}
+MusicPlayerContext.tsx:1688 [FIRST AUDIO] Detected! New track audio playing: {requestId: '1766941921900-yzx04zx', src: '79cc0e90-25b5-4549-9567-ecfd686f1266', currentTime: 0.129886}
+MusicPlayerContext.tsx:1468 [LOADING MODAL] TTFA already fired for requestId: 1766941921900-yzx04zx
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+streamingAudioEngine.ts:1834 [STREAMING AUDIO] Crossfade complete, cleaning up old track {oldAudioPaused: false, oldAudioVolume: 0, newAudioPaused: false, newAudioVolume: 0.7}
+streamingAudioEngine.ts:1848 [STREAMING AUDIO] Destroying old HLS instance
+streamingAudioEngine.ts:1861 [STREAMING AUDIO] Old audio cleanup complete {oldAudioPaused: true, oldAudioSrc: 'http://localhost:5174/'}
+streamingAudioEngine.ts:759 [AUDIO][CELLBUG][NETWORK] Connection updated {effectiveType: '4g', connectionType: undefined, downlink: 1.6, isSlowEffectiveType: false, isSlowDownlink: false, …}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+MusicPlayerContext.tsx:1562 [LOADING MODAL] Delayed dismiss firing for requestId: 1766941921900-yzx04zx
+MusicPlayerContext.tsx:1415 [LOADING MODAL] Dismissing modal: {requestId: '1766941921900-yzx04zx', ttfaMs: 1947}
+analyticsService.ts:215 [TTFA] Recorded event (local-only): {requestId: '1766941921900-yzx04zx', ttfaMs: 1947, channelName: 'The Deep', energyLevel: 'medium', trackName: 'The Flow I_A', …}
+PlaybackLoadingModal.tsx:105 [PlaybackLoadingModal] Modal visible: {requestId: '1766941921900-yzx04zx', channelName: 'The Deep', status: 'playing'}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: false, hasActiveLoadingRequest: true, …}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: false, hasActiveLoadingRequest: false, …}
+playerPerf.ts:131 [TTFA:START] {"requestId":"1766941926909-5vzlgxe","triggerType":"energy_change","channelName":"The Deep","energyLevel":"high"}
+playbackNetworkTrace.ts:152 [PLAYBACK_TRACE:BEGIN] {"requestId":"1766941926909-5vzlgxe","triggerType":"energy_change","channelId":"0d93d121-b8fe-42f5-97e9-59ccfab19e92","channelName":"The Deep","energyLevel":"high","engineType":"streaming"}
+MusicPlayerContext.tsx:1311 [LOADING MODAL] Captured old audio sources: {count: 2, sources: Array(2)}
+MusicPlayerContext.tsx:1321 [LOADING MODAL] channelImageUrl present: true {explicit: true, fromChannel: true}
+MusicPlayerContext.tsx:1327 [LOADING MODAL] Starting loading state: {requestId: '1766941926909-5vzlgxe', channelName: 'The Deep', energyLevel: 'high', triggerType: 'energy_change', oldAudioSources: 2}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+MusicPlayerContext.tsx:1632 [FIRST AUDIO] Starting detection for requestId: 1766941926909-5vzlgxe {oldSourcesCount: 2}
+PlaybackLoadingModal.tsx:105 [PlaybackLoadingModal] Modal visible: {requestId: '1766941926909-5vzlgxe', channelName: 'The Deep', status: 'loading'}
+MusicPlayerContext.tsx:1998 [setChannelEnergy] Same channel energy change: {channelId: '0d93d121-b8fe-42f5-97e9-59ccfab19e92', energyLevel: 'high', wasPlaying: true, reason: 'User clicked energy button - will start playback'}
+MusicPlayerContext.tsx:247 [setIsPlaying] true {reason: 'setChannelEnergy: user clicked energy button (resume fix)', stack: '    at setChannelEnergy (http://localhost:5174/src…ts/MusicPlayerContext.tsx?t=1766941782211:1239:9)'}
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941926909-5vzlgxe","mark":"playlistReadyAt","elapsedMs":914}
+MusicPlayerContext.tsx:620 [SYNC EFFECT] Skipping - track is loading
+MusicPlayerContext.tsx:1632 [FIRST AUDIO] Starting detection for requestId: 1766941926909-5vzlgxe {oldSourcesCount: 2}
+MusicPlayerContext.tsx:1130 Uncaught (in promise) TypeError: supabase.from(...).insert(...).catch is not a function
+    at generateNewPlaylist (MusicPlayerContext.tsx:1130:10)
+    at async setChannelEnergy (MusicPlayerContext.tsx:2024:9)
+generateNewPlaylist @ MusicPlayerContext.tsx:1130
+await in generateNewPlaylist
+setChannelEnergy @ MusicPlayerContext.tsx:2024
+await in setChannelEnergy
+onClick @ UserDashboard.tsx:1814
+callCallback2 @ chunk-6W5FFVKH.js?v=023cf795:3674
+invokeGuardedCallbackDev @ chunk-6W5FFVKH.js?v=023cf795:3699
+invokeGuardedCallback @ chunk-6W5FFVKH.js?v=023cf795:3733
+invokeGuardedCallbackAndCatchFirstError @ chunk-6W5FFVKH.js?v=023cf795:3736
+executeDispatch @ chunk-6W5FFVKH.js?v=023cf795:7014
+processDispatchQueueItemsInOrder @ chunk-6W5FFVKH.js?v=023cf795:7034
+processDispatchQueue @ chunk-6W5FFVKH.js?v=023cf795:7043
+dispatchEventsForPlugins @ chunk-6W5FFVKH.js?v=023cf795:7051
+(anonymous) @ chunk-6W5FFVKH.js?v=023cf795:7174
+batchedUpdates$1 @ chunk-6W5FFVKH.js?v=023cf795:18913
+batchedUpdates @ chunk-6W5FFVKH.js?v=023cf795:3579
+dispatchEventForPluginEventSystem @ chunk-6W5FFVKH.js?v=023cf795:7173
+dispatchEventWithEnableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay @ chunk-6W5FFVKH.js?v=023cf795:5478
+dispatchEvent @ chunk-6W5FFVKH.js?v=023cf795:5472
+dispatchDiscreteEvent @ chunk-6W5FFVKH.js?v=023cf795:5449
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941926909-5vzlgxe","mark":"trackLoadStartAt","elapsedMs":1162}
+streamingAudioEngine.ts:1215 [STREAMING ENGINE] Loading HLS track: 43823
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941926909-5vzlgxe","mark":"sourceSelectedAt","elapsedMs":1262}
+streamingAudioEngine.ts:1247 [STREAMING AUDIO] Re-attaching HLS to audio element
+streamingAudioEngine.ts:531 [AUDIO][CELLBUG][HLS] Manifest parsed {levelCount: 4, levels: Array(4), hasMultipleQualities: true, isCellular: false}
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941926909-5vzlgxe","mark":"manifestParsedAt","elapsedMs":1316}
+MusicPlayerContext.tsx:620 [SYNC EFFECT] Skipping - track is loading
+streamingAudioEngine.ts:570 [AUDIO][CELLBUG][HLS] Level switched {previousLevel: 3, newLevel: 3, tierName: 'premium', bitrate: 192000, bitrateKbps: 192, …}
+MusicPlayerContext.tsx:620 [SYNC EFFECT] Skipping - track is loading
+MusicPlayerContext.tsx:545 [loadAndPlay] Auto-play check: {isPlaying: true, shouldAutoPlayRef: true, willAutoPlay: true, trackId: '43823'}
+MusicPlayerContext.tsx:552 [loadAndPlay] Starting playback...
+MusicPlayerContext.tsx:247 [setIsPlaying] true {reason: 'loadAndPlay: auto-play after track load', stack: '    at loadAndPlay (http://localhost:5174/src/cont…ts/MusicPlayerContext.tsx?t=1766941782211:319:11)'}
+streamingAudioEngine.ts:1797 [STREAMING AUDIO] Starting crossfade {oldElement: 'PRIMARY', newElement: 'SECONDARY', oldSrc: '79cc0e90-25b5-4549-9567-ecfd686f1266', newSrc: 'ac8f6fa8-bd0a-4fa6-9a7a-e4dbdde021a3', oldVolume: 0.7, …}
+streamingAudioEngine.ts:424 [AUDIO][CELLBUG][EVENT] Playing event - playback resumed {currentTime: 0.00008, duration: 231.28558100000012, wasStalled: false, wasWaiting: false, stallRecoveryAttempts: 0}
+streamingAudioEngine.ts:1809 [STREAMING AUDIO] New track play() succeeded
+MusicPlayerContext.tsx:556 [loadAndPlay] Playback started successfully
+MusicPlayerContext.tsx:1688 [FIRST AUDIO] Detected! New track audio playing: {requestId: '1766941926909-5vzlgxe', src: 'ac8f6fa8-bd0a-4fa6-9a7a-e4dbdde021a3', currentTime: 0.098378}
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941926909-5vzlgxe","mark":"firstAudioAt","elapsedMs":1975}
+playerPerf.ts:217 [TTFA] {"requestId":"1766941926909-5vzlgxe","triggerType":"energy_change","clickAt":51776.89999999851,"channelId":"0d93d121-b8fe-42f5-97e9-59ccfab19e92","channelName":"The Deep","energyLevel":"high","playlistReadyAt":52690.89999999851,"trackLoadStartAt":52938.70000000298,"sourceSelectedAt":53038.39999999851,"manifestParsedAt":53092.39999999851,"firstAudioAt":53751.70000000298,"ttfaMs":1975,"success":true,"timestamp":"2025-12-28T17:12:08.884Z","audioType":"hls","trackId":"43823","trackName":"Eye heart knot","artistName":"General fuzz"}
+playbackNetworkTrace.ts:194 [PLAYBACK_TRACE] {"requestId":"1766941926909-5vzlgxe","outcome":"success","ttfaMs":1975,"traceDurationMs":1975,"networkSummary":{"totalRequests":22,"totalNetworkMs":2802,"byHostname":{"xewajlyswijmjxuajhif.supabase.co":{"count":21,"totalMs":2702},"pub-16f9274cf01948468de2d5af8a6fdb23.r2.dev":{"count":1,"totalMs":100}}},"topSlowRequests":[{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Alpha+Chill","durationMs":214,"method":"GET","pathname":"/rest/v1/audio_tracks"},{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Alpha+Chill","durationMs":194,"method":"GET","pathname":"/rest/v1/audio_tracks"},{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Alpha+Chill","durationMs":191,"method":"GET","pathname":"/rest/v1/audio_tracks"},{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Alpha+Chill","durationMs":186,"method":"GET","pathname":"/rest/v1/audio_tracks"},{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Alpha+Chill","durationMs":182,"method":"GET","pathname":"/rest/v1/audio_tracks"}],"endpointsByCount":{"/rest/v1/user_preferences":2,"/rest/v1/slot_strategies":1,"/rest/v1/slot_definitions":1,"/rest/v1/slot_rule_groups":1,"/rest/v1/slot_boosts":1,"/rest/v1/user_playback_state":3,"/rest/v1/audio_tracks":10,"/rest/v1/track_play_events":1,"/rest/v1/rpc/update_track_analytics_summary":1,"/hls/43823/master.m3u8":1},"meta":{"triggerType":"energy_change","channelId":"0d93d121-b8fe-42f5-97e9-59ccfab19e92","channelName":"The Deep","energyLevel":"high","engineType":"streaming"}}
+playbackNetworkTrace.ts:635 [PLAYBACK_TRACE_SUMMARY]
+╭──────────────────────────────────────────────────────────────╮
+│ PLAYBACK TRACE SUMMARY                                       │
+├──────────────────────────────────────────────────────────────┤
+│ ✅ SUCCESS  TTFA: 1.98s      requestId: 17669419...
+│ Trigger: energy_change   Channel: The Deep
+│ Energy: high             Engine: streaming
+├──────────────────────────────────────────────────────────────┤
+│ Network: 22 requests, 2.80s total
+│   xewajlyswijmjxuajhif.supaba...  21 reqs     2.70s
+│   pub-16f9274cf01948468de2d5a...   1 reqs     100ms
+├──────────────────────────────────────────────────────────────┤
+│ Slowest Requests:
+│   GET  /rest/v1/audio_tracks                     214ms
+│   GET  /rest/v1/audio_tracks                     194ms
+│   GET  /rest/v1/audio_tracks                     191ms
+│   GET  /rest/v1/audio_tracks                     186ms
+│   GET  /rest/v1/audio_tracks                     182ms
+├──────────────────────────────────────────────────────────────┤
+│ Endpoint Counts:
+│   /rest/v1/audio_tracks                               10x
+│   /rest/v1/user_playback_state                         3x
+│   /rest/v1/user_preferences                            2x
+│   /rest/v1/slot_strategies                             1x
+│   /rest/v1/slot_definitions                            1x
+├──────────────────────────────────────────────────────────────┤
+│ ⚠️  Warnings (3):
+│   ⚠️ Multiple user_preferences calls (2x) - consider caching
+│   ⚠️ track_play_events (2x) fired before first audio - shoul
+│   ⚠️ Multiple slot_strategy fetches (2x) - use cache
+╰──────────────────────────────────────────────────────────────╯
+MusicPlayerContext.tsx:1507 [LOADING MODAL] First audio detected: {requestId: '1766941926909-5vzlgxe', ttfaMs: 1975, elapsedMs: 1975, minVisibleMs: 2900, channelName: 'The Deep'}
+MusicPlayerContext.tsx:1552 [LOADING MODAL] Scheduling delayed dismiss in 925 ms
+MusicPlayerContext.tsx:1632 [FIRST AUDIO] Starting detection for requestId: 1766941926909-5vzlgxe {oldSourcesCount: 2}
+streamingAudioEngine.ts:759 [AUDIO][CELLBUG][NETWORK] Connection updated {effectiveType: '4g', connectionType: undefined, downlink: 1.6, isSlowEffectiveType: false, isSlowDownlink: false, …}
+MusicPlayerContext.tsx:1688 [FIRST AUDIO] Detected! New track audio playing: {requestId: '1766941926909-5vzlgxe', src: 'ac8f6fa8-bd0a-4fa6-9a7a-e4dbdde021a3', currentTime: 0.15211}
+MusicPlayerContext.tsx:1468 [LOADING MODAL] TTFA already fired for requestId: 1766941926909-5vzlgxe
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+streamingAudioEngine.ts:1834 [STREAMING AUDIO] Crossfade complete, cleaning up old track {oldAudioPaused: false, oldAudioVolume: 0, newAudioPaused: false, newAudioVolume: 0.7}
+streamingAudioEngine.ts:1848 [STREAMING AUDIO] Destroying old HLS instance
+streamingAudioEngine.ts:1861 [STREAMING AUDIO] Old audio cleanup complete {oldAudioPaused: true, oldAudioSrc: 'http://localhost:5174/'}
+streamingAudioEngine.ts:759 [AUDIO][CELLBUG][NETWORK] Connection updated {effectiveType: '4g', connectionType: undefined, downlink: 1.6, isSlowEffectiveType: false, isSlowDownlink: false, …}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+MusicPlayerContext.tsx:1562 [LOADING MODAL] Delayed dismiss firing for requestId: 1766941926909-5vzlgxe
+MusicPlayerContext.tsx:1415 [LOADING MODAL] Dismissing modal: {requestId: '1766941926909-5vzlgxe', ttfaMs: 1975}
+analyticsService.ts:215 [TTFA] Recorded event (local-only): {requestId: '1766941926909-5vzlgxe', ttfaMs: 1975, channelName: 'The Deep', energyLevel: 'high', trackName: 'Eye heart knot', …}
+PlaybackLoadingModal.tsx:105 [PlaybackLoadingModal] Modal visible: {requestId: '1766941926909-5vzlgxe', channelName: 'The Deep', status: 'playing'}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: false, hasActiveLoadingRequest: true, …}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: false, hasActiveLoadingRequest: false, …}
+playerPerf.ts:131 [TTFA:START] {"requestId":"1766941931646-6nt8gsk","triggerType":"energy_change","channelName":"The Drop","energyLevel":"low"}
+playbackNetworkTrace.ts:152 [PLAYBACK_TRACE:BEGIN] {"requestId":"1766941931646-6nt8gsk","triggerType":"energy_change","channelId":"c9446d4f-a799-4617-adce-f15f9aa3bc65","channelName":"The Drop","energyLevel":"low","engineType":"streaming"}
+MusicPlayerContext.tsx:1311 [LOADING MODAL] Captured old audio sources: {count: 2, sources: Array(2)}
+MusicPlayerContext.tsx:1321 [LOADING MODAL] channelImageUrl present: true {explicit: true, fromChannel: true}
+MusicPlayerContext.tsx:1327 [LOADING MODAL] Starting loading state: {requestId: '1766941931646-6nt8gsk', channelName: 'The Drop', energyLevel: 'low', triggerType: 'energy_change', oldAudioSources: 2}
+MusicPlayerContext.tsx:1777 [DIAGNOSTIC] toggleChannel called: {channelName: 'The Drop', turnOn: true, fromPlayer: false, currentIsPlaying: true, activeChannelId: '0d93d121-b8fe-42f5-97e9-59ccfab19e92'}
+playerPerf.ts:131 [TTFA:START] {"requestId":"1766941931648-pdu4tul","triggerType":"channel_change","channelName":"The Drop","energyLevel":"low"}
+playbackNetworkTrace.ts:152 [PLAYBACK_TRACE:BEGIN] {"requestId":"1766941931648-pdu4tul","triggerType":"channel_change","channelId":"c9446d4f-a799-4617-adce-f15f9aa3bc65","channelName":"The Drop","energyLevel":"low","engineType":"streaming"}
+MusicPlayerContext.tsx:1311 [LOADING MODAL] Captured old audio sources: {count: 2, sources: Array(2)}
+MusicPlayerContext.tsx:1321 [LOADING MODAL] channelImageUrl present: true {explicit: true, fromChannel: true}
+MusicPlayerContext.tsx:1327 [LOADING MODAL] Starting loading state: {requestId: '1766941931648-pdu4tul', channelName: 'The Drop', energyLevel: 'low', triggerType: 'channel_switch', oldAudioSources: 2}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+MusicPlayerContext.tsx:1632 [FIRST AUDIO] Starting detection for requestId: 1766941931648-pdu4tul {oldSourcesCount: 2}
+PlaybackLoadingModal.tsx:105 [PlaybackLoadingModal] Modal visible: {requestId: '1766941931648-pdu4tul', channelName: 'The Drop', status: 'loading'}
+MusicPlayerContext.tsx:247 [setIsPlaying] true {reason: 'setChannelEnergy: switching to different channel', stack: '    at setChannelEnergy (http://localhost:5174/src…ts/MusicPlayerContext.tsx?t=1766941782211:1210:7)'}
+MusicPlayerContext.tsx:247 [setIsPlaying] true {reason: 'toggleChannel: turning ON channel', stack: '    at toggleChannel (http://localhost:5174/src/co…ts/MusicPlayerContext.tsx?t=1766941782211:1155:7)'}
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941931648-pdu4tul","mark":"playlistReadyAt","elapsedMs":653}
+MusicPlayerContext.tsx:620 [SYNC EFFECT] Skipping - track is loading
+MusicPlayerContext.tsx:1632 [FIRST AUDIO] Starting detection for requestId: 1766941931648-pdu4tul {oldSourcesCount: 2}
+MusicPlayerContext.tsx:1130 Uncaught (in promise) TypeError: supabase.from(...).insert(...).catch is not a function
+    at generateNewPlaylist (MusicPlayerContext.tsx:1130:10)
+generateNewPlaylist @ MusicPlayerContext.tsx:1130
+await in generateNewPlaylist
+(anonymous) @ MusicPlayerContext.tsx:450
+commitHookEffectListMount @ chunk-6W5FFVKH.js?v=023cf795:16915
+commitPassiveMountOnFiber @ chunk-6W5FFVKH.js?v=023cf795:18156
+commitPassiveMountEffects_complete @ chunk-6W5FFVKH.js?v=023cf795:18129
+commitPassiveMountEffects_begin @ chunk-6W5FFVKH.js?v=023cf795:18119
+commitPassiveMountEffects @ chunk-6W5FFVKH.js?v=023cf795:18109
+flushPassiveEffectsImpl @ chunk-6W5FFVKH.js?v=023cf795:19490
+flushPassiveEffects @ chunk-6W5FFVKH.js?v=023cf795:19447
+(anonymous) @ chunk-6W5FFVKH.js?v=023cf795:19328
+workLoop @ chunk-6W5FFVKH.js?v=023cf795:197
+flushWork @ chunk-6W5FFVKH.js?v=023cf795:176
+performWorkUntilDeadline @ chunk-6W5FFVKH.js?v=023cf795:384
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941931648-pdu4tul","mark":"trackLoadStartAt","elapsedMs":879}
+streamingAudioEngine.ts:1215 [STREAMING ENGINE] Loading HLS track: 144553
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941931648-pdu4tul","mark":"sourceSelectedAt","elapsedMs":879}
+streamingAudioEngine.ts:1247 [STREAMING AUDIO] Re-attaching HLS to audio element
+streamingAudioEngine.ts:531 [AUDIO][CELLBUG][HLS] Manifest parsed {levelCount: 4, levels: Array(4), hasMultipleQualities: true, isCellular: false}
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941931648-pdu4tul","mark":"manifestParsedAt","elapsedMs":990}
+MusicPlayerContext.tsx:620 [SYNC EFFECT] Skipping - track is loading
+streamingAudioEngine.ts:570 [AUDIO][CELLBUG][HLS] Level switched {previousLevel: 3, newLevel: 3, tierName: 'premium', bitrate: 192000, bitrateKbps: 192, …}
+MusicPlayerContext.tsx:545 [loadAndPlay] Auto-play check: {isPlaying: true, shouldAutoPlayRef: true, willAutoPlay: true, trackId: '144553'}
+MusicPlayerContext.tsx:552 [loadAndPlay] Starting playback...
+MusicPlayerContext.tsx:247 [setIsPlaying] true {reason: 'loadAndPlay: auto-play after track load', stack: '    at loadAndPlay (http://localhost:5174/src/cont…ts/MusicPlayerContext.tsx?t=1766941782211:319:11)'}
+streamingAudioEngine.ts:1797 [STREAMING AUDIO] Starting crossfade {oldElement: 'SECONDARY', newElement: 'PRIMARY', oldSrc: 'ac8f6fa8-bd0a-4fa6-9a7a-e4dbdde021a3', newSrc: '8324bdcd-9c3c-4a4e-8871-34e8e8e1928d', oldVolume: 0.7, …}
+streamingAudioEngine.ts:424 [AUDIO][CELLBUG][EVENT] Playing event - playback resumed {currentTime: 0.00016, duration: 288.51960500000007, wasStalled: false, wasWaiting: false, stallRecoveryAttempts: 0}
+streamingAudioEngine.ts:1809 [STREAMING AUDIO] New track play() succeeded
+MusicPlayerContext.tsx:556 [loadAndPlay] Playback started successfully
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+streamingAudioEngine.ts:759 [AUDIO][CELLBUG][NETWORK] Connection updated {effectiveType: '4g', connectionType: undefined, downlink: 1.6, isSlowEffectiveType: false, isSlowDownlink: false, …}
+MusicPlayerContext.tsx:1688 [FIRST AUDIO] Detected! New track audio playing: {requestId: '1766941931648-pdu4tul', src: '8324bdcd-9c3c-4a4e-8871-34e8e8e1928d', currentTime: 0.058407}
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941931648-pdu4tul","mark":"firstAudioAt","elapsedMs":1612}
+playerPerf.ts:217 [TTFA] {"requestId":"1766941931648-pdu4tul","triggerType":"channel_change","clickAt":56515.79999999702,"channelId":"c9446d4f-a799-4617-adce-f15f9aa3bc65","channelName":"The Drop","energyLevel":"low","playlistReadyAt":57168.29999999702,"trackLoadStartAt":57395.10000000149,"sourceSelectedAt":57395.20000000298,"manifestParsedAt":57506,"firstAudioAt":58127.70000000298,"ttfaMs":1612,"success":true,"timestamp":"2025-12-28T17:12:13.260Z","audioType":"hls","trackId":"144553","trackName":"The Colors Of The Horizon(DynamicIllusionRemix)_v3","artistName":"Dreaming Cooper & Unusual Cosmic Process"}
+playbackNetworkTrace.ts:194 [PLAYBACK_TRACE] {"requestId":"1766941931648-pdu4tul","outcome":"success","ttfaMs":1612,"traceDurationMs":1612,"networkSummary":{"totalRequests":21,"totalNetworkMs":2786,"byHostname":{"xewajlyswijmjxuajhif.supabase.co":{"count":21,"totalMs":2786}}},"topSlowRequests":[{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Uptempo","durationMs":215,"method":"GET","pathname":"/rest/v1/audio_tracks"},{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Uptempo","durationMs":212,"method":"GET","pathname":"/rest/v1/audio_tracks"},{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Uptempo","durationMs":202,"method":"GET","pathname":"/rest/v1/audio_tracks"},{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Uptempo","durationMs":195,"method":"GET","pathname":"/rest/v1/audio_tracks"},{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Uptempo","durationMs":192,"method":"GET","pathname":"/rest/v1/audio_tracks"}],"endpointsByCount":{"/rest/v1/user_preferences":4,"/rest/v1/user_playback_state":3,"/rest/v1/listening_sessions":2,"/rest/v1/audio_tracks":10,"/rest/v1/track_play_events":1,"/rest/v1/rpc/update_track_analytics_summary":1},"meta":{"triggerType":"channel_change","channelId":"c9446d4f-a799-4617-adce-f15f9aa3bc65","channelName":"The Drop","energyLevel":"low","engineType":"streaming"}}
+playbackNetworkTrace.ts:635 [PLAYBACK_TRACE_SUMMARY]
+╭──────────────────────────────────────────────────────────────╮
+│ PLAYBACK TRACE SUMMARY                                       │
+├──────────────────────────────────────────────────────────────┤
+│ ✅ SUCCESS  TTFA: 1.61s      requestId: 17669419...
+│ Trigger: channel_change  Channel: The Drop
+│ Energy: low              Engine: streaming
+├──────────────────────────────────────────────────────────────┤
+│ Network: 21 requests, 2.79s total
+│   xewajlyswijmjxuajhif.supaba...  21 reqs     2.79s
+├──────────────────────────────────────────────────────────────┤
+│ Slowest Requests:
+│   GET  /rest/v1/audio_tracks                     215ms
+│   GET  /rest/v1/audio_tracks                     212ms
+│   GET  /rest/v1/audio_tracks                     202ms
+│   GET  /rest/v1/audio_tracks                     195ms
+│   GET  /rest/v1/audio_tracks                     192ms
+├──────────────────────────────────────────────────────────────┤
+│ Endpoint Counts:
+│   /rest/v1/audio_tracks                               10x
+│   /rest/v1/user_preferences                            4x
+│   /rest/v1/user_playback_state                         3x
+│   /rest/v1/listening_sessions                          2x
+│   /rest/v1/track_play_events                           1x
+├──────────────────────────────────────────────────────────────┤
+│ ⚠️  Warnings (3):
+│   ⚠️ Multiple user_preferences calls (4x) - consider caching
+│   ⚠️ track_play_events (2x) fired before first audio - shoul
+│   ⚠️ listening_sessions (2x) fired before first audio - shou
+╰──────────────────────────────────────────────────────────────╯
+MusicPlayerContext.tsx:1507 [LOADING MODAL] First audio detected: {requestId: '1766941931648-pdu4tul', ttfaMs: 1612, elapsedMs: 1612, minVisibleMs: 2900, channelName: 'The Drop'}
+MusicPlayerContext.tsx:1552 [LOADING MODAL] Scheduling delayed dismiss in 1288 ms
+MusicPlayerContext.tsx:1632 [FIRST AUDIO] Starting detection for requestId: 1766941931648-pdu4tul {oldSourcesCount: 2}
+MusicPlayerContext.tsx:1688 [FIRST AUDIO] Detected! New track audio playing: {requestId: '1766941931648-pdu4tul', src: '8324bdcd-9c3c-4a4e-8871-34e8e8e1928d', currentTime: 0.11306}
+MusicPlayerContext.tsx:1468 [LOADING MODAL] TTFA already fired for requestId: 1766941931648-pdu4tul
+streamingAudioEngine.ts:759 [AUDIO][CELLBUG][NETWORK] Connection updated {effectiveType: '4g', connectionType: undefined, downlink: 1.6, isSlowEffectiveType: false, isSlowDownlink: false, …}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+streamingAudioEngine.ts:1834 [STREAMING AUDIO] Crossfade complete, cleaning up old track {oldAudioPaused: false, oldAudioVolume: 0, newAudioPaused: false, newAudioVolume: 0.7}
+streamingAudioEngine.ts:1848 [STREAMING AUDIO] Destroying old HLS instance
+streamingAudioEngine.ts:1861 [STREAMING AUDIO] Old audio cleanup complete {oldAudioPaused: true, oldAudioSrc: 'http://localhost:5174/'}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+streamingAudioEngine.ts:759 [AUDIO][CELLBUG][NETWORK] Connection updated {effectiveType: '4g', connectionType: undefined, downlink: 1.6, isSlowEffectiveType: false, isSlowDownlink: false, …}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+MusicPlayerContext.tsx:1562 [LOADING MODAL] Delayed dismiss firing for requestId: 1766941931648-pdu4tul
+MusicPlayerContext.tsx:1415 [LOADING MODAL] Dismissing modal: {requestId: '1766941931648-pdu4tul', ttfaMs: 1612}
+analyticsService.ts:215 [TTFA] Recorded event (local-only): {requestId: '1766941931648-pdu4tul', ttfaMs: 1612, channelName: 'The Drop', energyLevel: 'low', trackName: 'The Colors Of The Horizon(DynamicIllusionRemix)_v3', …}
+PlaybackLoadingModal.tsx:105 [PlaybackLoadingModal] Modal visible: {requestId: '1766941931648-pdu4tul', channelName: 'The Drop', status: 'playing'}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: false, hasActiveLoadingRequest: true, …}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: false, hasActiveLoadingRequest: false, …}
+playerPerf.ts:131 [TTFA:START] {"requestId":"1766941936560-6rq4nsa","triggerType":"energy_change","channelName":"The Drop","energyLevel":"high"}
+playbackNetworkTrace.ts:152 [PLAYBACK_TRACE:BEGIN] {"requestId":"1766941936560-6rq4nsa","triggerType":"energy_change","channelId":"c9446d4f-a799-4617-adce-f15f9aa3bc65","channelName":"The Drop","energyLevel":"high","engineType":"streaming"}
+MusicPlayerContext.tsx:1311 [LOADING MODAL] Captured old audio sources: {count: 2, sources: Array(2)}
+MusicPlayerContext.tsx:1321 [LOADING MODAL] channelImageUrl present: true {explicit: true, fromChannel: true}
+MusicPlayerContext.tsx:1327 [LOADING MODAL] Starting loading state: {requestId: '1766941936560-6rq4nsa', channelName: 'The Drop', energyLevel: 'high', triggerType: 'energy_change', oldAudioSources: 2}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+MusicPlayerContext.tsx:1632 [FIRST AUDIO] Starting detection for requestId: 1766941936560-6rq4nsa {oldSourcesCount: 2}
+PlaybackLoadingModal.tsx:105 [PlaybackLoadingModal] Modal visible: {requestId: '1766941936560-6rq4nsa', channelName: 'The Drop', status: 'loading'}
+MusicPlayerContext.tsx:1998 [setChannelEnergy] Same channel energy change: {channelId: 'c9446d4f-a799-4617-adce-f15f9aa3bc65', energyLevel: 'high', wasPlaying: true, reason: 'User clicked energy button - will start playback'}
+MusicPlayerContext.tsx:247 [setIsPlaying] true {reason: 'setChannelEnergy: user clicked energy button (resume fix)', stack: '    at setChannelEnergy (http://localhost:5174/src…ts/MusicPlayerContext.tsx?t=1766941782211:1239:9)'}
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941936560-6rq4nsa","mark":"playlistReadyAt","elapsedMs":626}
+MusicPlayerContext.tsx:620 [SYNC EFFECT] Skipping - track is loading
+MusicPlayerContext.tsx:1632 [FIRST AUDIO] Starting detection for requestId: 1766941936560-6rq4nsa {oldSourcesCount: 2}
+MusicPlayerContext.tsx:1130 Uncaught (in promise) TypeError: supabase.from(...).insert(...).catch is not a function
+    at generateNewPlaylist (MusicPlayerContext.tsx:1130:10)
+    at async setChannelEnergy (MusicPlayerContext.tsx:2024:9)
+generateNewPlaylist @ MusicPlayerContext.tsx:1130
+await in generateNewPlaylist
+setChannelEnergy @ MusicPlayerContext.tsx:2024
+await in setChannelEnergy
+onClick @ UserDashboard.tsx:1814
+callCallback2 @ chunk-6W5FFVKH.js?v=023cf795:3674
+invokeGuardedCallbackDev @ chunk-6W5FFVKH.js?v=023cf795:3699
+invokeGuardedCallback @ chunk-6W5FFVKH.js?v=023cf795:3733
+invokeGuardedCallbackAndCatchFirstError @ chunk-6W5FFVKH.js?v=023cf795:3736
+executeDispatch @ chunk-6W5FFVKH.js?v=023cf795:7014
+processDispatchQueueItemsInOrder @ chunk-6W5FFVKH.js?v=023cf795:7034
+processDispatchQueue @ chunk-6W5FFVKH.js?v=023cf795:7043
+dispatchEventsForPlugins @ chunk-6W5FFVKH.js?v=023cf795:7051
+(anonymous) @ chunk-6W5FFVKH.js?v=023cf795:7174
+batchedUpdates$1 @ chunk-6W5FFVKH.js?v=023cf795:18913
+batchedUpdates @ chunk-6W5FFVKH.js?v=023cf795:3579
+dispatchEventForPluginEventSystem @ chunk-6W5FFVKH.js?v=023cf795:7173
+dispatchEventWithEnableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay @ chunk-6W5FFVKH.js?v=023cf795:5478
+dispatchEvent @ chunk-6W5FFVKH.js?v=023cf795:5472
+dispatchDiscreteEvent @ chunk-6W5FFVKH.js?v=023cf795:5449
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941936560-6rq4nsa","mark":"trackLoadStartAt","elapsedMs":868}
+streamingAudioEngine.ts:1215 [STREAMING ENGINE] Loading HLS track: 94143
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941936560-6rq4nsa","mark":"sourceSelectedAt","elapsedMs":868}
+streamingAudioEngine.ts:1247 [STREAMING AUDIO] Re-attaching HLS to audio element
+streamingAudioEngine.ts:531 [AUDIO][CELLBUG][HLS] Manifest parsed {levelCount: 4, levels: Array(4), hasMultipleQualities: true, isCellular: false}
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941936560-6rq4nsa","mark":"manifestParsedAt","elapsedMs":968}
+MusicPlayerContext.tsx:620 [SYNC EFFECT] Skipping - track is loading
+streamingAudioEngine.ts:570 [AUDIO][CELLBUG][HLS] Level switched {previousLevel: 3, newLevel: 3, tierName: 'premium', bitrate: 192000, bitrateKbps: 192, …}
+MusicPlayerContext.tsx:545 [loadAndPlay] Auto-play check: {isPlaying: true, shouldAutoPlayRef: true, willAutoPlay: true, trackId: '94143'}
+MusicPlayerContext.tsx:552 [loadAndPlay] Starting playback...
+MusicPlayerContext.tsx:247 [setIsPlaying] true {reason: 'loadAndPlay: auto-play after track load', stack: '    at loadAndPlay (http://localhost:5174/src/cont…ts/MusicPlayerContext.tsx?t=1766941782211:319:11)'}
+streamingAudioEngine.ts:1797 [STREAMING AUDIO] Starting crossfade {oldElement: 'PRIMARY', newElement: 'SECONDARY', oldSrc: '8324bdcd-9c3c-4a4e-8871-34e8e8e1928d', newSrc: 'a599eaf8-a0ab-4d14-9ae0-c95525ca97c8', oldVolume: 0.7, …}
+streamingAudioEngine.ts:424 [AUDIO][CELLBUG][EVENT] Playing event - playback resumed {currentTime: 0.001778, duration: 196.54285900000008, wasStalled: false, wasWaiting: false, stallRecoveryAttempts: 0}
+streamingAudioEngine.ts:1809 [STREAMING AUDIO] New track play() succeeded
+MusicPlayerContext.tsx:556 [loadAndPlay] Playback started successfully
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+streamingAudioEngine.ts:759 [AUDIO][CELLBUG][NETWORK] Connection updated {effectiveType: '4g', connectionType: undefined, downlink: 1.6, isSlowEffectiveType: false, isSlowDownlink: false, …}
+MusicPlayerContext.tsx:1688 [FIRST AUDIO] Detected! New track audio playing: {requestId: '1766941936560-6rq4nsa', src: 'a599eaf8-a0ab-4d14-9ae0-c95525ca97c8', currentTime: 0.086736}
+playerPerf.ts:158 [TTFA:MARK] {"requestId":"1766941936560-6rq4nsa","mark":"firstAudioAt","elapsedMs":1635}
+playerPerf.ts:217 [TTFA] {"requestId":"1766941936560-6rq4nsa","triggerType":"energy_change","clickAt":61427.89999999851,"channelId":"c9446d4f-a799-4617-adce-f15f9aa3bc65","channelName":"The Drop","energyLevel":"high","playlistReadyAt":62054.20000000298,"trackLoadStartAt":62295.70000000298,"sourceSelectedAt":62295.79999999702,"manifestParsedAt":62396,"firstAudioAt":63062.70000000298,"ttfaMs":1635,"success":true,"timestamp":"2025-12-28T17:12:18.195Z","audioType":"hls","trackId":"94143","trackName":"New Room (Jumex Remix)_v4","artistName":"Jocksten"}
+playbackNetworkTrace.ts:194 [PLAYBACK_TRACE] {"requestId":"1766941936560-6rq4nsa","outcome":"success","ttfaMs":1635,"traceDurationMs":1635,"networkSummary":{"totalRequests":17,"totalNetworkMs":2301,"byHostname":{"xewajlyswijmjxuajhif.supabase.co":{"count":17,"totalMs":2301}}},"topSlowRequests":[{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Uptempo","durationMs":211,"method":"GET","pathname":"/rest/v1/audio_tracks"},{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Uptempo","durationMs":198,"method":"GET","pathname":"/rest/v1/audio_tracks"},{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Uptempo","durationMs":188,"method":"GET","pathname":"/rest/v1/audio_tracks"},{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/audio_tracks?select=id%2Cmetadata%2Cspeed%2Cintensity%2Cbrightness%2Ccomplexity%2Carousal%2Cvalence%2Ctempo%2Cduration_seconds%2Ccatalog%2Clocked%2Ctrack_user_genre_id%2Cmusic_key_value%2Cenergy_set%2Cenergy_low%2Cenergy_medium%2Cenergy_high&deleted_at=is.null&genre=eq.Uptempo","durationMs":188,"method":"GET","pathname":"/rest/v1/audio_tracks"},{"url":"https://xewajlyswijmjxuajhif.supabase.co/rest/v1/user_playback_state?select=*&user_id=eq.e073383a-7d22-40ef-86da-bb6566a33965&channel_id=eq.c9446d4f-a799-4617-adce-f15f9aa3bc65&energy_level=eq.high","durationMs":136,"method":"GET","pathname":"/rest/v1/user_playback_state"}],"endpointsByCount":{"/rest/v1/user_preferences":2,"/rest/v1/user_playback_state":3,"/rest/v1/audio_tracks":10,"/rest/v1/track_play_events":1,"/rest/v1/rpc/update_track_analytics_summary":1},"meta":{"triggerType":"energy_change","channelId":"c9446d4f-a799-4617-adce-f15f9aa3bc65","channelName":"The Drop","energyLevel":"high","engineType":"streaming"}}
+playbackNetworkTrace.ts:635 [PLAYBACK_TRACE_SUMMARY]
+╭──────────────────────────────────────────────────────────────╮
+│ PLAYBACK TRACE SUMMARY                                       │
+├──────────────────────────────────────────────────────────────┤
+│ ✅ SUCCESS  TTFA: 1.64s      requestId: 17669419...
+│ Trigger: energy_change   Channel: The Drop
+│ Energy: high             Engine: streaming
+├──────────────────────────────────────────────────────────────┤
+│ Network: 17 requests, 2.30s total
+│   xewajlyswijmjxuajhif.supaba...  17 reqs     2.30s
+├──────────────────────────────────────────────────────────────┤
+│ Slowest Requests:
+│   GET  /rest/v1/audio_tracks                     211ms
+│   GET  /rest/v1/audio_tracks                     198ms
+│   GET  /rest/v1/audio_tracks                     188ms
+│   GET  /rest/v1/audio_tracks                     188ms
+│   GET  /rest/v1/user_playback_state              136ms
+├──────────────────────────────────────────────────────────────┤
+│ Endpoint Counts:
+│   /rest/v1/audio_tracks                               10x
+│   /rest/v1/user_playback_state                         3x
+│   /rest/v1/user_preferences                            2x
+│   /rest/v1/track_play_events                           1x
+│   /rest/v1/rpc/update_track_analytics_summary          1x
+├──────────────────────────────────────────────────────────────┤
+│ ⚠️  Warnings (2):
+│   ⚠️ Multiple user_preferences calls (2x) - consider caching
+│   ⚠️ track_play_events (2x) fired before first audio - shoul
+╰──────────────────────────────────────────────────────────────╯
+MusicPlayerContext.tsx:1507 [LOADING MODAL] First audio detected: {requestId: '1766941936560-6rq4nsa', ttfaMs: 1635, elapsedMs: 1635, minVisibleMs: 2900, channelName: 'The Drop'}
+MusicPlayerContext.tsx:1552 [LOADING MODAL] Scheduling delayed dismiss in 1265 ms
+MusicPlayerContext.tsx:1632 [FIRST AUDIO] Starting detection for requestId: 1766941936560-6rq4nsa {oldSourcesCount: 2}
+MusicPlayerContext.tsx:1688 [FIRST AUDIO] Detected! New track audio playing: {requestId: '1766941936560-6rq4nsa', src: 'a599eaf8-a0ab-4d14-9ae0-c95525ca97c8', currentTime: 0.140046}
+MusicPlayerContext.tsx:1468 [LOADING MODAL] TTFA already fired for requestId: 1766941936560-6rq4nsa
+streamingAudioEngine.ts:759 [AUDIO][CELLBUG][NETWORK] Connection updated {effectiveType: '4g', connectionType: undefined, downlink: 1.6, isSlowEffectiveType: false, isSlowDownlink: false, …}
+streamingAudioEngine.ts:1834 [STREAMING AUDIO] Crossfade complete, cleaning up old track {oldAudioPaused: false, oldAudioVolume: 0, newAudioPaused: false, newAudioVolume: 0.7}
+streamingAudioEngine.ts:1848 [STREAMING AUDIO] Destroying old HLS instance
+streamingAudioEngine.ts:1861 [STREAMING AUDIO] Old audio cleanup complete {oldAudioPaused: true, oldAudioSrc: 'http://localhost:5174/'}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: true, hasActiveLoadingRequest: true, …}
+MusicPlayerContext.tsx:1562 [LOADING MODAL] Delayed dismiss firing for requestId: 1766941936560-6rq4nsa
+MusicPlayerContext.tsx:1415 [LOADING MODAL] Dismissing modal: {requestId: '1766941936560-6rq4nsa', ttfaMs: 1635}
+analyticsService.ts:215 [TTFA] Recorded event (local-only): {requestId: '1766941936560-6rq4nsa', ttfaMs: 1635, channelName: 'The Drop', energyLevel: 'high', trackName: 'New Room (Jumex Remix)_v4', …}
+PlaybackLoadingModal.tsx:105 [PlaybackLoadingModal] Modal visible: {requestId: '1766941936560-6rq4nsa', channelName: 'The Drop', status: 'playing'}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: false, hasActiveLoadingRequest: true, …}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: true, currentlyPlaying: true, hasBuffer: true, isInLoadingState: false, hasActiveLoadingRequest: false, …}
+MusicPlayerContext.tsx:1777 [DIAGNOSTIC] toggleChannel called: {channelName: 'The Drop', turnOn: false, fromPlayer: true, currentIsPlaying: true, activeChannelId: 'c9446d4f-a799-4617-adce-f15f9aa3bc65'}
+MusicPlayerContext.tsx:247 [setIsPlaying] false {reason: 'toggleChannel: turning OFF channel', stack: '    at toggleChannel (http://localhost:5174/src/co…/.vite/deps/chunk-6W5FFVKH.js?v=023cf795:3674:22)'}
+MusicPlayerContext.tsx:631 [SYNC EFFECT] Checking sync: {isPlaying: false, currentlyPlaying: false, hasBuffer: true, isInLoadingState: false, hasActiveLoadingRequest: false, …}

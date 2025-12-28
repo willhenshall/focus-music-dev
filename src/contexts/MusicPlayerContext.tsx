@@ -1296,14 +1296,19 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     
     // Capture current audio sources BEFORE starting load
     // These are the "old" sources that should be ignored during detection
-    // [RESUME BUG FIX] Include ALL audio sources (even paused ones) to prevent
-    // the resumed old track from falsely triggering "first audio" detection
+    // [SLOT-SEQUENCE FIX] Only capture audio sources that have actually played content
+    // HLS audio elements get blob URLs from attachMedia() before any track loads, causing
+    // false matches. Skip these by checking for valid duration (> 0, not NaN).
+    // This prevents the first track after hard reload from being falsely filtered out.
     const currentAudioSources = new Set<string>();
     document.querySelectorAll('audio').forEach(audio => {
       if (audio.src) {
-        // Include all audio sources, not just playing ones
-        // This prevents the old track from triggering detection when it resumes
-        currentAudioSources.add(audio.src);
+        // [SLOT-SEQUENCE FIX] Only capture sources that have loaded/played actual content
+        // Skip uninitialized HLS audio elements (blob URL exists but no track loaded yet)
+        const hasLoadedContent = !isNaN(audio.duration) && audio.duration > 0;
+        if (hasLoadedContent) {
+          currentAudioSources.add(audio.src);
+        }
       }
     });
     oldAudioSourcesRef.current = currentAudioSources;
@@ -1311,6 +1316,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     console.log('[LOADING MODAL] Captured old audio sources:', {
       count: currentAudioSources.size,
       sources: Array.from(currentAudioSources).map(s => s.split('/').pop()),
+      note: 'Only includes audio with loaded content (duration > 0)',
     });
     
     // Resolve image URL: prefer explicit channelImageUrl, fall back to channel.image_url
