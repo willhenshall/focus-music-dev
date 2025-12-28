@@ -30,6 +30,10 @@ import {
   isTerminal,
   type TTFATriggerType,
 } from '../lib/playerPerf';
+import {
+  beginTrace,
+  endTrace,
+} from '../lib/playbackNetworkTrace';
 
 // ============================================================================
 // PLAYBACK LOADING STATE MACHINE (for loading modal + TTFA)
@@ -1262,6 +1266,15 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       energyLevel,
     });
     
+    // [DEV-ONLY] Start network trace for this playback request
+    beginTrace(requestId, {
+      triggerType: perfTriggerType,
+      channelId: channel.id,
+      channelName: channel.channel_name,
+      energyLevel,
+      engineType: isStreamingEngine ? 'streaming' : 'enterprise',
+    });
+    
     // Capture current audio sources BEFORE starting load
     // These are the "old" sources that should be ignored during detection
     // [RESUME BUG FIX] Include ALL audio sources (even paused ones) to prevent
@@ -1351,6 +1364,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       // [TTFA INSTRUMENTATION] Record timeout failure
       // perfFail also checks terminal state internally, but we check above for clarity
       perfFail(requestId, 'loading_timeout');
+      
+      // [DEV-ONLY] End network trace with failure
+      endTrace(requestId, { outcome: 'fail', reason: 'loading_timeout' });
       
       setPlaybackLoadingState(prev => ({
         ...prev,
@@ -1465,6 +1481,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       artistName: playbackLoadingState.artistName,
       audioType: isStreamingEngine ? 'hls' : 'mp3',
     });
+    
+    // [DEV-ONLY] End network trace with success
+    endTrace(requestId, { outcome: 'success', ttfaMs });
     
     console.log('[LOADING MODAL] First audio detected:', {
       requestId,
