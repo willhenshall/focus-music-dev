@@ -300,6 +300,15 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const handleTrackEndRef = useRef<(() => void) | null>(null);
   // Playback session ID for E2E test tracking - increments on each new track load
   const playbackSessionIdRef = useRef<number>(0);
+  
+  // [PHASE 3 FIX] Pending session data for deferred listening_sessions insert.
+  // This stores the session data to be created AFTER first audio is detected.
+  const pendingSessionRef = useRef<{
+    userId: string;
+    channelId: string;
+    energyLevel: string;
+    startedAt: string;
+  } | null>(null);
 
   // Initialize Web Audio Engine (runs ONCE on mount, never again)
   useEffect(() => {
@@ -1518,17 +1527,42 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       channelName: playbackLoadingState.channelName,
     });
     
+    // [PHASE 3 FIX] Create listening session AFTER first audio is detected
+    // This completely removes listening_sessions INSERT from TTFA window
+    const pendingSession = pendingSessionRef.current;
+    if (pendingSession) {
+      pendingSessionRef.current = null; // Clear the pending session
+      supabase
+        .from('listening_sessions')
+        .insert({
+          user_id: pendingSession.userId,
+          channel_id: pendingSession.channelId,
+          energy_level: pendingSession.energyLevel,
+          started_at: pendingSession.startedAt,
+        })
+        .select()
+        .single()
+        .then(({ data }) => {
+          if (data) setCurrentSessionId(data.id);
+        })
+        .catch(error => {
+          console.error('[DEFERRED_ANALYTICS] listening_sessions insert failed:', error);
+        });
+    }
+    
     // [PHASE 2 OPTIMIZATION] Fire deferred analytics AFTER first audio
     // This removes analytics from the TTFA critical path
     if (!isAdminMode && playbackLoadingState.trackId && user?.id) {
       const currentTrackForAnalytics = playlist[currentTrackIndex];
       if (currentTrackForAnalytics?.track_id) {
+        // Get the sessionId from the pending session if available
+        const sessionIdForAnalytics = pendingSession ? undefined : currentSessionId;
         trackPlayStart(
           currentTrackForAnalytics.track_id,
           currentTrackForAnalytics.duration_seconds || 0,
           user.id,
           activeChannel?.id,
-          currentSessionId || undefined
+          sessionIdForAnalytics
         ).then(eventId => {
           if (eventId) {
             setCurrentPlayEventId(eventId);
@@ -1835,24 +1869,14 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
           preloadPromise,
         ]);
         
-        // [PHASE 2 OPTIMIZATION] Create listening session in background (non-blocking)
-        // This removes listening_sessions INSERT from TTFA critical path
-        supabase
-          .from('listening_sessions')
-          .insert({
-            user_id: user.id,
-            channel_id: channel.id,
-            energy_level: energyLevel,
-            started_at: new Date().toISOString(),
-          })
-          .select()
-          .single()
-          .then(({ data }) => {
-            if (data) setCurrentSessionId(data.id);
-          })
-          .catch(error => {
-            console.error('[DEFERRED_ANALYTICS] listening_sessions insert failed:', error);
-          });
+        // [PHASE 3 FIX] Store session data for deferred insert AFTER first audio
+        // This completely removes listening_sessions INSERT from TTFA window
+        pendingSessionRef.current = {
+          userId: user.id,
+          channelId: channel.id,
+          energyLevel,
+          startedAt: new Date().toISOString(),
+        };
 
         // Check if channel uses restart_session mode and clear state BEFORE turning on
         const playbackContinuation = strategyConfig?.playbackContinuation;
@@ -1978,24 +2002,14 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         // [PHASE 2 OPTIMIZATION] Defer saveLastChannel to background (non-blocking)
         saveLastChannel(channelId);
 
-        // [PHASE 2 OPTIMIZATION] Defer session creation to background (non-blocking)
-        // This removes listening_sessions INSERT from TTFA critical path
-        supabase
-          .from('listening_sessions')
-          .insert({
-            user_id: user.id,
-            channel_id: channelId,
-            energy_level: energyLevel,
-            started_at: new Date().toISOString(),
-          })
-          .select()
-          .single()
-          .then(({ data }) => {
-            if (data) setCurrentSessionId(data.id);
-          })
-          .catch(error => {
-            console.error('[DEFERRED_ANALYTICS] listening_sessions insert failed:', error);
-          });
+        // [PHASE 3 FIX] Store session data for deferred insert AFTER first audio
+        // This completely removes listening_sessions INSERT from TTFA window
+        pendingSessionRef.current = {
+          userId: user.id,
+          channelId: channelId,
+          energyLevel,
+          startedAt: new Date().toISOString(),
+        };
       }
     } else {
       // Same channel, just changing energy level
