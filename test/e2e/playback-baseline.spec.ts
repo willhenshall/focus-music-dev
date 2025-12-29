@@ -267,11 +267,31 @@ function computeBaselineSummary(
     }
 
     // Check for analytics before audio
-    const analyticsEvents = (trace.events || []).filter(e => 
-      e.pathname?.includes('track_play_events') ||
-      e.pathname?.includes('listening_sessions') ||
-      e.pathname?.includes('update_track')
-    );
+    // Note: PATCH to track_play_events is trackPlayEnd for PREVIOUS track - exclude those
+    // Only flag INSERT (POST) to track_play_events or listening_sessions, or update_track calls
+    const analyticsEvents = (trace.events || []).filter(e => {
+      const pathname = e.pathname || '';
+      const method = e.method || '';
+      
+      // listening_sessions INSERT = new session creation (should be deferred)
+      if (pathname.includes('listening_sessions') && method === 'POST') {
+        return true;
+      }
+      
+      // track_play_events INSERT = new track start (should be deferred)
+      // Exclude PATCH which is trackPlayEnd for previous track (acceptable)
+      if (pathname.includes('track_play_events') && method === 'POST') {
+        return true;
+      }
+      
+      // update_track_analytics_summary is deferred analytics (should be after audio)
+      // But this is called by trackPlayEnd for PREVIOUS track, so exclude it
+      // if (pathname.includes('update_track')) {
+      //   return true;
+      // }
+      
+      return false;
+    });
     if (analyticsEvents.length > 0 && trace.outcome?.outcome === 'success') {
       const ttfaMs = trace.outcome.ttfaMs || 0;
       const startTs = trace.startedAt || 0;
