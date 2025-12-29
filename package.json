@@ -59,7 +59,7 @@
     "playback:report": "node perf/playback-trace-report.cjs",
     "playback:baseline": "npx playwright test playback-baseline.spec.ts --project=chromium --workers=1 --reporter=list",
     "playback:compare": "node perf/playback-compare.cjs",
-    "test:perf-regression": "npx playwright test playback-regression.spec.ts --reporter=list"
+    "test:perf-regression": "npx playwright test playback-regression.spec.ts --project=chromium --workers=1 --reporter=list"
   },
   "dependencies": {
     "@capacitor/core": "^6.1.2",
