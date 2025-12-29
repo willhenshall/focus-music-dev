@@ -309,6 +309,16 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     energyLevel: string;
     startedAt: string;
   } | null>(null);
+  
+  // [PHASE 3 FIX] Pending user_preferences write for deferred save.
+  // This eliminates user_preferences writes from the TTFA critical window.
+  // Stores all preference updates to be written AFTER first audio.
+  const pendingUserPrefsRef = useRef<{
+    userId: string;
+    channelId: string;
+    energyLevel?: string;
+    channelEnergyLevels?: Record<string, string>;
+  } | null>(null);
 
   // Initialize Web Audio Engine (runs ONCE on mount, never again)
   useEffect(() => {
@@ -1527,6 +1537,32 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       channelName: playbackLoadingState.channelName,
     });
     
+    // [PHASE 3 FIX] Save user_preferences AFTER first audio is detected
+    // This completely removes user_preferences writes from TTFA window
+    const pendingUserPrefs = pendingUserPrefsRef.current;
+    if (pendingUserPrefs) {
+      pendingUserPrefsRef.current = null; // Clear the pending prefs
+      const prefsToUpsert: Record<string, unknown> = {
+        user_id: pendingUserPrefs.userId,
+        last_channel_id: pendingUserPrefs.channelId,
+      };
+      if (pendingUserPrefs.energyLevel) {
+        prefsToUpsert.last_energy_level = pendingUserPrefs.energyLevel;
+      }
+      if (pendingUserPrefs.channelEnergyLevels) {
+        prefsToUpsert.channel_energy_levels = pendingUserPrefs.channelEnergyLevels;
+      }
+      supabase
+        .from('user_preferences')
+        .upsert(prefsToUpsert, { onConflict: 'user_id' })
+        .then(() => {
+          invalidateUserPreferences(pendingUserPrefs.userId);
+        })
+        .catch(error => {
+          console.error('[DEFERRED_ANALYTICS] user_preferences upsert failed:', error);
+        });
+    }
+    
     // [PHASE 3 FIX] Create listening session AFTER first audio is detected
     // This completely removes listening_sessions INSERT from TTFA window
     const pendingSession = pendingSessionRef.current;
@@ -1857,20 +1893,21 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         const channelStrategy = strategyConfig?.strategy;
 
         // Preload slot strategy data if this is a slot-based channel
-        // This runs in parallel with saving preferences
         const preloadPromise = channelStrategy === 'slot_based'
           ? preloadSlotStrategy(channel.id, energyLevel)
           : Promise.resolve(null);
 
-        // [PHASE 2 OPTIMIZATION] Defer session creation to after first audio
-        // Only run critical path items: saveLastChannel and slot strategy preload
-        await Promise.all([
-          saveLastChannel(channel.id),
-          preloadPromise,
-        ]);
+        // [PHASE 3 FIX] Only run critical path items: slot strategy preload
+        // Defer all user_preferences writes to after first audio
+        await preloadPromise;
         
-        // [PHASE 3 FIX] Store session data for deferred insert AFTER first audio
-        // This completely removes listening_sessions INSERT from TTFA window
+        // [PHASE 3 FIX] Store data for deferred writes AFTER first audio
+        // This completely removes user_preferences and listening_sessions writes from TTFA window
+        pendingUserPrefsRef.current = {
+          userId: user.id,
+          channelId: channel.id,
+          energyLevel,
+        };
         pendingSessionRef.current = {
           userId: user.id,
           channelId: channel.id,
@@ -1944,34 +1981,21 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     startPlaybackLoading('energy_change', channel, energyLevel, undefined, channelImageUrl, isPlaying);
 
     if (user) {
-      // [PHASE 2 OPTIMIZATION] Use cached user preferences instead of direct Supabase query
-      // This eliminates duplicate user_preferences reads per playback request
+      // [PHASE 3 FIX] Use cached user preferences and prepare deferred write
+      // This eliminates duplicate user_preferences reads AND writes from TTFA window
       const cachedPrefs = await getUserPreferences(user.id);
       const energyLevels = { ...(cachedPrefs?.channel_energy_levels || {}) };
       energyLevels[channelId] = energyLevel;
 
-      // Non-blocking write - don't await, just fire and forget
-      // The cache will be updated on next read if needed
-      supabase
-        .from('user_preferences')
-        .upsert(
-          {
-            user_id: user.id,
-            last_channel_id: channelId,
-            channel_energy_levels: energyLevels,
-            last_energy_level: energyLevel
-          },
-          {
-            onConflict: 'user_id'
-          }
-        )
-        .then(() => {
-          // Invalidate cache after successful write so next read gets fresh data
-          invalidateUserPreferences(user.id);
-        })
-        .catch((error) => {
-          console.error('[setChannelEnergy] Failed to save user preferences:', error);
-        });
+      // [PHASE 3 FIX] Store data for deferred user_preferences write AFTER first audio
+      // This completely removes the write from the TTFA critical window
+      pendingUserPrefsRef.current = {
+        userId: user.id,
+        channelId,
+        energyLevel,
+        channelEnergyLevels: energyLevels,
+      };
+
     }
 
     if (activeChannel?.id !== channelId) {
@@ -1999,11 +2023,13 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       setIsPlaying(true, 'setChannelEnergy: switching to different channel');
 
       if (user) {
-        // [PHASE 2 OPTIMIZATION] Defer saveLastChannel to background (non-blocking)
-        saveLastChannel(channelId);
-
-        // [PHASE 3 FIX] Store session data for deferred insert AFTER first audio
-        // This completely removes listening_sessions INSERT from TTFA window
+        // [PHASE 3 FIX] Store data for deferred writes AFTER first audio
+        // This completely removes user_preferences and listening_sessions writes from TTFA window
+        pendingUserPrefsRef.current = {
+          userId: user.id,
+          channelId: channelId,
+          energyLevel,
+        };
         pendingSessionRef.current = {
           userId: user.id,
           channelId: channelId,
