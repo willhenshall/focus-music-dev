@@ -55,7 +55,11 @@
     "transcode-hls": "tsx scripts/transcode-to-hls.ts",
     "transcode-hls:large": "tsx scripts/transcode-to-hls.ts --large-only",
     "transcode-hls:all": "tsx scripts/transcode-to-hls.ts --all",
-    "ttfa:report": "node perf/ttfa-report.cjs"
+    "ttfa:report": "node perf/ttfa-report.cjs",
+    "playback:report": "node perf/playback-trace-report.cjs",
+    "playback:baseline": "npx playwright test playback-baseline.spec.ts --reporter=list",
+    "playback:compare": "node perf/playback-compare.cjs",
+    "test:perf-regression": "npx playwright test playback-regression.spec.ts --reporter=list"
   },
   "dependencies": {
     "@capacitor/core": "^6.1.2",

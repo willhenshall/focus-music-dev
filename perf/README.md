@@ -2,6 +2,51 @@
 
 This directory contains tools for measuring and proving audio playback performance.
 
+## Quick Start (Phase 3)
+
+### Generate a Baseline Run
+
+```bash
+# Run the baseline generation test suite
+npm run playback:baseline
+
+# Output will be saved to:
+# perf/runs/YYYY-MM-DD_HH-mm-ss/
+#   - playback-traces.json
+#   - ttfa-events.json  
+#   - report.json
+#   - summary.md
+```
+
+### Compare Two Runs
+
+```bash
+# After making performance changes, generate a new baseline
+npm run playback:baseline
+
+# Compare against a previous run
+npm run playback:compare -- --base perf/runs/2024-01-01_12-00-00 --target perf/runs/2024-01-02_12-00-00
+
+# Output:
+#   - Console diff summary
+#   - comparison.md (suitable for PR comments)
+```
+
+### Run Regression Checks (CI)
+
+```bash
+# Run performance regression tests
+npm run test:perf-regression
+
+# These tests will FAIL if:
+#   - TTFA P95 > 4s
+#   - Fetch count per trace > 25
+#   - audio_tracks?select=* detected
+#   - Excessive duplicate API calls
+```
+
+---
+
 ## TTFA (Time To First Audible)
 
 TTFA measures the time from user action (click channel/energy) to first audible audio playing.
@@ -226,4 +271,175 @@ The trace system automatically detects common performance issues:
 4. Run `window.__playbackTrace.downloadLatest()` in console
 5. Move downloaded file: `mv ~/Downloads/playback-trace-*.json perf/playback-trace-latest.json`
 6. Run `npm run playback:report`
+
+---
+
+## Phase 3: Automated Baseline + Comparison System
+
+Phase 3 provides automated tools for measuring, tracking, and comparing playback performance across code changes.
+
+### Key Files
+
+| File | Description |
+|------|-------------|
+| `test/e2e/playback-baseline.spec.ts` | E2E test that generates baseline runs |
+| `test/e2e/playback-regression.spec.ts` | Regression tests for CI |
+| `perf/playback-compare.cjs` | CLI for comparing two runs |
+| `perf/runs/` | Directory containing all baseline runs |
+
+### Baseline Run Structure
+
+Each baseline run creates a timestamped directory:
+
+```
+perf/runs/2024-01-15_14-30-00/
+├── playback-traces.json     # Raw trace data
+├── ttfa-events.json         # TTFA event data  
+├── report.json              # Full report with computed stats
+├── summary.md               # Human-readable markdown summary
+└── comparison.md            # (if compared) Diff against another run
+```
+
+### Report Format
+
+The `report.json` contains:
+
+```json
+{
+  "runId": "2024-01-15_14-30-00",
+  "timestamp": "2024-01-15T14:30:00.000Z",
+  "traces": [...],
+  "ttfaEvents": [...],
+  "summary": {
+    "traceCount": 3,
+    "successCount": 3,
+    "failCount": 0,
+    "ttfa": {
+      "min": 1200,
+      "p50": 1500,
+      "p95": 2100,
+      "max": 2300
+    },
+    "byTriggerType": {
+      "channel_change": { "count": 2, "p50Ms": 1400, "p95Ms": 1800, "avgFetches": 15 },
+      "energy_change": { "count": 1, "p50Ms": 1200, "p95Ms": 1200, "avgFetches": 12 }
+    },
+    "totalFetches": 42,
+    "avgFetchesPerTrace": 14,
+    "warnings": [
+      { "type": "duplicate_user_preferences", "count": 1 }
+    ]
+  },
+  "thresholds": {
+    "ttfaP95Ms": 4000,
+    "maxFetchesPerTrace": 20
+  },
+  "verdict": {
+    "pass": true,
+    "issues": []
+  }
+}
+```
+
+### Comparison Output
+
+The comparison tool produces both console output and a markdown file:
+
+```
+╔══════════════════════════════════════════════════════════════════════════╗
+║              PLAYBACK PERFORMANCE COMPARISON                              ║
+╚══════════════════════════════════════════════════════════════════════════╝
+
+Comparing:
+  Base:   2024-01-14_10-00-00
+  Target: 2024-01-15_14-30-00
+
+TTFA Statistics:
+  P50:  1800ms → 1500ms  ↓ -300ms (-16.7%)
+  P95:  2500ms → 2100ms  ↓ -400ms (-16.0%)
+  Max:  3000ms → 2300ms  ↓ -700ms (-23.3%)
+
+Network Requests:
+  Total Fetches:      50 → 42  ↓ -8 (-16.0%)
+  Avg Fetches/Trace:  17 → 14  ↓ -3 (-17.6%)
+
+Verdict:
+  Improvements:
+    ✅ TTFA P95 improved by 400ms
+    ✅ Avg fetches/trace reduced by 3
+```
+
+### Regression Thresholds
+
+The regression tests enforce these thresholds (configurable via env vars):
+
+| Threshold | Default | Env Var |
+|-----------|---------|---------|
+| TTFA P95 | 4000ms | `PERF_TTFA_P95_THRESHOLD` |
+| Max fetches/trace | 25 | `PERF_MAX_FETCHES` |
+| Duplicate user_preferences | 2 | `PERF_MAX_DUP_USER_PREFS` |
+| Duplicate slot_strategy | 3 | `PERF_MAX_DUP_SLOT_STRATEGY` |
+
+### CI Integration
+
+Add to your CI workflow:
+
+```yaml
+# Run performance regression tests
+- name: Performance Regression Check
+  run: npm run test:perf-regression
+  env:
+    TEST_USER_EMAIL: ${{ secrets.TEST_USER_EMAIL }}
+    TEST_USER_PASSWORD: ${{ secrets.TEST_USER_PASSWORD }}
+```
+
+### Performance Audit Workflow
+
+1. **Before making changes**: Generate a baseline
+   ```bash
+   npm run playback:baseline
+   # Note the run ID, e.g., 2024-01-15_14-30-00
+   ```
+
+2. **Make your performance changes**
+
+3. **After changes**: Generate a new baseline
+   ```bash
+   npm run playback:baseline
+   # New run ID, e.g., 2024-01-16_10-00-00
+   ```
+
+4. **Compare the runs**
+   ```bash
+   npm run playback:compare -- --base perf/runs/2024-01-15_14-30-00 --target perf/runs/2024-01-16_10-00-00
+   ```
+
+5. **Include comparison in PR**
+   - Copy `perf/runs/2024-01-16_10-00-00/comparison.md` contents to PR description
+   - Or attach the files as artifacts
+
+### Interpreting Results
+
+| Metric | Good | Needs Work | Regression |
+|--------|------|------------|------------|
+| TTFA P50 | < 2s | 2-4s | > 4s |
+| TTFA P95 | < 4s | 4-6s | > 6s |
+| Fetches/trace | < 15 | 15-25 | > 25 |
+| Warnings | 0 | 1-2 | > 2 |
+
+### Troubleshooting
+
+**Tests timing out?**
+- Increase timeout in test file: `test.setTimeout(180_000);`
+- Check if dev server is running properly
+- Verify test credentials are set
+
+**No traces captured?**
+- Ensure you're running in dev mode (`npm run dev`)
+- Check that `window.__playbackTrace` exists in console
+- Verify the fetch patch is installed (look for `[DEV] Fetch patch installed`)
+
+**Comparison fails to load reports?**
+- Ensure both run directories exist
+- Check that `report.json` files are present in both directories
 
