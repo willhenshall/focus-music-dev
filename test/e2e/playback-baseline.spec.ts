@@ -355,6 +355,22 @@ function computeBaselineSummary(
       if (audioTracksCount > 2) {
         warningCounts['slot_seq_excessive_audio_tracks'] = (warningCounts['slot_seq_excessive_audio_tracks'] || 0) + 1;
       }
+
+      // [PHASE 4.8] Check for duplicate slot config fetches in slot-seq flows
+      // After Phase 4.8 deduplication, slot-seq should have at most 1 request per slot table
+      const slotDefCount = Object.entries(summary?.byEndpoint || {})
+        .filter(([ep]) => ep.includes('slot_definitions'))
+        .reduce((sum, [, count]) => sum + count, 0);
+      const slotRuleGroupsCount = Object.entries(summary?.byEndpoint || {})
+        .filter(([ep]) => ep.includes('slot_rule_groups'))
+        .reduce((sum, [, count]) => sum + count, 0);
+      const slotBoostsCount = Object.entries(summary?.byEndpoint || {})
+        .filter(([ep]) => ep.includes('slot_boosts'))
+        .reduce((sum, [, count]) => sum + count, 0);
+      
+      if (slotDefCount > 1 || slotRuleGroupsCount > 1 || slotBoostsCount > 1) {
+        warningCounts['slot_seq_duplicate_slot_config'] = (warningCounts['slot_seq_duplicate_slot_config'] || 0) + 1;
+      }
     }
 
     // Check for analytics before audio

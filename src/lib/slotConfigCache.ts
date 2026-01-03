@@ -95,6 +95,26 @@ const cache = new Map<string, CacheEntry>();
  */
 const inFlightRequests = new Map<string, Promise<CachedSlotConfig | null>>();
 
+/**
+ * [PHASE 4.8] RequestId-scoped promises for slot config.
+ * This ensures that within a single playback request, slot config is only fetched once,
+ * even if multiple codepaths request it concurrently or sequentially.
+ * Key format: `${requestId}:${channelId}:${energyLevel}`
+ */
+const requestScopedPromises = new Map<string, Promise<CachedSlotConfig | null>>();
+
+/**
+ * [PHASE 4.8] Clear request-scoped promises for a completed/failed requestId.
+ * Should be called when playback completes or fails.
+ */
+export function clearRequestScope(requestId: string): void {
+  for (const key of requestScopedPromises.keys()) {
+    if (key.startsWith(`${requestId}:`)) {
+      requestScopedPromises.delete(key);
+    }
+  }
+}
+
 // ============================================================================
 // INTERNAL HELPERS
 // ============================================================================
@@ -275,6 +295,52 @@ export async function getOrFetchSlotConfig(
   
   // Fetch and cache
   return fetchSlotConfig(channelId, energyLevel, supabase);
+}
+
+/**
+ * [PHASE 4.8] Get slot config with requestId-scoped deduplication.
+ * 
+ * This ensures that within a single playback request, slot config is only fetched once,
+ * even if multiple codepaths (e.g., preloadSlotStrategy + generateNewPlaylist) request it.
+ * 
+ * @param requestId - Unique playback request ID
+ * @param channelId - Channel UUID
+ * @param energyLevel - Energy level (low/medium/high)
+ * @param supabase - Supabase client instance
+ * @returns Config or null if not found
+ */
+export async function getOrFetchSlotConfigForRequest(
+  requestId: string,
+  channelId: string,
+  energyLevel: string,
+  supabase: { from: (table: string) => unknown }
+): Promise<CachedSlotConfig | null> {
+  // Check TTL cache first (fastest path)
+  const cached = getSlotConfig(channelId, energyLevel);
+  if (cached) {
+    return cached;
+  }
+  
+  // Check request-scoped promise (ensures single fetch per requestId)
+  const requestKey = `${requestId}:${channelId}:${energyLevel}`;
+  const existingRequestPromise = requestScopedPromises.get(requestKey);
+  if (existingRequestPromise) {
+    return existingRequestPromise;
+  }
+  
+  // Create new fetch promise and register it for both request-scope and global in-flight
+  const fetchPromise = fetchSlotConfig(channelId, energyLevel, supabase);
+  requestScopedPromises.set(requestKey, fetchPromise);
+  
+  // Clean up request-scoped promise after it resolves
+  fetchPromise.finally(() => {
+    // Only delete if it's still the same promise (not replaced by a new request)
+    if (requestScopedPromises.get(requestKey) === fetchPromise) {
+      requestScopedPromises.delete(requestKey);
+    }
+  });
+  
+  return fetchPromise;
 }
 
 // ============================================================================

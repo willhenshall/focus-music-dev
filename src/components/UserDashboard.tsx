@@ -1639,10 +1639,12 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
                 <div
                   onClick={() => {
                     if (!isActive) {
+                      // [PHASE 4.8] Pass energy level directly to toggleChannel to avoid duplicate slot config fetches
+                      // Previously setChannelEnergy was called first, causing a race condition where both
+                      // setChannelEnergy and toggleChannel triggered separate slot config fetches
                       const savedLevel = savedEnergyLevels[channel.id] || 'medium';
                       const imageUrl = getChannelImage(channel.id, channel.image_url) || undefined;
-                      setChannelEnergy(channel.id, savedLevel, imageUrl);
-                      toggleChannel(channel, true, false, imageUrl);
+                      toggleChannel(channel, true, false, imageUrl, savedLevel);
                     }
                   }}
                   className={viewMode === 'grid'
@@ -1735,10 +1737,10 @@ export function UserDashboard({ onSwitchToAdmin, initialTab = 'channels', showAu
                             e.stopPropagation();
                             // Activate the channel if not already active
                             if (!isActive) {
+                              // [PHASE 4.8] Pass energy level directly to toggleChannel to avoid duplicate slot config fetches
                               const savedLevel = savedEnergyLevels[channel.id] || 'medium';
                               const imageUrl = getChannelImage(channel.id, channel.image_url) || undefined;
-                              setChannelEnergy(channel.id, savedLevel, imageUrl);
-                              toggleChannel(channel, true, false, imageUrl);
+                              toggleChannel(channel, true, false, imageUrl, savedLevel);
                             }
                             // Switch to grid view
                             saveViewMode('grid');
