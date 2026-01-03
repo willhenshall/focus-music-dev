@@ -89,8 +89,38 @@ interface PlaybackTrace {
   postAudioSummary?: TraceSummary;
 }
 
-// [PHASE 4.4] Known slot sequencer channel names for identification
-const SLOT_SEQUENCER_CHANNELS = ['Deep', 'The Drop', 'Tranquility', 'NatureBeat'];
+/**
+ * [PHASE 4.5] Canonical slot sequencer channel names (source of truth).
+ * 
+ * These channels use slot-based playlist generation with:
+ * - Track pool + global filters
+ * - Slot strategies, definitions, rule groups
+ * 
+ * All other channels are admin-curated (explicit track list ordering).
+ * 
+ * IMPORTANT: Use exact channel names for matching. Do NOT add channels
+ * to this list without confirming they use slot_strategies in the database.
+ */
+const SLOT_SEQUENCER_CHANNELS = [
+  'Tranquility',
+  'The Drop',
+  'The Deep',
+  'Organica',
+  'The Duke',
+  'Symphonica',
+  'PowerTool',
+  'Edwardian',
+  'Cinematic',
+  'Bach Beats',
+  'Atmosphere',
+  'Aquascope',
+];
+
+/**
+ * [PHASE 4.5] Preferred slot sequencer channels for Flow 4 testing.
+ * These are the most reliable/stable for baseline measurements.
+ */
+const PREFERRED_SLOT_SEQ_CHANNELS = ['The Deep', 'The Drop'];
 
 interface BaselineReport {
   runId: string;
@@ -359,8 +389,9 @@ function computeBaselineSummary(
 
   for (const trace of traces) {
     const channelName = trace.meta.channelName || '';
+    // [PHASE 4.5] Use exact match against canonical list (case-insensitive)
     const isSlotSeq = SLOT_SEQUENCER_CHANNELS.some(name => 
-      channelName.toLowerCase().includes(name.toLowerCase())
+      channelName.toLowerCase() === name.toLowerCase()
     );
     const target = isSlotSeq ? slotSeqTraces : adminCuratedTraces;
     
@@ -571,16 +602,30 @@ test.describe('Playback Baseline Generation', () => {
 
     console.log('\n=== BASELINE GENERATION ===\n');
 
-    // Helper to find a slot sequencer channel by name
+    // [PHASE 4.5] Helper to find a slot sequencer channel by name
+    // Uses PREFERRED_SLOT_SEQ_CHANNELS for reliable testing
     const findSlotSequencerChannel = async () => {
-      const slotSeqNames = ['Deep', 'The Drop', 'Tranquility'];
-      for (const name of slotSeqNames) {
+      for (const name of PREFERRED_SLOT_SEQ_CHANNELS) {
         const card = page.locator('[data-channel-id]', { hasText: name }).first();
         if (await card.isVisible({ timeout: 500 }).catch(() => false)) {
+          // [PHASE 4.5] Guardrail: Verify this channel is in canonical slot-seq list
+          const isInCanonicalList = SLOT_SEQUENCER_CHANNELS.some(
+            canonical => canonical.toLowerCase() === name.toLowerCase()
+          );
+          if (!isInCanonicalList) {
+            throw new Error(`GUARDRAIL FAIL: "${name}" is not in SLOT_SEQUENCER_CHANNELS canonical list`);
+          }
           return { card, name };
         }
       }
       return null;
+    };
+    
+    // [PHASE 4.5] Helper to check if a channel name is a slot sequencer
+    const isSlotSequencerChannel = (channelName: string): boolean => {
+      return SLOT_SEQUENCER_CHANNELS.some(
+        name => channelName.toLowerCase() === name.toLowerCase()
+      );
     };
 
     // -------------------------------------------------------------------------
@@ -664,11 +709,17 @@ test.describe('Playback Baseline Generation', () => {
     
     const slotSeqChannel = await findSlotSequencerChannel();
     if (slotSeqChannel) {
+      // [PHASE 4.5] Guardrail: Assert Flow 4 uses a canonical slot-seq channel
+      expect(
+        isSlotSequencerChannel(slotSeqChannel.name),
+        `Flow 4 channel "${slotSeqChannel.name}" must be in SLOT_SEQUENCER_CHANNELS canonical list`
+      ).toBe(true);
+      
       await slotSeqChannel.card.click();
       await waitForAudioPlaying(page, 45000);
       console.log(`  ✓ Slot sequencer channel "${slotSeqChannel.name}" complete`);
     } else {
-      console.log('  ⚠ No slot sequencer channel found (Deep, The Drop, Tranquility)');
+      console.log('  ⚠ No slot sequencer channel found in preferred list: ' + PREFERRED_SLOT_SEQ_CHANNELS.join(', '));
     }
 
     // Wait for final trace to settle
@@ -730,6 +781,44 @@ test.describe('Playback Baseline Generation', () => {
     // Assertions for CI
     expect(traces.length).toBeGreaterThan(0);
     expect(summary.successCount).toBeGreaterThan(0);
+    
+    // [PHASE 4.5] Guardrail assertions for channel classification correctness
+    if (summary.byChannelType) {
+      const slotSeqChannels = summary.byChannelType.slotSequencer.channelNames;
+      const adminCuratedChannels = summary.byChannelType.adminCurated.channelNames;
+      
+      // Guardrail 1: NatureBeat must NOT be in slot sequencer list
+      expect(
+        slotSeqChannels.some(name => name.toLowerCase() === 'naturebeat'),
+        'GUARDRAIL: NatureBeat was incorrectly classified as slot sequencer'
+      ).toBe(false);
+      
+      // Guardrail 2: All slot-seq channels must be in canonical list
+      for (const channelName of slotSeqChannels) {
+        const isCanonical = SLOT_SEQUENCER_CHANNELS.some(
+          canonical => canonical.toLowerCase() === channelName.toLowerCase()
+        );
+        expect(
+          isCanonical,
+          `GUARDRAIL: "${channelName}" in slot-seq report but not in SLOT_SEQUENCER_CHANNELS canonical list`
+        ).toBe(true);
+      }
+      
+      // Guardrail 3: No canonical slot-seq channels should appear in admin-curated list
+      for (const channelName of adminCuratedChannels) {
+        const isSlotSeq = SLOT_SEQUENCER_CHANNELS.some(
+          canonical => canonical.toLowerCase() === channelName.toLowerCase()
+        );
+        expect(
+          isSlotSeq,
+          `GUARDRAIL: "${channelName}" is a slot-seq channel but was classified as admin-curated`
+        ).toBe(false);
+      }
+      
+      console.log('\n✅ Channel classification guardrails passed');
+      console.log(`   Slot Sequencer: ${slotSeqChannels.join(', ') || '(none)'}`);
+      console.log(`   Admin-Curated: ${adminCuratedChannels.join(', ') || '(none)'}`);
+    }
   });
 });
 
