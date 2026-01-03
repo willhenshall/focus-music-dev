@@ -19,6 +19,9 @@ test-results/
 assets/
 supabase/.temp/
 
+# Performance baseline runs (generated artifacts)
+perf/runs/
+
 # IDE/Tool configs
 .cursor/
 .cursorrules

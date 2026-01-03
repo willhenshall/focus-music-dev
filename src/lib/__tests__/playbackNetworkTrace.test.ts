@@ -653,5 +653,174 @@ describe('playbackNetworkTrace', () => {
       expect(summary?.slowestRequests[0].pathname).toBe('/rest/v1/rpc/my_function');
     });
   });
+
+  // ============================================================================
+  // PHASE 4.1: TTFA Window Separation Tests
+  // ============================================================================
+  
+  describe('Phase 4.1: TTFA Window Separation', () => {
+    it('should exclude bleed-over events (ts < startedAt) from ttfaWindowEvents', () => {
+      const requestId = 'req-bleedover-1';
+      
+      // Trace starts at t=1000
+      vi.spyOn(performance, 'now').mockReturnValue(1000);
+      beginTrace(requestId);
+      
+      // Bleed-over event: started BEFORE trace (ts=500 < startedAt=1000)
+      // This simulates a request from the previous operation that completes
+      // after the new trace starts
+      recordNetworkEventToAll(createNetworkEvent({
+        ts: 500, // Started before trace
+        url: 'https://api.supabase.co/rest/v1/track_play_events',
+        pathname: '/rest/v1/track_play_events',
+        durationMs: 600,
+      }));
+      
+      // Normal event: started AFTER trace began (ts=1100 >= startedAt=1000)
+      recordNetworkEventToAll(createNetworkEvent({
+        ts: 1100, // Started after trace
+        url: 'https://api.supabase.co/rest/v1/audio_tracks',
+        pathname: '/rest/v1/audio_tracks',
+        durationMs: 150,
+      }));
+      
+      vi.spyOn(performance, 'now').mockReturnValue(1500);
+      endTrace(requestId, { outcome: 'success', ttfaMs: 500 });
+      
+      const trace = getTrace(requestId);
+      
+      // All events should be in events array
+      expect(trace?.events.length).toBe(2);
+      
+      // Only non-bleed-over event should be in ttfaWindowEvents
+      expect(trace?.ttfaWindowEvents?.length).toBe(1);
+      expect(trace?.ttfaWindowEvents?.[0].pathname).toBe('/rest/v1/audio_tracks');
+    });
+    
+    it('should compute ttfaWindowSummary from ttfaWindowEvents only', () => {
+      const requestId = 'req-bleedover-2';
+      
+      vi.spyOn(performance, 'now').mockReturnValue(1000);
+      beginTrace(requestId);
+      
+      // Add 2 bleed-over events (ts < 1000)
+      recordNetworkEventToAll(createNetworkEvent({
+        ts: 800,
+        url: 'https://api.supabase.co/rest/v1/track_play_events',
+        pathname: '/rest/v1/track_play_events',
+        durationMs: 100,
+      }));
+      recordNetworkEventToAll(createNetworkEvent({
+        ts: 900,
+        url: 'https://api.supabase.co/rest/v1/update_track_analytics_summary',
+        pathname: '/rest/v1/rpc/update_track_analytics_summary',
+        durationMs: 80,
+      }));
+      
+      // Add 3 normal events (ts >= 1000)
+      recordNetworkEventToAll(createNetworkEvent({
+        ts: 1050,
+        url: 'https://api.supabase.co/rest/v1/audio_tracks',
+        pathname: '/rest/v1/audio_tracks',
+        durationMs: 120,
+      }));
+      recordNetworkEventToAll(createNetworkEvent({
+        ts: 1100,
+        url: 'https://cdn.example.com/hls/master.m3u8',
+        pathname: '/hls/master.m3u8',
+        durationMs: 50,
+      }));
+      recordNetworkEventToAll(createNetworkEvent({
+        ts: 1150,
+        url: 'https://cdn.example.com/hls/segment.ts',
+        pathname: '/hls/segment.ts',
+        durationMs: 200,
+      }));
+      
+      vi.spyOn(performance, 'now').mockReturnValue(1400);
+      endTrace(requestId, { outcome: 'success', ttfaMs: 400 });
+      
+      const trace = getTrace(requestId);
+      
+      // All 5 events in events array
+      expect(trace?.events.length).toBe(5);
+      
+      // Only 3 non-bleed-over events in ttfaWindowEvents
+      expect(trace?.ttfaWindowEvents?.length).toBe(3);
+      
+      // ttfaWindowSummary should only count the 3 TTFA-window events
+      expect(trace?.ttfaWindowSummary?.totalRequests).toBe(3);
+      
+      // Legacy summary should count all 5 events
+      expect(trace?.summary?.totalRequests).toBe(5);
+    });
+    
+    it('should return ttfaWindowSummary from summarizeTrace()', () => {
+      const requestId = 'req-bleedover-3';
+      
+      vi.spyOn(performance, 'now').mockReturnValue(1000);
+      beginTrace(requestId);
+      
+      // 1 bleed-over event
+      recordNetworkEventToAll(createNetworkEvent({
+        ts: 500,
+        durationMs: 100,
+      }));
+      
+      // 2 normal events
+      recordNetworkEventToAll(createNetworkEvent({
+        ts: 1100,
+        durationMs: 150,
+      }));
+      recordNetworkEventToAll(createNetworkEvent({
+        ts: 1200,
+        durationMs: 200,
+      }));
+      
+      vi.spyOn(performance, 'now').mockReturnValue(1500);
+      endTrace(requestId, { outcome: 'success', ttfaMs: 500 });
+      
+      // summarizeTrace should return ttfaWindowSummary (2 requests, not 3)
+      const summary = summarizeTrace(requestId);
+      expect(summary?.totalRequests).toBe(2);
+    });
+    
+    it('should use ttfaWindowEvents for detectWarnings()', () => {
+      const requestId = 'req-bleedover-warn';
+      
+      vi.spyOn(performance, 'now').mockReturnValue(1000);
+      beginTrace(requestId);
+      
+      // Add bleed-over duplicate user_preferences (should NOT trigger warning)
+      recordNetworkEventToAll(createNetworkEvent({
+        ts: 800,
+        url: 'https://api.supabase.co/rest/v1/user_preferences',
+        pathname: '/rest/v1/user_preferences',
+      }));
+      recordNetworkEventToAll(createNetworkEvent({
+        ts: 900,
+        url: 'https://api.supabase.co/rest/v1/user_preferences',
+        pathname: '/rest/v1/user_preferences',
+      }));
+      
+      // Add only 1 user_preferences in TTFA window (should NOT trigger warning)
+      recordNetworkEventToAll(createNetworkEvent({
+        ts: 1100,
+        url: 'https://api.supabase.co/rest/v1/user_preferences',
+        pathname: '/rest/v1/user_preferences',
+      }));
+      
+      vi.spyOn(performance, 'now').mockReturnValue(1500);
+      endTrace(requestId, { outcome: 'success', ttfaMs: 500 });
+      
+      const trace = getTrace(requestId);
+      const warnings = detectWarnings(trace!);
+      
+      // Should NOT have duplicate_user_preferences warning because
+      // only 1 user_preferences is in ttfaWindowEvents
+      const duplicateWarning = warnings.find(w => w.type === 'duplicate_user_preferences');
+      expect(duplicateWarning).toBeUndefined();
+    });
+  });
 });
 
