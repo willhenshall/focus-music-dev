@@ -89,6 +89,9 @@ interface PlaybackTrace {
   postAudioSummary?: TraceSummary;
 }
 
+// [PHASE 4.4] Known slot sequencer channel names for identification
+const SLOT_SEQUENCER_CHANNELS = ['Deep', 'The Drop', 'Tranquility', 'NatureBeat'];
+
 interface BaselineReport {
   runId: string;
   timestamp: string;
@@ -110,6 +113,23 @@ interface BaselineReport {
       p95Ms: number;
       avgFetches: number;
     }>;
+    // [PHASE 4.4] Per-channel-type breakdown for slot sequencer analysis
+    byChannelType?: {
+      slotSequencer: {
+        count: number;
+        p50Ms: number;
+        p95Ms: number;
+        avgFetches: number;
+        channelNames: string[];
+      };
+      adminCurated: {
+        count: number;
+        p50Ms: number;
+        p95Ms: number;
+        avgFetches: number;
+        channelNames: string[];
+      };
+    };
     totalFetches: number;
     avgFetchesPerTrace: number;
     warnings: Array<{
@@ -333,6 +353,50 @@ function computeBaselineSummary(
     return sum + (summary?.totalRequests || 0);
   }, 0);
 
+  // [PHASE 4.4] Compute per-channel-type breakdown (slot sequencer vs admin-curated)
+  const slotSeqTraces: { times: number[]; fetches: number[]; names: Set<string> } = { times: [], fetches: [], names: new Set() };
+  const adminCuratedTraces: { times: number[]; fetches: number[]; names: Set<string> } = { times: [], fetches: [], names: new Set() };
+
+  for (const trace of traces) {
+    const channelName = trace.meta.channelName || '';
+    const isSlotSeq = SLOT_SEQUENCER_CHANNELS.some(name => 
+      channelName.toLowerCase().includes(name.toLowerCase())
+    );
+    const target = isSlotSeq ? slotSeqTraces : adminCuratedTraces;
+    
+    if (trace.outcome?.ttfaMs) {
+      target.times.push(trace.outcome.ttfaMs);
+    }
+    const summary = getTraceSummary(trace);
+    if (summary?.totalRequests) {
+      target.fetches.push(summary.totalRequests);
+    }
+    if (channelName) {
+      target.names.add(channelName);
+    }
+  }
+
+  const byChannelType = {
+    slotSequencer: {
+      count: slotSeqTraces.times.length,
+      p50Ms: percentile(slotSeqTraces.times, 50),
+      p95Ms: percentile(slotSeqTraces.times, 95),
+      avgFetches: slotSeqTraces.fetches.length > 0 
+        ? Math.round(slotSeqTraces.fetches.reduce((a, b) => a + b, 0) / slotSeqTraces.fetches.length)
+        : 0,
+      channelNames: Array.from(slotSeqTraces.names),
+    },
+    adminCurated: {
+      count: adminCuratedTraces.times.length,
+      p50Ms: percentile(adminCuratedTraces.times, 50),
+      p95Ms: percentile(adminCuratedTraces.times, 95),
+      avgFetches: adminCuratedTraces.fetches.length > 0 
+        ? Math.round(adminCuratedTraces.fetches.reduce((a, b) => a + b, 0) / adminCuratedTraces.fetches.length)
+        : 0,
+      channelNames: Array.from(adminCuratedTraces.names),
+    },
+  };
+
   return {
     traceCount: traces.length,
     successCount,
@@ -344,6 +408,7 @@ function computeBaselineSummary(
       max: successTTFA.length > 0 ? Math.max(...successTTFA) : 0,
     },
     byTriggerType: byTriggerTypeSummary,
+    byChannelType,
     totalFetches,
     avgFetchesPerTrace: traces.length > 0 ? Math.round(totalFetches / traces.length) : 0,
     warnings: Object.entries(warningCounts).map(([type, count]) => ({ type, count })),
@@ -430,6 +495,25 @@ function writeBaselineReport(report: BaselineReport): void {
 
   for (const [type, data] of Object.entries(report.summary.byTriggerType)) {
     summaryLines.push(`| ${type} | ${data.count} | ${data.p50Ms}ms | ${data.p95Ms}ms | ${data.avgFetches} |`);
+  }
+
+  // [PHASE 4.4] Add per-channel-type breakdown
+  if (report.summary.byChannelType) {
+    summaryLines.push(``);
+    summaryLines.push(`## By Channel Type`);
+    summaryLines.push(``);
+    summaryLines.push(`| Type | Count | P50 | P95 | Avg Fetches | Channels |`);
+    summaryLines.push(`|------|-------|-----|-----|-------------|----------|`);
+    
+    const slotSeq = report.summary.byChannelType.slotSequencer;
+    const adminCur = report.summary.byChannelType.adminCurated;
+    
+    if (slotSeq.count > 0) {
+      summaryLines.push(`| Slot Sequencer | ${slotSeq.count} | ${slotSeq.p50Ms}ms | ${slotSeq.p95Ms}ms | ${slotSeq.avgFetches} | ${slotSeq.channelNames.join(', ')} |`);
+    }
+    if (adminCur.count > 0) {
+      summaryLines.push(`| Admin-Curated | ${adminCur.count} | ${adminCur.p50Ms}ms | ${adminCur.p95Ms}ms | ${adminCur.avgFetches} | ${adminCur.channelNames.join(', ')} |`);
+    }
   }
 
   if (report.summary.warnings.length > 0) {

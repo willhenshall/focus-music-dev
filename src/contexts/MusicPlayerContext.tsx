@@ -40,6 +40,10 @@ import {
   warmCache as warmAudioTracksCache,
   type CachedAudioTrack,
 } from '../lib/audioTracksCache';
+import {
+  getOrFetchSlotConfig,
+  type CachedSlotConfig,
+} from '../lib/slotConfigCache';
 
 // ============================================================================
 // CONSTANTS
@@ -1235,77 +1239,26 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     })();
   };
 
-  // Preload slot strategy data to cache for fast first track selection
-  const preloadSlotStrategy = async (channelId: string, energyLevel: 'low' | 'medium' | 'high') => {
+  // [PHASE 4.4] Preload slot strategy data using dedicated cache module
+  // This reduces duplicate slot table fetches across playback flows
+  const preloadSlotStrategy = async (channelId: string, energyLevel: 'low' | 'medium' | 'high'): Promise<CachedSlotConfig | null> => {
     const cacheKey = `${channelId}:${energyLevel}`;
 
-
-    // [PHASE 4.3] Return cached data if available and not expired (5 minute TTL)
-    const SLOT_STRATEGY_TTL_MS = 5 * 60 * 1000;
-    const cached = slotStrategyCache.current[cacheKey];
-    if (cached && cached.timestamp && (Date.now() - cached.timestamp) < SLOT_STRATEGY_TTL_MS) {
-      return cached;
-    }
-    // Remove stale entry if TTL expired
-    if (cached) {
-      delete slotStrategyCache.current[cacheKey];
+    // Check local ref cache first (for backward compatibility with existing callers)
+    const localCached = slotStrategyCache.current[cacheKey];
+    if (localCached && localCached.timestamp && (Date.now() - localCached.timestamp) < 5 * 60 * 1000) {
+      return localCached;
     }
 
-    try {
-      // First, load the strategy
-      const { data: strategy, error: strategyError } = await supabase
-        .from('slot_strategies')
-        .select('*')
-        .eq('channel_id', channelId)
-        .eq('energy_tier', energyLevel)
-        .maybeSingle();
-
-      if (strategyError || !strategy) {
-        return null;
-      }
-
-
-      // Then load all related data in parallel using the strategy_id
-      const [definitionsResult, ruleGroupsResult] = await Promise.all([
-        supabase
-          .from('slot_definitions')
-          .select('*')
-          .eq('strategy_id', strategy.id)
-          .order('index'),
-
-        supabase
-          .from('slot_rule_groups')
-          .select(`
-            *,
-            rules:slot_rules(*)
-          `)
-          .eq('strategy_id', strategy.id)
-          .order('order')
-      ]);
-
-      // Load boosts for all definitions
-      const definitionIds = definitionsResult.data?.map(d => d.id) || [];
-      const { data: boosts } = await supabase
-        .from('slot_boosts')
-        .select('*')
-        .in('slot_definition_id', definitionIds);
-
-      const cachedData = {
-        strategy: {
-          ...strategy,
-          definitions: definitionsResult.data || [],
-          boosts: boosts || []
-        },
-        ruleGroups: ruleGroupsResult.data || [],
-        timestamp: Date.now()
-      };
-
-      slotStrategyCache.current[cacheKey] = cachedData;
-      return cachedData;
-    } catch (error) {
+    // Use the dedicated slot config cache module
+    const config = await getOrFetchSlotConfig(channelId, energyLevel, supabase);
+    
+    if (config) {
+      // Also store in local ref for backward compatibility
+      slotStrategyCache.current[cacheKey] = config;
     }
-
-    return null;
+    
+    return config;
   };
 
   /**
