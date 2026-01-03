@@ -36,6 +36,19 @@ export default defineConfig({
     baseURL: "http://localhost:5173",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
+    // Allow autoplay for audio testing - required for headless Chromium
+    contextOptions: {
+      // Bypass autoplay restrictions
+      permissions: [],
+    },
+    launchOptions: {
+      args: [
+        // Allow autoplay without user gesture
+        '--autoplay-policy=no-user-gesture-required',
+        // Disable audio output to avoid system audio issues in headless
+        '--mute-audio',
+      ],
+    },
   },
 
   projects: [
