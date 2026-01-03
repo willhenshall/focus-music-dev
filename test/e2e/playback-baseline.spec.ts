@@ -341,6 +341,22 @@ function computeBaselineSummary(
       }
     }
 
+    // [PHASE 4.7] Check for excessive audio_tracks requests in slot-seq flows
+    // After Phase 4.7 batching, slot-seq should have at most 2 audio_tracks requests:
+    // 1x genre pool fetch + 1x metadata batch fetch
+    const channelName = trace.meta.channelName || '';
+    const isSlotSeq = SLOT_SEQUENCER_CHANNELS.some(name => 
+      channelName.toLowerCase() === name.toLowerCase()
+    );
+    if (isSlotSeq) {
+      const audioTracksCount = Object.entries(summary?.byEndpoint || {})
+        .filter(([ep]) => ep.includes('audio_tracks'))
+        .reduce((sum, [, count]) => sum + count, 0);
+      if (audioTracksCount > 2) {
+        warningCounts['slot_seq_excessive_audio_tracks'] = (warningCounts['slot_seq_excessive_audio_tracks'] || 0) + 1;
+      }
+    }
+
     // Check for analytics before audio
     // Note: PATCH to track_play_events is trackPlayEnd for PREVIOUS track - exclude those
     // Only flag INSERT (POST) to track_play_events or listening_sessions, or update_track calls

@@ -1062,39 +1062,64 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       // This reduces audio_tracks requests from 7x to 1x for slot sequencer channels
       const trackPool = await prefetchTrackPool(supabase, cachedStrategy.ruleGroups || []);
 
-      // Generate ONLY the first track to start playback immediately
-      const firstSlotIndex = getCurrentSlotIndex(startPosition, numSlots);
-      const firstResult = await selectNextTrackCached(supabase, {
-        channelId: activeChannel.id,
-        energyTier: energyLevel,
-        slotIndex: firstSlotIndex,
-        history,
-        cachedStrategy,
-        cachedTrackPool: trackPool || undefined,
-      });
+      // [PHASE 4.7] Batch all slot selections and metadata fetches into ONE query
+      // This collapses 3 audio_tracks metadata requests into 1
+      const initialBufferSize = 5;
+      const allSlotResults: { id: string; trackId: string; slotIndex: number }[] = [];
+      
+      // Step 1: Run all slot selections first (first track + buffer tracks)
+      for (let i = 0; i < initialBufferSize; i++) {
+        if (currentGenerationId !== playlistGenerationId.current) break;
 
-      // Check if this generation was superseded
+        const absolutePosition = startPosition + i;
+        const slotIndex = getCurrentSlotIndex(absolutePosition, numSlots);
+
+        const result = await selectNextTrackCached(supabase, {
+          channelId: activeChannel.id,
+          energyTier: energyLevel,
+          slotIndex,
+          history,
+          cachedStrategy,
+          cachedTrackPool: trackPool || undefined,
+        });
+
+        if (currentGenerationId !== playlistGenerationId.current) break;
+
+        if (result) {
+          allSlotResults.push({ id: result.id, trackId: result.trackId, slotIndex });
+          history.push(result.trackId);
+        }
+      }
+
+      // Check if superseded
       if (currentGenerationId !== playlistGenerationId.current) {
         return;
       }
 
-      if (firstResult) {
-        // [PHASE 4.2 OPTIMIZATION] Use cached audio tracks fetch
-        // This reduces duplicate /audio_tracks requests across flows
-        const firstTrack = await getOrFetchOneAudioTrack(firstResult.id, supabase);
+      // Step 2: [PHASE 4.7] Single batch fetch for ALL track metadata (first + buffer)
+      if (allSlotResults.length > 0) {
+        const allTrackIds = allSlotResults.map(r => r.id);
+        const { tracks: allTracks } = await getOrFetchAudioTracks(allTrackIds, supabase);
 
-        if (firstTrack) {
-          generatedTracks.push(firstTrack as unknown as AudioTrack);
-          history.push(firstResult.trackId);
+        // Reorder tracks to match slot selection order
+        for (const result of allSlotResults) {
+          const track = allTracks.find(t => t.id === result.id);
+          if (track) {
+            generatedTracks.push(track as unknown as AudioTrack);
+          }
         }
       }
 
+      // Check if superseded after fetch
+      if (currentGenerationId !== playlistGenerationId.current) {
+        return;
+      }
 
       // Set up abort controller for background loading
       const abortController = new AbortController();
       backgroundLoadAbortController.current = abortController;
 
-      // Set initial playlist with first track immediately
+      // Set initial playlist with all tracks
       setPlaylist(generatedTracks);
       setPlaylistChannelId(activeChannel.id);
       setCurrentTrackIndex(0);
@@ -1130,57 +1155,6 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
           }
         })();
       }
-
-      // [PHASE 4 OPTIMIZATION] Load additional tracks with BATCHED audio_tracks fetch
-      // Instead of fetching each track individually, collect all IDs first then fetch in one query
-      // [PHASE 4.6] Now also passes cachedTrackPool to avoid refetching track pool
-      ((cachedPool) => {
-        (async () => {
-          const initialBufferSize = 5;
-          const pendingResults: { id: string; trackId: string }[] = [];
-          
-          // Step 1: Run all slot selections first (still sequential due to history dependency)
-          for (let i = 1; i < initialBufferSize; i++) {
-            if (abortController.signal.aborted || currentGenerationId !== playlistGenerationId.current) break;
-
-            const absolutePosition = startPosition + i;
-            const slotIndex = getCurrentSlotIndex(absolutePosition, numSlots);
-
-            const result = await selectNextTrackCached(supabase, {
-              channelId: activeChannel.id,
-              energyTier: energyLevel,
-              slotIndex,
-              history,
-              cachedStrategy,
-              cachedTrackPool: cachedPool || undefined,
-            });
-
-            if (abortController.signal.aborted || currentGenerationId !== playlistGenerationId.current) break;
-
-            if (result) {
-              pendingResults.push({ id: result.id, trackId: result.trackId });
-              history.push(result.trackId); // Update history for next iteration
-            }
-          }
-
-        // Step 2: Batch fetch ALL pending tracks using cache
-        // [PHASE 4.2 OPTIMIZATION] Use cached audio tracks fetch - returns cached tracks + fetches missing in single query
-        if (pendingResults.length > 0 && !abortController.signal.aborted && currentGenerationId === playlistGenerationId.current) {
-          const trackIds = pendingResults.map(r => r.id);
-          const { tracks: batchedTracks } = await getOrFetchAudioTracks(trackIds, supabase);
-
-          if (batchedTracks.length > 0 && !abortController.signal.aborted && currentGenerationId === playlistGenerationId.current) {
-            // Reorder tracks to match the order from slot selection
-            const orderedBatchTracks = pendingResults
-              .map(r => batchedTracks.find(t => t.id === r.id))
-              .filter((t): t is CachedAudioTrack => t !== undefined);
-            
-            generatedTracks.push(...(orderedBatchTracks as unknown as AudioTrack[]));
-            setPlaylist([...generatedTracks]);
-          }
-        }
-        })();
-      })(trackPool);
 
       // [PHASE 2 OPTIMIZATION] Defer playlist insert to background (non-blocking)
       // This removes playlists INSERT from TTFA critical path
