@@ -34,6 +34,12 @@ import {
   beginTrace,
   endTrace,
 } from '../lib/playbackNetworkTrace';
+import {
+  getOrFetch as getOrFetchAudioTracks,
+  getOrFetchOne as getOrFetchOneAudioTrack,
+  warmCache as warmAudioTracksCache,
+  type CachedAudioTrack,
+} from '../lib/audioTracksCache';
 
 // ============================================================================
 // CONSTANTS
@@ -954,23 +960,20 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    // Step 2: Batch fetch ALL pending tracks in ONE query
+    // Step 2: Batch fetch ALL pending tracks using cache
+    // [PHASE 4.2 OPTIMIZATION] Use cached audio tracks fetch - returns cached tracks + fetches missing in single query
     if (pendingResults.length > 0) {
       const trackIds = pendingResults.map(r => r.id);
-      const { data: batchedTracks } = await supabase
-        .from('audio_tracks')
-        .select(AUDIO_TRACK_PLAYBACK_FIELDS)
-        .in('id', trackIds)
-        .is('deleted_at', null);
+      const { tracks: batchedTracks } = await getOrFetchAudioTracks(trackIds, supabase);
 
-      if (batchedTracks && batchedTracks.length > 0) {
+      if (batchedTracks.length > 0) {
         // Reorder tracks to match the order from slot selection
         const orderedBatchTracks = pendingResults
           .map(r => batchedTracks.find(t => t.id === r.id))
-          .filter((t): t is AudioTrack => t !== undefined);
+          .filter((t): t is CachedAudioTrack => t !== undefined);
         
         if (orderedBatchTracks.length > 0) {
-          setPlaylist(prev => [...prev, ...orderedBatchTracks]);
+          setPlaylist(prev => [...prev, ...(orderedBatchTracks as unknown as AudioTrack[])]);
         }
       }
     }
@@ -1064,16 +1067,12 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       }
 
       if (firstResult) {
-        // [PHASE 2 OPTIMIZATION] Use minimal select instead of select('*')
-        const { data: firstTrack } = await supabase
-          .from('audio_tracks')
-          .select(AUDIO_TRACK_PLAYBACK_FIELDS)
-          .eq('id', firstResult.id)
-          .is('deleted_at', null)
-          .maybeSingle();
+        // [PHASE 4.2 OPTIMIZATION] Use cached audio tracks fetch
+        // This reduces duplicate /audio_tracks requests across flows
+        const firstTrack = await getOrFetchOneAudioTrack(firstResult.id, supabase);
 
         if (firstTrack) {
-          generatedTracks.push(firstTrack);
+          generatedTracks.push(firstTrack as unknown as AudioTrack);
           history.push(firstResult.trackId);
         }
       }
@@ -1149,22 +1148,19 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
           }
         }
 
-        // Step 2: Batch fetch ALL pending tracks in ONE query
+        // Step 2: Batch fetch ALL pending tracks using cache
+        // [PHASE 4.2 OPTIMIZATION] Use cached audio tracks fetch - returns cached tracks + fetches missing in single query
         if (pendingResults.length > 0 && !abortController.signal.aborted && currentGenerationId === playlistGenerationId.current) {
           const trackIds = pendingResults.map(r => r.id);
-          const { data: batchedTracks } = await supabase
-            .from('audio_tracks')
-            .select(AUDIO_TRACK_PLAYBACK_FIELDS)
-            .in('id', trackIds)
-            .is('deleted_at', null);
+          const { tracks: batchedTracks } = await getOrFetchAudioTracks(trackIds, supabase);
 
-          if (batchedTracks && batchedTracks.length > 0 && !abortController.signal.aborted && currentGenerationId === playlistGenerationId.current) {
+          if (batchedTracks.length > 0 && !abortController.signal.aborted && currentGenerationId === playlistGenerationId.current) {
             // Reorder tracks to match the order from slot selection
             const orderedBatchTracks = pendingResults
               .map(r => batchedTracks.find(t => t.id === r.id))
-              .filter((t): t is AudioTrack => t !== undefined);
+              .filter((t): t is CachedAudioTrack => t !== undefined);
             
-            generatedTracks.push(...orderedBatchTracks);
+            generatedTracks.push(...(orderedBatchTracks as unknown as AudioTrack[]));
             setPlaylist([...generatedTracks]);
           }
         }
