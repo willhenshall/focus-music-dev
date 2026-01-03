@@ -160,6 +160,23 @@ interface BaselineReport {
         channelNames: string[];
       };
     };
+    // [PHASE 4.9] Slot sequencer repeat performance (cold vs warm)
+    slotSeqRepeatPerformance?: {
+      coldPlay: {
+        ttfaMs: number;
+        fetchCount: number;
+        channelName: string;
+      };
+      warmRepeat: {
+        ttfaMs: number;
+        fetchCount: number;
+        channelName: string;
+      };
+      delta: {
+        ttfaMs: number;      // negative means improvement
+        fetchCount: number;  // negative means fewer fetches (good)
+      };
+    };
     totalFetches: number;
     avgFetchesPerTrace: number;
     warnings: Array<{
@@ -171,6 +188,8 @@ interface BaselineReport {
   verdict: {
     pass: boolean;
     issues: string[];
+    // [PHASE 4.9] Non-fatal observations about slot-seq cache performance
+    slotSeqRepeatObservations?: string[];
   };
 }
 
@@ -585,6 +604,91 @@ function computeBaselineSummary(
     },
   };
 
+  // [PHASE 4.9] Compute slot sequencer repeat performance (cold vs warm)
+  // Find slot-seq traces that are repeats of the same channel
+  // Flow 4 = first occurrence of slot-seq channel (cold)
+  // Flow 5 = second occurrence of same slot-seq channel (warm repeat)
+  let slotSeqRepeatPerformance: BaselineReport['summary']['slotSeqRepeatPerformance'] = undefined;
+  
+  const slotSeqChannelOccurrences: Record<string, PlaybackTrace[]> = {};
+  for (const trace of traces) {
+    const channelName = trace.meta.channelName || '';
+    const isSlotSeq = SLOT_SEQUENCER_CHANNELS.some(name => 
+      channelName.toLowerCase() === name.toLowerCase()
+    );
+    if (isSlotSeq) {
+      if (!slotSeqChannelOccurrences[channelName]) {
+        slotSeqChannelOccurrences[channelName] = [];
+      }
+      slotSeqChannelOccurrences[channelName].push(trace);
+    }
+  }
+  
+  // Find a channel with at least 2 occurrences (cold + warm)
+  for (const [channelName, channelTraces] of Object.entries(slotSeqChannelOccurrences)) {
+    if (channelTraces.length >= 2) {
+      const coldTrace = channelTraces[0];
+      const warmTrace = channelTraces[1];
+      
+      const coldSummary = getTraceSummary(coldTrace);
+      const warmSummary = getTraceSummary(warmTrace);
+      const warmEvents = getTraceEvents(warmTrace);
+      
+      const coldTtfa = coldTrace.outcome?.ttfaMs || 0;
+      const warmTtfa = warmTrace.outcome?.ttfaMs || 0;
+      const coldFetches = coldSummary?.totalRequests || 0;
+      const warmFetches = warmSummary?.totalRequests || 0;
+      
+      slotSeqRepeatPerformance = {
+        coldPlay: {
+          ttfaMs: coldTtfa,
+          fetchCount: coldFetches,
+          channelName,
+        },
+        warmRepeat: {
+          ttfaMs: warmTtfa,
+          fetchCount: warmFetches,
+          channelName,
+        },
+        delta: {
+          ttfaMs: warmTtfa - coldTtfa,
+          fetchCount: warmFetches - coldFetches,
+        },
+      };
+      
+      // [PHASE 4.9] Warning: slot_seq_repeat_should_cache_hit
+      // Warm repeat should NOT fetch slot config tables (cache should be hit)
+      const slotConfigEndpoints = ['slot_strategies', 'slot_definitions', 'slot_rule_groups', 'slot_boosts'];
+      let slotConfigFetchedInWarmRepeat = false;
+      
+      for (const endpoint of slotConfigEndpoints) {
+        const count = Object.entries(warmSummary?.byEndpoint || {})
+          .filter(([ep]) => ep.includes(endpoint))
+          .reduce((sum, [, c]) => sum + c, 0);
+        if (count > 0) {
+          slotConfigFetchedInWarmRepeat = true;
+          break;
+        }
+      }
+      
+      // Also check for track pool fetch (audio_tracks with genre filter)
+      // This is harder to detect precisely, but excessive audio_tracks in warm repeat is suspicious
+      const audioTracksCount = Object.entries(warmSummary?.byEndpoint || {})
+        .filter(([ep]) => ep.includes('audio_tracks'))
+        .reduce((sum, [, c]) => sum + c, 0);
+      
+      // Warm repeat should ideally have 0-1 audio_tracks fetches (just metadata, no pool)
+      // If it has more, the cache might not be working
+      const excessiveAudioTracks = audioTracksCount > 2;
+      
+      if (slotConfigFetchedInWarmRepeat || excessiveAudioTracks) {
+        warningCounts['slot_seq_repeat_should_cache_hit'] = (warningCounts['slot_seq_repeat_should_cache_hit'] || 0) + 1;
+      }
+      
+      break; // Only compute for first repeated channel found
+    }
+  }
+
   return {
     traceCount: traces.length,
     successCount,
@@ -597,6 +701,7 @@ function computeBaselineSummary(
     },
     byTriggerType: byTriggerTypeSummary,
     byChannelType,
+    slotSeqRepeatPerformance, // [PHASE 4.9] Cold vs warm comparison
     totalFetches,
     avgFetchesPerTrace: traces.length > 0 ? Math.round(totalFetches / traces.length) : 0,
     warnings: Object.entries(warningCounts).map(([type, count]) => ({ type, count })),
@@ -630,11 +735,42 @@ function computeVerdict(summary: BaselineReport['summary']): BaselineReport['ver
     if (warning.type === 'analytics_before_audio') {
       issues.push(`Analytics fired before first audio (${warning.count}x)`);
     }
+    // [PHASE 4.9] Note: slot_seq_repeat_should_cache_hit is tracked but NOT a hard failure
+    // It's logged in slotSeqRepeatObservations instead for measurement purposes
+  }
+
+  // [PHASE 4.9] Slot-seq repeat performance observations
+  // These are logged as issues but NOT counted as failures for now.
+  // The purpose is to measure cache effectiveness and identify optimization opportunities.
+  // Future phases can make these hard failures once cache behavior is optimized.
+  const slotSeqRepeatIssues: string[] = [];
+  
+  if (summary.slotSeqRepeatPerformance) {
+    const perf = summary.slotSeqRepeatPerformance;
+    const TTFA_TOLERANCE_MS = 150; // Allow small variance due to network jitter
+    
+    // Flow 5 TTFA ideally <= Flow 4 TTFA + tolerance
+    if (perf.warmRepeat.ttfaMs > perf.coldPlay.ttfaMs + TTFA_TOLERANCE_MS) {
+      slotSeqRepeatIssues.push(
+        `Slot-seq warm repeat TTFA (${perf.warmRepeat.ttfaMs}ms) exceeded cold play ` +
+        `(${perf.coldPlay.ttfaMs}ms) by more than ${TTFA_TOLERANCE_MS}ms`
+      );
+    }
+    
+    // Flow 5 fetch count ideally < Flow 4 fetch count (cache should help)
+    if (perf.warmRepeat.fetchCount >= perf.coldPlay.fetchCount) {
+      slotSeqRepeatIssues.push(
+        `Slot-seq warm repeat fetches (${perf.warmRepeat.fetchCount}) >= ` +
+        `cold play (${perf.coldPlay.fetchCount}) - cache not reducing calls`
+      );
+    }
   }
 
   return {
     pass: issues.length === 0,
     issues,
+    // [PHASE 4.9] Include slot-seq repeat observations (non-fatal for now)
+    slotSeqRepeatObservations: slotSeqRepeatIssues.length > 0 ? slotSeqRepeatIssues : undefined,
   };
 }
 
@@ -704,6 +840,24 @@ function writeBaselineReport(report: BaselineReport): void {
     }
   }
 
+  // [PHASE 4.9] Add slot sequencer repeat performance (cold vs warm)
+  if (report.summary.slotSeqRepeatPerformance) {
+    const perf = report.summary.slotSeqRepeatPerformance;
+    const ttfaDeltaSign = perf.delta.ttfaMs >= 0 ? '+' : '';
+    const fetchDeltaSign = perf.delta.fetchCount >= 0 ? '+' : '';
+    
+    summaryLines.push(``);
+    summaryLines.push(`## Slot Sequencer Repeat Performance`);
+    summaryLines.push(``);
+    summaryLines.push(`Measures cache effectiveness by comparing cold play vs warm repeat of "${perf.coldPlay.channelName}".`);
+    summaryLines.push(``);
+    summaryLines.push(`| Flow | TTFA | Fetches | Notes |`);
+    summaryLines.push(`|------|------|---------|-------|`);
+    summaryLines.push(`| Flow 4 (Cold) | ${perf.coldPlay.ttfaMs}ms | ${perf.coldPlay.fetchCount} | First play, caches empty |`);
+    summaryLines.push(`| Flow 5 (Warm) | ${perf.warmRepeat.ttfaMs}ms | ${perf.warmRepeat.fetchCount} | Repeat within TTL, cache hit expected |`);
+    summaryLines.push(`| **Delta** | **${ttfaDeltaSign}${perf.delta.ttfaMs}ms** | **${fetchDeltaSign}${perf.delta.fetchCount}** | ${perf.delta.fetchCount < 0 ? '✅ Fewer fetches' : perf.delta.fetchCount === 0 ? '⚠️ Same fetches' : '❌ More fetches'} |`);
+  }
+
   if (report.summary.warnings.length > 0) {
     summaryLines.push(``);
     summaryLines.push(`## Warnings`);
@@ -722,6 +876,17 @@ function writeBaselineReport(report: BaselineReport): void {
     summaryLines.push(`❌ **FAIL** - Issues detected:`);
     for (const issue of report.verdict.issues) {
       summaryLines.push(`- ${issue}`);
+    }
+  }
+  
+  // [PHASE 4.9] Show slot-seq repeat observations (non-fatal)
+  if (report.verdict.slotSeqRepeatObservations && report.verdict.slotSeqRepeatObservations.length > 0) {
+    summaryLines.push(``);
+    summaryLines.push(`### Slot Sequencer Repeat Observations`);
+    summaryLines.push(``);
+    summaryLines.push(`*These are measurements for cache optimization, not failures:*`);
+    for (const obs of report.verdict.slotSeqRepeatObservations) {
+      summaryLines.push(`- 📊 ${obs}`);
     }
   }
 
@@ -752,7 +917,7 @@ test.describe('Playback Baseline Generation', () => {
     await clearTraces(page);
   });
 
-  test('generate baseline: initial play → energy change → channel change → slot-seq channel', async ({ page }) => {
+  test('generate baseline: initial play → energy change → channel change → slot-seq cold → slot-seq warm', async ({ page }) => {
     const channelCards = page.locator('[data-channel-id]');
     const count = await channelCards.count();
     expect(count).toBeGreaterThan(1);
@@ -868,9 +1033,9 @@ test.describe('Playback Baseline Generation', () => {
     await page.waitForTimeout(2000);
 
     // -------------------------------------------------------------------------
-    // FLOW 4: Slot Sequencer Channel (explicit)
+    // FLOW 4: Slot Sequencer Channel (explicit) - COLD PLAY
     // -------------------------------------------------------------------------
-    console.log('FLOW 4: Slot Sequencer Channel...');
+    console.log('FLOW 4: Slot Sequencer Channel (cold)...');
     
     const slotSeqChannel = await findSlotSequencerChannel();
     if (slotSeqChannel) {
@@ -882,9 +1047,51 @@ test.describe('Playback Baseline Generation', () => {
       
       await slotSeqChannel.card.click();
       await waitForAudioPlaying(page, 45000);
-      console.log(`  ✓ Slot sequencer channel "${slotSeqChannel.name}" complete`);
+      console.log(`  ✓ Slot sequencer channel "${slotSeqChannel.name}" cold play complete`);
     } else {
       console.log('  ⚠ No slot sequencer channel found in preferred list: ' + PREFERRED_SLOT_SEQ_CHANNELS.join(', '));
+    }
+
+    // Wait for trace to settle
+    await page.waitForTimeout(2000);
+
+    // -------------------------------------------------------------------------
+    // FLOW 5: Slot Sequencer Repeat (WARM) - Return to same channel within TTL
+    // -------------------------------------------------------------------------
+    console.log('FLOW 5: Slot Sequencer Repeat (warm)...');
+    
+    if (slotSeqChannel) {
+      // Step 1: Switch to a different admin-curated channel
+      // Find an admin-curated channel (A.D.D.J. or Ultra Drone)
+      const adminChannelCandidates = ['A.D.D.J.', 'Ultra Drone'];
+      let adminChannel: { card: typeof channelCards; name: string } | null = null;
+      
+      for (const name of adminChannelCandidates) {
+        const card = page.locator('[data-channel-id]', { hasText: name }).first();
+        if (await card.isVisible({ timeout: 500 }).catch(() => false)) {
+          adminChannel = { card, name };
+          break;
+        }
+      }
+      
+      if (adminChannel) {
+        // Switch to admin channel
+        await adminChannel.card.click();
+        await waitForAudioPlaying(page, 45000);
+        console.log(`  ✓ Switched to admin channel "${adminChannel.name}"`);
+        
+        // Wait a moment for the transition
+        await page.waitForTimeout(1000);
+        
+        // Step 2: Return to the slot sequencer channel (should be cache hit)
+        await slotSeqChannel.card.click();
+        await waitForAudioPlaying(page, 45000);
+        console.log(`  ✓ Returned to slot sequencer channel "${slotSeqChannel.name}" (warm repeat)`);
+      } else {
+        console.log('  ⚠ No admin channel found for intermediate switch');
+      }
+    } else {
+      console.log('  ⚠ Skipping Flow 5 - no slot sequencer channel was found for Flow 4');
     }
 
     // Wait for final trace to settle
