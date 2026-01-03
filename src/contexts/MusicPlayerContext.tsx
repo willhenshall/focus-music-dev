@@ -527,16 +527,19 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        // End previous track analytics
+        // [PHASE 4 OPTIMIZATION] End previous track analytics - fire-and-forget
+        // Deferred to not block TTFA for the new track
         if (currentPlayEventId && !isAdminMode) {
           const playDuration = (Date.now() - playStartTimeRef.current) / 1000;
-          await trackPlayEnd(
-            currentPlayEventId,
-            playDuration,
-            false,
-            audioEngine.getCurrentTime()
-          );
-          setCurrentPlayEventId(null);
+          const currentTime = audioEngine.getCurrentTime();
+          const eventIdToEnd = currentPlayEventId;
+          setCurrentPlayEventId(null); // Clear immediately to prevent double-fire
+          
+          // Fire-and-forget - don't await, don't block TTFA
+          trackPlayEnd(eventIdToEnd, playDuration, false, currentTime)
+            .catch(error => {
+              console.error('[DEFERRED_ANALYTICS] trackPlayEnd failed:', error);
+            });
         }
 
         // Load new track using file_path (storage adapter will handle URL generation)
@@ -930,8 +933,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     const currentPosition = playbackState.last_position + playlist.length;
     const history = playlist.map(t => t.metadata?.track_id).filter(Boolean) as string[];
 
-    // Load next 3 tracks
-    const newTracks: AudioTrack[] = [];
+    // [PHASE 4 OPTIMIZATION] Load next 3 tracks with BATCHED audio_tracks fetch
+    // Step 1: Run all slot selections first
+    const pendingResults: { id: string; trackId: string }[] = [];
     for (let i = 0; i < 3; i++) {
       const absolutePosition = currentPosition + i;
       const slotIndex = getCurrentSlotIndex(absolutePosition, numSlots);
@@ -945,23 +949,30 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       });
 
       if (result) {
-        // [PHASE 2 OPTIMIZATION] Use minimal select instead of select('*')
-        const { data: track } = await supabase
-          .from('audio_tracks')
-          .select(AUDIO_TRACK_PLAYBACK_FIELDS)
-          .eq('id', result.id)
-          .is('deleted_at', null)
-          .maybeSingle();
-
-        if (track) {
-          newTracks.push(track);
-          history.push(result.trackId);
-        }
+        pendingResults.push({ id: result.id, trackId: result.trackId });
+        history.push(result.trackId);
       }
     }
 
-    if (newTracks.length > 0) {
-      setPlaylist(prev => [...prev, ...newTracks]);
+    // Step 2: Batch fetch ALL pending tracks in ONE query
+    if (pendingResults.length > 0) {
+      const trackIds = pendingResults.map(r => r.id);
+      const { data: batchedTracks } = await supabase
+        .from('audio_tracks')
+        .select(AUDIO_TRACK_PLAYBACK_FIELDS)
+        .in('id', trackIds)
+        .is('deleted_at', null);
+
+      if (batchedTracks && batchedTracks.length > 0) {
+        // Reorder tracks to match the order from slot selection
+        const orderedBatchTracks = pendingResults
+          .map(r => batchedTracks.find(t => t.id === r.id))
+          .filter((t): t is AudioTrack => t !== undefined);
+        
+        if (orderedBatchTracks.length > 0) {
+          setPlaylist(prev => [...prev, ...orderedBatchTracks]);
+        }
+      }
     }
   };
 
@@ -1085,26 +1096,37 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       // Force track reload by clearing lastLoadedTrackId
       lastLoadedTrackId.current = null;
 
-      // Save/update playback state
+      // [PHASE 4 OPTIMIZATION] Save/update playback state - fire-and-forget
+      // This is non-critical for TTFA, can happen in background
       if (generatedTracks.length > 0) {
-        await supabase
-          .from('user_playback_state')
-          .upsert({
-            user_id: user.id,
-            channel_id: activeChannel.id,
-            energy_level: energyLevel,
-            last_track_id: generatedTracks[0].metadata?.track_id || '',
-            last_position: startPosition,
-            session_id: sessionId,
-            updated_at: new Date().toISOString()
-          }, {
-            onConflict: 'user_id,channel_id,energy_level'
-          });
+        (async () => {
+          try {
+            await supabase
+              .from('user_playback_state')
+              .upsert({
+                user_id: user.id,
+                channel_id: activeChannel.id,
+                energy_level: energyLevel,
+                last_track_id: generatedTracks[0].metadata?.track_id || '',
+                last_position: startPosition,
+                session_id: sessionId,
+                updated_at: new Date().toISOString()
+              }, {
+                onConflict: 'user_id,channel_id,energy_level'
+              });
+          } catch (error) {
+            console.error('[DEFERRED_ANALYTICS] user_playback_state upsert failed:', error);
+          }
+        })();
       }
 
-      // Load additional tracks sequentially in background
+      // [PHASE 4 OPTIMIZATION] Load additional tracks with BATCHED audio_tracks fetch
+      // Instead of fetching each track individually, collect all IDs first then fetch in one query
       (async () => {
         const initialBufferSize = 5;
+        const pendingResults: { id: string; trackId: string }[] = [];
+        
+        // Step 1: Run all slot selections first (still sequential due to history dependency)
         for (let i = 1; i < initialBufferSize; i++) {
           if (abortController.signal.aborted || currentGenerationId !== playlistGenerationId.current) break;
 
@@ -1122,33 +1144,46 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
           if (abortController.signal.aborted || currentGenerationId !== playlistGenerationId.current) break;
 
           if (result) {
-            // [PHASE 2 OPTIMIZATION] Use minimal select instead of select('*')
-            const { data: track } = await supabase
-              .from('audio_tracks')
-              .select(AUDIO_TRACK_PLAYBACK_FIELDS)
-              .eq('id', result.id)
-              .is('deleted_at', null)
-              .maybeSingle();
+            pendingResults.push({ id: result.id, trackId: result.trackId });
+            history.push(result.trackId); // Update history for next iteration
+          }
+        }
 
-            if (track && !abortController.signal.aborted && currentGenerationId === playlistGenerationId.current) {
-              generatedTracks.push(track);
-              history.push(result.trackId);
-              setPlaylist([...generatedTracks]);
-            }
+        // Step 2: Batch fetch ALL pending tracks in ONE query
+        if (pendingResults.length > 0 && !abortController.signal.aborted && currentGenerationId === playlistGenerationId.current) {
+          const trackIds = pendingResults.map(r => r.id);
+          const { data: batchedTracks } = await supabase
+            .from('audio_tracks')
+            .select(AUDIO_TRACK_PLAYBACK_FIELDS)
+            .in('id', trackIds)
+            .is('deleted_at', null);
+
+          if (batchedTracks && batchedTracks.length > 0 && !abortController.signal.aborted && currentGenerationId === playlistGenerationId.current) {
+            // Reorder tracks to match the order from slot selection
+            const orderedBatchTracks = pendingResults
+              .map(r => batchedTracks.find(t => t.id === r.id))
+              .filter((t): t is AudioTrack => t !== undefined);
+            
+            generatedTracks.push(...orderedBatchTracks);
+            setPlaylist([...generatedTracks]);
           }
         }
       })();
 
       // [PHASE 2 OPTIMIZATION] Defer playlist insert to background (non-blocking)
       // This removes playlists INSERT from TTFA critical path
-      supabase.from('playlists').insert({
-        user_id: user.id,
-        channel_id: activeChannel.id,
-        energy_level: energyLevel,
-        track_sequence: generatedTracks.map(t => t.metadata?.track_id).filter(Boolean),
-      }).catch(error => {
-        console.error('[DEFERRED_ANALYTICS] playlists insert failed:', error);
-      });
+      (async () => {
+        try {
+          await supabase.from('playlists').insert({
+            user_id: user.id,
+            channel_id: activeChannel.id,
+            energy_level: energyLevel,
+            track_sequence: generatedTracks.map(t => t.metadata?.track_id).filter(Boolean),
+          });
+        } catch (error) {
+          console.error('[DEFERRED_ANALYTICS] playlists insert failed:', error);
+        }
+      })();
 
       return;
     }
@@ -1190,14 +1225,18 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
     // [PHASE 2 OPTIMIZATION] Defer playlist insert to background (non-blocking)
     // This removes playlists INSERT from TTFA critical path
-    supabase.from('playlists').insert({
-      user_id: user.id,
-      channel_id: activeChannel.id,
-      energy_level: energyLevel,
-      track_sequence: playlistResponse.trackIds,
-    }).catch(error => {
-      console.error('[DEFERRED_ANALYTICS] playlists insert failed:', error);
-    });
+    (async () => {
+      try {
+        await supabase.from('playlists').insert({
+          user_id: user.id,
+          channel_id: activeChannel.id,
+          energy_level: energyLevel,
+          track_sequence: playlistResponse.trackIds,
+        });
+      } catch (error) {
+        console.error('[DEFERRED_ANALYTICS] playlists insert failed:', error);
+      }
+    })();
   };
 
   // Preload slot strategy data to cache for fast first track selection
@@ -1552,15 +1591,16 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       if (pendingUserPrefs.channelEnergyLevels) {
         prefsToUpsert.channel_energy_levels = pendingUserPrefs.channelEnergyLevels;
       }
-      supabase
-        .from('user_preferences')
-        .upsert(prefsToUpsert, { onConflict: 'user_id' })
-        .then(() => {
+      (async () => {
+        try {
+          await supabase
+            .from('user_preferences')
+            .upsert(prefsToUpsert, { onConflict: 'user_id' });
           invalidateUserPreferences(pendingUserPrefs.userId);
-        })
-        .catch(error => {
+        } catch (error) {
           console.error('[DEFERRED_ANALYTICS] user_preferences upsert failed:', error);
-        });
+        }
+      })();
     }
     
     // [PHASE 3 FIX] Create listening session AFTER first audio is detected
@@ -1568,22 +1608,23 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     const pendingSession = pendingSessionRef.current;
     if (pendingSession) {
       pendingSessionRef.current = null; // Clear the pending session
-      supabase
-        .from('listening_sessions')
-        .insert({
-          user_id: pendingSession.userId,
-          channel_id: pendingSession.channelId,
-          energy_level: pendingSession.energyLevel,
-          started_at: pendingSession.startedAt,
-        })
-        .select()
-        .single()
-        .then(({ data }) => {
+      (async () => {
+        try {
+          const { data } = await supabase
+            .from('listening_sessions')
+            .insert({
+              user_id: pendingSession.userId,
+              channel_id: pendingSession.channelId,
+              energy_level: pendingSession.energyLevel,
+              started_at: pendingSession.startedAt,
+            })
+            .select()
+            .single();
           if (data) setCurrentSessionId(data.id);
-        })
-        .catch(error => {
+        } catch (error) {
           console.error('[DEFERRED_ANALYTICS] listening_sessions insert failed:', error);
-        });
+        }
+      })();
     }
     
     // [PHASE 2 OPTIMIZATION] Fire deferred analytics AFTER first audio
