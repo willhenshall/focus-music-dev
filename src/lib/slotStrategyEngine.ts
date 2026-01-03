@@ -440,8 +440,94 @@ export async function selectNextTrack(
 }
 
 /**
+ * [PHASE 4.6] In-memory cache for track pools by genre.
+ * TTL: 5 minutes to prevent stale data.
+ */
+const trackPoolCache = new Map<string, { tracks: any[]; cachedAt: number }>();
+const TRACK_POOL_CACHE_TTL_MS = 5 * 60 * 1000;
+const inFlightTrackPoolRequests = new Map<string, Promise<any[] | null>>();
+
+/**
+ * [PHASE 4.6] Prefetch the track pool based on genre filter from rule groups.
+ * Uses in-memory caching to avoid duplicate fetches within the same playback session.
+ * 
+ * @param supabase - Supabase client
+ * @param ruleGroups - Rule groups from cachedStrategy
+ * @returns Array of tracks or null on error
+ */
+export async function prefetchTrackPool(
+  supabase: SupabaseClient,
+  ruleGroups: any[]
+): Promise<any[] | null> {
+  // Determine genre from rule groups
+  const genreRules = ruleGroups?.flatMap((group: any) =>
+    group.rules?.filter((rule: any) =>
+      rule.field === 'genre' &&
+      rule.operator === 'eq'
+    ) || []
+  ) || [];
+  
+  const genre = genreRules.length > 0 ? genreRules[0].value : '__no_genre__';
+  const cacheKey = `genre:${genre}`;
+  
+  // Check cache first
+  const now = Date.now();
+  const cached = trackPoolCache.get(cacheKey);
+  if (cached && (now - cached.cachedAt) < TRACK_POOL_CACHE_TTL_MS) {
+    return cached.tracks;
+  }
+  
+  // Check in-flight request
+  const inFlight = inFlightTrackPoolRequests.get(cacheKey);
+  if (inFlight) {
+    return inFlight;
+  }
+  
+  // Fetch and cache
+  const fetchPromise = (async () => {
+    try {
+      let tracksQuery = supabase
+        .from('audio_tracks')
+        .select('id, metadata, speed, intensity, brightness, complexity, arousal, valence, tempo, duration_seconds, catalog, locked, track_user_genre_id, music_key_value, energy_set, energy_low, energy_medium, energy_high')
+        .is('deleted_at', null);
+
+      if (genre !== '__no_genre__') {
+        tracksQuery = tracksQuery.eq('genre', genre);
+      }
+
+      const { data: tracks, error: tracksError } = await tracksQuery;
+
+      if (tracksError) {
+        console.error('[SLOT_ENGINE] prefetchTrackPool error:', tracksError);
+        return null;
+      }
+
+      const result = tracks || [];
+      trackPoolCache.set(cacheKey, { tracks: result, cachedAt: Date.now() });
+      return result;
+    } finally {
+      inFlightTrackPoolRequests.delete(cacheKey);
+    }
+  })();
+  
+  inFlightTrackPoolRequests.set(cacheKey, fetchPromise);
+  return fetchPromise;
+}
+
+/**
+ * Clear the track pool cache (useful for testing or admin updates).
+ */
+export function clearTrackPoolCache(): void {
+  trackPoolCache.clear();
+  inFlightTrackPoolRequests.clear();
+}
+
+/**
  * Optimized version that uses pre-loaded strategy data from cache
  * This reduces latency from ~5s to <500ms by eliminating multiple DB queries
+ * 
+ * [PHASE 4.6] Now accepts optional cachedTrackPool to avoid refetching
+ * the track pool for each slot selection within the same playlist generation.
  */
 export async function selectNextTrackCached(
   supabase: SupabaseClient,
@@ -451,9 +537,10 @@ export async function selectNextTrackCached(
     slotIndex: number;
     history: string[];
     cachedStrategy?: any; // Pre-loaded strategy data
+    cachedTrackPool?: any[]; // [PHASE 4.6] Pre-fetched track pool
   }
 ): Promise<SelectionResult | null> {
-  const { channelId, energyTier, slotIndex, history, cachedStrategy } = params;
+  const { channelId, energyTier, slotIndex, history, cachedStrategy, cachedTrackPool } = params;
 
   // Use cached data if available, otherwise fall back to loading
   let strategy, slotDef, boosts, ruleGroups;
@@ -487,41 +574,49 @@ export async function selectNextTrackCached(
     { field: 'bpm', mode: 'near', weight: 1 },
   ];
 
-  // Build tracks query with genre filtering - fetch ALL fields for rule evaluation
-  let tracksQuery = supabase
-    .from('audio_tracks')
-    .select('id, metadata, speed, intensity, brightness, complexity, arousal, valence, tempo, duration_seconds, catalog, locked, track_user_genre_id, music_key_value, energy_set, energy_low, energy_medium, energy_high')
-    .is('deleted_at', null);
+  // [PHASE 4.6] Use cachedTrackPool if provided, otherwise fetch
+  let tracks: any[] | null = null;
+  
+  if (cachedTrackPool && cachedTrackPool.length > 0) {
+    tracks = cachedTrackPool;
+  } else {
+    // Build tracks query with genre filtering - fetch ALL fields for rule evaluation
+    let tracksQuery = supabase
+      .from('audio_tracks')
+      .select('id, metadata, speed, intensity, brightness, complexity, arousal, valence, tempo, duration_seconds, catalog, locked, track_user_genre_id, music_key_value, energy_set, energy_low, energy_medium, energy_high')
+      .is('deleted_at', null);
 
-  // Apply genre filters from rule groups (skip these in evaluateRuleGroups later)
-  const genreRules = ruleGroups?.flatMap((group: any) =>
-    group.rules?.filter((rule: any) =>
-      rule.field === 'genre' &&
-      rule.operator === 'eq'
-    ) || []
-  ) || [];
+    // Apply genre filters from rule groups (skip these in evaluateRuleGroups later)
+    const genreRules = ruleGroups?.flatMap((group: any) =>
+      group.rules?.filter((rule: any) =>
+        rule.field === 'genre' &&
+        rule.operator === 'eq'
+      ) || []
+    ) || [];
 
-  if (genreRules.length > 0) {
-    tracksQuery = tracksQuery.eq('genre', genreRules[0].value);
+    if (genreRules.length > 0) {
+      tracksQuery = tracksQuery.eq('genre', genreRules[0].value);
+    }
+
+    const { data: fetchedTracks, error: tracksError } = await tracksQuery;
+
+    if (tracksError) {
+      return null;
+    }
+    tracks = fetchedTracks;
   }
 
-  // Remove genre rules from ruleGroups since we already filtered by SQL
+  if (!tracks || tracks.length === 0) {
+    return null;
+  }
+
+  // Remove genre rules from ruleGroups since we already filtered by SQL (or cached pool is already filtered)
   const filteredRuleGroups = ruleGroups?.map((group: any) => ({
     ...group,
     rules: group.rules?.filter((rule: any) =>
       rule.field !== 'genre'
     ) || []
   })) || [];
-
-  const { data: tracks, error: tracksError } = await tracksQuery;
-
-  if (tracksError) {
-    return null;
-  }
-
-  if (!tracks || tracks.length === 0) {
-    return null;
-  }
 
   // Filter and score candidates
   const candidates: TrackCandidate[] = [];
