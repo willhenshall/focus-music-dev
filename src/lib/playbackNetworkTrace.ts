@@ -80,9 +80,15 @@ export interface PlaybackTrace {
   startedAt: number;       // performance.now() when trace began
   endedAt?: number;        // performance.now() when trace ended
   outcome?: TraceOutcome;
-  events: NetworkEvent[];
+  events: NetworkEvent[];  // All captured events (including bleed-over from previous ops)
   summary?: TraceSummary;
   active: boolean;         // True if trace is still collecting events
+  
+  // [PHASE 4.1] Separated event buckets for clean TTFA measurement
+  ttfaWindowEvents?: NetworkEvent[];   // Events that started within TTFA window (startedAt <= ts < endedAt)
+  postAudioEvents?: NetworkEvent[];    // Events captured after TTFA window (for post-audio chatter analysis)
+  ttfaWindowSummary?: TraceSummary;    // Summary of TTFA-window-only events
+  postAudioSummary?: TraceSummary;     // Summary of post-audio events
 }
 
 // ============================================================================
@@ -160,6 +166,11 @@ export function beginTrace(requestId: string, meta: TraceMeta = {}): void {
  * End a trace and compute summary statistics.
  * Produces a single structured log for diagnostics.
  * 
+ * [PHASE 4.1] Events are now separated into buckets:
+ * - ttfaWindowEvents: Events that started within the TTFA window (startedAt <= ts)
+ * - postAudioEvents: (reserved for future post-audio capture)
+ * - Events with ts < startedAt are "bleed-over" from previous operations and excluded from TTFA count
+ * 
  * @param requestId - The requestId of the trace to end
  * @param outcome - The outcome of the playback attempt
  */
@@ -183,7 +194,22 @@ export function endTrace(requestId: string, outcome: TraceOutcome): void {
   trace.endedAt = performance.now();
   trace.outcome = outcome;
 
-  // Compute summary
+  // [PHASE 4.1] Separate events into TTFA-window and bleed-over buckets
+  // TTFA-window events: started AFTER the trace began (ts >= startedAt)
+  // Bleed-over events: started BEFORE the trace (ts < startedAt) - from previous operations
+  trace.ttfaWindowEvents = trace.events.filter(e => e.ts >= trace.startedAt);
+  const bleedOverEvents = trace.events.filter(e => e.ts < trace.startedAt);
+  
+  // Log bleed-over events for debugging if any
+  if (bleedOverEvents.length > 0 && import.meta.env.DEV) {
+    console.log('[PLAYBACK_TRACE] Excluded bleed-over events:', bleedOverEvents.length, 
+      bleedOverEvents.map(e => ({ pathname: e.pathname, ts: e.ts, startedAt: trace.startedAt })));
+  }
+
+  // Compute summary for TTFA-window events only (clean measurement)
+  trace.ttfaWindowSummary = computeSummary(trace.ttfaWindowEvents);
+  
+  // Also compute legacy summary for all events (backward compatibility)
   trace.summary = computeSummary(trace.events);
 
   // Move to completed traces
@@ -191,6 +217,7 @@ export function endTrace(requestId: string, outcome: TraceOutcome): void {
   addToRingBuffer(trace);
 
   // Log the complete trace as a single structured JSON line (keep for parsing)
+  // [PHASE 4.1] Use ttfaWindowSummary for clean metrics
   console.log('[PLAYBACK_TRACE]', JSON.stringify({
     requestId,
     outcome: outcome.outcome,
@@ -198,12 +225,13 @@ export function endTrace(requestId: string, outcome: TraceOutcome): void {
     reason: outcome.reason,
     traceDurationMs: Math.round(trace.endedAt - trace.startedAt),
     networkSummary: {
-      totalRequests: trace.summary.totalRequests,
-      totalNetworkMs: trace.summary.totalDurationMs,
-      byHostname: trace.summary.byHostname,
+      totalRequests: trace.ttfaWindowSummary.totalRequests,
+      totalNetworkMs: trace.ttfaWindowSummary.totalDurationMs,
+      byHostname: trace.ttfaWindowSummary.byHostname,
+      bleedOverExcluded: bleedOverEvents.length,
     },
-    topSlowRequests: trace.summary.slowestRequests,
-    endpointsByCount: trace.summary.byEndpoint,
+    topSlowRequests: trace.ttfaWindowSummary.slowestRequests,
+    endpointsByCount: trace.ttfaWindowSummary.byEndpoint,
     meta: trace.meta,
   }));
 
@@ -292,6 +320,7 @@ export function clearTrace(requestId: string): void {
 
 /**
  * Get summary for a completed trace.
+ * [PHASE 4.1] Returns ttfaWindowSummary (clean TTFA-only metrics) by default.
  */
 export function summarizeTrace(requestId: string): TraceSummary | undefined {
   if (!import.meta.env.DEV) return undefined;
@@ -299,11 +328,15 @@ export function summarizeTrace(requestId: string): TraceSummary | undefined {
   const trace = getTrace(requestId);
   if (!trace) return undefined;
   
-  // If already computed, return it
+  // [PHASE 4.1] Prefer ttfaWindowSummary for clean metrics
+  if (trace.ttfaWindowSummary) return trace.ttfaWindowSummary;
+  
+  // Fall back to legacy summary if available
   if (trace.summary) return trace.summary;
   
-  // Compute on demand (for active traces)
-  return computeSummary(trace.events);
+  // Compute on demand (for active traces) - filter to TTFA window
+  const ttfaWindowEvents = trace.events.filter(e => e.ts >= trace.startedAt);
+  return computeSummary(ttfaWindowEvents);
 }
 
 /**
@@ -335,6 +368,7 @@ export function clearAllTraces(): void {
 
 /**
  * Get summary of all completed traces.
+ * [PHASE 4.1] Uses ttfaWindowSummary for clean TTFA-only metrics.
  */
 export function getOverallSummary(): { 
   traceCount: number; 
@@ -347,8 +381,15 @@ export function getOverallSummary(): {
     return { traceCount: 0, avgRequestsPerTrace: 0, avgNetworkMsPerTrace: 0 };
   }
 
-  const totalRequests = traces.reduce((sum, t) => sum + (t.summary?.totalRequests ?? 0), 0);
-  const totalNetworkMs = traces.reduce((sum, t) => sum + (t.summary?.totalDurationMs ?? 0), 0);
+  // [PHASE 4.1] Use ttfaWindowSummary for clean metrics (fall back to summary)
+  const totalRequests = traces.reduce((sum, t) => {
+    const summary = t.ttfaWindowSummary || t.summary;
+    return sum + (summary?.totalRequests ?? 0);
+  }, 0);
+  const totalNetworkMs = traces.reduce((sum, t) => {
+    const summary = t.ttfaWindowSummary || t.summary;
+    return sum + (summary?.totalDurationMs ?? 0);
+  }, 0);
 
   return {
     traceCount: traces.length,
@@ -437,10 +478,12 @@ export function parseUrl(url: string): { hostname: string; pathname: string } {
 
 /**
  * Detect heuristic warnings in a trace.
+ * [PHASE 4.1] Uses ttfaWindowEvents for clean TTFA-only analysis.
  */
 export function detectWarnings(trace: PlaybackTrace): TraceWarning[] {
   const warnings: TraceWarning[] = [];
-  const events = trace.events;
+  // [PHASE 4.1] Use ttfaWindowEvents for clean analysis (fall back to all events)
+  const events = trace.ttfaWindowEvents || trace.events;
 
   // 1. Duplicate user_preferences reads/writes
   const userPrefsEvents = events.filter(e => 
@@ -557,14 +600,19 @@ function truncatePath(pathname: string, maxLen = 40): string {
 
 /**
  * Print a human-readable trace summary to console.
+ * [PHASE 4.1] Uses ttfaWindowSummary for clean TTFA-only metrics.
  */
 function printTraceSummary(trace: PlaybackTrace): void {
   if (!import.meta.env.DEV) return;
 
   const meta = trace.meta;
   const outcome = trace.outcome;
-  const summary = trace.summary;
+  // [PHASE 4.1] Use ttfaWindowSummary for clean metrics (fall back to summary for backward compat)
+  const summary = trace.ttfaWindowSummary || trace.summary;
   const warnings = detectWarnings(trace);
+  
+  // Count bleed-over events (excluded from TTFA window)
+  const bleedOverCount = (trace.events?.length || 0) - (trace.ttfaWindowEvents?.length || 0);
 
   const outcomeIcon = outcome?.outcome === 'success' ? '✅' : '❌';
   const ttfaDisplay = formatMs(outcome?.ttfaMs);
@@ -578,7 +626,7 @@ function printTraceSummary(trace: PlaybackTrace): void {
     `│ Trigger: ${(meta.triggerType || 'unknown').padEnd(15)} Channel: ${(meta.channelName || meta.channelId || 'unknown').slice(0, 20)}`,
     `│ Energy: ${(meta.energyLevel || 'unknown').padEnd(16)} Engine: ${meta.engineType || 'unknown'}`,
     `├──────────────────────────────────────────────────────────────┤`,
-    `│ Network: ${summary?.totalRequests || 0} requests, ${formatMs(summary?.totalDurationMs)} total`,
+    `│ TTFA Window: ${summary?.totalRequests || 0} requests, ${formatMs(summary?.totalDurationMs)} total${bleedOverCount > 0 ? ` (${bleedOverCount} bleed-over excluded)` : ''}`,
   ];
 
   // Add hostname breakdown
@@ -637,11 +685,13 @@ function printTraceSummary(trace: PlaybackTrace): void {
 
 /**
  * Generate a human-readable summary string for a trace (for CLI/export).
+ * [PHASE 4.1] Uses ttfaWindowSummary for clean TTFA-only metrics.
  */
 export function generateTraceSummaryText(trace: PlaybackTrace): string {
   const meta = trace.meta;
   const outcome = trace.outcome;
-  const summary = trace.summary;
+  // [PHASE 4.1] Use ttfaWindowSummary for clean metrics
+  const summary = trace.ttfaWindowSummary || trace.summary;
   const warnings = detectWarnings(trace);
 
   const outcomeIcon = outcome?.outcome === 'success' ? '✅' : '❌';

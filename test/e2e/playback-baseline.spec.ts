@@ -46,6 +46,24 @@ interface TTFAEvent {
   timestamp?: string;
 }
 
+interface NetworkEvent {
+  ts: number;
+  method: string;
+  url: string;
+  status: number | 'ERR';
+  durationMs: number;
+  hostname: string;
+  pathname: string;
+}
+
+interface TraceSummary {
+  totalRequests: number;
+  totalDurationMs: number;
+  byHostname: Record<string, { count: number; totalMs: number }>;
+  byEndpoint: Record<string, number>;
+  slowestRequests: Array<{ url: string; durationMs: number; method: string; pathname: string }>;
+}
+
 interface PlaybackTrace {
   requestId: string;
   meta: {
@@ -62,22 +80,13 @@ interface PlaybackTrace {
     ttfaMs?: number;
     reason?: string;
   };
-  events: Array<{
-    ts: number;
-    method: string;
-    url: string;
-    status: number | 'ERR';
-    durationMs: number;
-    hostname: string;
-    pathname: string;
-  }>;
-  summary?: {
-    totalRequests: number;
-    totalDurationMs: number;
-    byHostname: Record<string, { count: number; totalMs: number }>;
-    byEndpoint: Record<string, number>;
-    slowestRequests: Array<{ url: string; durationMs: number; method: string; pathname: string }>;
-  };
+  events: NetworkEvent[];
+  summary?: TraceSummary;
+  // [PHASE 4.1] Separated event buckets for clean TTFA measurement
+  ttfaWindowEvents?: NetworkEvent[];
+  ttfaWindowSummary?: TraceSummary;
+  postAudioEvents?: NetworkEvent[];
+  postAudioSummary?: TraceSummary;
 }
 
 interface BaselineReport {
@@ -195,6 +204,16 @@ function percentile(values: number[], p: number): number {
   return sorted[Math.max(0, Math.min(index, sorted.length - 1))];
 }
 
+// [PHASE 4.1] Helper to get the appropriate summary (prefer ttfaWindowSummary)
+function getTraceSummary(trace: PlaybackTrace): TraceSummary | undefined {
+  return trace.ttfaWindowSummary || trace.summary;
+}
+
+// [PHASE 4.1] Helper to get the appropriate events (prefer ttfaWindowEvents)
+function getTraceEvents(trace: PlaybackTrace): NetworkEvent[] {
+  return trace.ttfaWindowEvents || trace.events || [];
+}
+
 function computeBaselineSummary(
   traces: PlaybackTrace[], 
   ttfaEvents: TTFAEvent[]
@@ -208,6 +227,7 @@ function computeBaselineSummary(
   const failCount = traces.filter(t => t.outcome?.outcome === 'fail').length;
 
   // By trigger type
+  // [PHASE 4.1] Use ttfaWindowSummary for clean TTFA-only metrics
   const byTriggerType: Record<string, { times: number[]; fetches: number[] }> = {};
   for (const trace of traces) {
     const triggerType = trace.meta.triggerType || 'unknown';
@@ -217,8 +237,9 @@ function computeBaselineSummary(
     if (trace.outcome?.ttfaMs) {
       byTriggerType[triggerType].times.push(trace.outcome.ttfaMs);
     }
-    if (trace.summary?.totalRequests) {
-      byTriggerType[triggerType].fetches.push(trace.summary.totalRequests);
+    const summary = getTraceSummary(trace);
+    if (summary?.totalRequests) {
+      byTriggerType[triggerType].fetches.push(summary.totalRequests);
     }
   }
 
@@ -241,10 +262,14 @@ function computeBaselineSummary(
   }
 
   // Warning counts
+  // [PHASE 4.1] Use ttfaWindowSummary and ttfaWindowEvents for clean TTFA-only analysis
   const warningCounts: Record<string, number> = {};
   for (const trace of traces) {
+    const summary = getTraceSummary(trace);
+    const events = getTraceEvents(trace);
+    
     // Check for duplicate user_preferences
-    const userPrefsCount = Object.entries(trace.summary?.byEndpoint || {})
+    const userPrefsCount = Object.entries(summary?.byEndpoint || {})
       .filter(([ep]) => ep.includes('user_preferences'))
       .reduce((sum, [, count]) => sum + count, 0);
     if (userPrefsCount > 1) {
@@ -252,7 +277,7 @@ function computeBaselineSummary(
     }
 
     // Check for duplicate slot_strategies
-    const slotStratCount = Object.entries(trace.summary?.byEndpoint || {})
+    const slotStratCount = Object.entries(summary?.byEndpoint || {})
       .filter(([ep]) => ep.includes('slot_strategies'))
       .reduce((sum, [, count]) => sum + count, 0);
     if (slotStratCount > 1) {
@@ -260,7 +285,7 @@ function computeBaselineSummary(
     }
 
     // Check for audio_tracks select=*
-    for (const event of trace.events || []) {
+    for (const event of events) {
       if (event.url?.includes('audio_tracks') && event.url.includes('select=*')) {
         warningCounts['audio_tracks_select_all'] = (warningCounts['audio_tracks_select_all'] || 0) + 1;
       }
@@ -269,7 +294,7 @@ function computeBaselineSummary(
     // Check for analytics before audio
     // Note: PATCH to track_play_events is trackPlayEnd for PREVIOUS track - exclude those
     // Only flag INSERT (POST) to track_play_events or listening_sessions, or update_track calls
-    const analyticsEvents = (trace.events || []).filter(e => {
+    const analyticsEvents = events.filter(e => {
       const pathname = e.pathname || '';
       const method = e.method || '';
       
@@ -302,7 +327,11 @@ function computeBaselineSummary(
     }
   }
 
-  const totalFetches = traces.reduce((sum, t) => sum + (t.summary?.totalRequests || 0), 0);
+  // [PHASE 4.1] Use ttfaWindowSummary for clean TTFA-only fetch counts
+  const totalFetches = traces.reduce((sum, t) => {
+    const summary = getTraceSummary(t);
+    return sum + (summary?.totalRequests || 0);
+  }, 0);
 
   return {
     traceCount: traces.length,
