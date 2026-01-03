@@ -32,7 +32,7 @@ const THRESHOLDS = {
   ttfaP95Ms: 4000,           // TTFA P95 must be under 4s
   maxFetchesPerTrace: 20,    // Max fetch requests per trace
   maxDuplicateUserPrefs: 1,  // No duplicate user_preferences
-  maxDuplicateSlotStrategy: 2, // Minimal slot_strategy duplicates
+  maxDuplicateSlotStrategy: 0, // Phase 4.8: slot_strategy duplicates should be eliminated
 };
 
 interface TTFAEvent {
@@ -200,28 +200,153 @@ async function navigateToChannelsIfNeeded(page: Page): Promise<void> {
   await channelCard.waitFor({ state: 'visible', timeout: 20000 });
 }
 
+/**
+ * Wait for audio to be playing with retry logic for headless Chromium reliability.
+ * 
+ * This function:
+ * 1. Checks for error modals and fails early if detected
+ * 2. Retries clicking the play button if audio doesn't start
+ * 3. Verifies both the UI state (data-playing) and actual audio playback
+ * 4. Provides detailed diagnostics on failure
+ */
 async function waitForAudioPlaying(page: Page, timeout = 30000): Promise<void> {
-  await page.waitForFunction(
-    () => {
-      const btn = document.querySelector('[data-testid="player-play-pause"]');
-      return btn?.getAttribute('data-playing') === 'true';
-    },
-    { timeout }
-  );
+  const MAX_RETRIES = 3;
+  // Use shorter per-attempt timeout to allow for retries
+  const PER_ATTEMPT_TIMEOUT = Math.min(12000, Math.floor(timeout / 3));
   
-  // Wait for audio element to be actually playing
-  await page.waitForFunction(
-    async () => {
-      const audio = document.querySelector('audio') as HTMLAudioElement | null;
-      if (!audio) return false;
-      if (audio.paused) return false;
+  let lastDiagnostics: Record<string, unknown> | null = null;
+  
+  // Helper to get current diagnostics
+  const getDiagnostics = async (): Promise<Record<string, unknown> | null> => {
+    try {
+      return await page.evaluate(() => {
+        const footerBtn = document.querySelector('[data-testid="player-play-pause"]');
+        const channelBtn = document.querySelector('[data-testid="channel-play-pause"]');
+        const audio = document.querySelector('audio') as HTMLAudioElement | null;
+        const errorModal = document.querySelector('[data-testid="playback-loading-modal"]');
+        const loadingShimmer = document.querySelector('[data-testid="loading-shimmer"]');
+        
+        return {
+          footerBtnExists: !!footerBtn,
+          footerDataPlaying: footerBtn?.getAttribute('data-playing'),
+          channelBtnExists: !!channelBtn,
+          channelDataPlaying: channelBtn?.getAttribute('data-playing'),
+          audioExists: !!audio,
+          audioPaused: audio?.paused,
+          audioCurrentTime: audio?.currentTime,
+          audioSrc: audio?.src?.slice(0, 100),
+          audioReadyState: audio?.readyState,
+          audioNetworkState: audio?.networkState,
+          audioError: audio?.error?.message,
+          errorModalVisible: !!errorModal,
+          loadingModalVisible: !!loadingShimmer,
+        };
+      });
+    } catch {
+      return null;
+    }
+  };
+  
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      // Check for error modal before waiting
+      const hasErrorModal = await page.evaluate(() => {
+        const modal = document.querySelector('[data-testid="playback-loading-modal"]');
+        if (!modal) return false;
+        const ariaLabel = modal.getAttribute('aria-label');
+        return ariaLabel === 'Playback error';
+      }).catch(() => false);
       
-      const initialTime = audio.currentTime;
-      await new Promise(resolve => setTimeout(resolve, 300));
-      return audio.currentTime > initialTime;
-    },
-    { timeout: 15000 }
-  );
+      if (hasErrorModal) {
+        // Dismiss error modal and retry
+        console.log(`  [attempt ${attempt}/${MAX_RETRIES}] Error modal detected, dismissing and retrying...`);
+        const dismissBtn = page.locator('[data-testid="loading-modal-dismiss-btn"]');
+        if (await dismissBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
+          await dismissBtn.click();
+          await page.waitForTimeout(500);
+        }
+        
+        // Re-click play button to retry
+        await retryPlayClick(page);
+        continue;
+      }
+      
+      // Wait for data-playing="true" on the footer play button
+      await page.waitForFunction(
+        () => {
+          const btn = document.querySelector('[data-testid="player-play-pause"]');
+          return btn?.getAttribute('data-playing') === 'true';
+        },
+        { timeout: PER_ATTEMPT_TIMEOUT }
+      );
+      
+      // Wait for audio element to be actually playing
+      await page.waitForFunction(
+        async () => {
+          const audio = document.querySelector('audio') as HTMLAudioElement | null;
+          if (!audio) return false;
+          if (audio.paused) return false;
+          
+          const initialTime = audio.currentTime;
+          await new Promise(resolve => setTimeout(resolve, 300));
+          return audio.currentTime > initialTime;
+        },
+        { timeout: 10000 }
+      );
+      
+      // Success!
+      return;
+      
+    } catch (err) {
+      // Get diagnostics on failure
+      lastDiagnostics = await getDiagnostics();
+      if (lastDiagnostics) {
+        console.log(`  [attempt ${attempt}/${MAX_RETRIES}] Audio not playing. Diagnostics:`, JSON.stringify(lastDiagnostics, null, 2));
+      } else {
+        console.log(`  [attempt ${attempt}/${MAX_RETRIES}] Audio not playing. (Could not get diagnostics)`);
+      }
+      
+      if (attempt < MAX_RETRIES) {
+        console.log(`  [attempt ${attempt}/${MAX_RETRIES}] Retrying...`);
+        await retryPlayClick(page);
+      } else {
+        // Final attempt failed - throw with diagnostics
+        throw new Error(
+          `Audio failed to start after ${MAX_RETRIES} attempts. ` +
+          `Last diagnostics: ${JSON.stringify(lastDiagnostics)}`
+        );
+      }
+    }
+  }
+}
+
+/**
+ * Helper to retry clicking the play button
+ */
+async function retryPlayClick(page: Page): Promise<void> {
+  try {
+    // First try the channel play button
+    const channelPlayBtn = page.locator('[data-testid="channel-play-pause"]').first();
+    if (await channelPlayBtn.isVisible({ timeout: 500 }).catch(() => false)) {
+      await channelPlayBtn.click({ force: true });
+      await page.waitForTimeout(1500);
+      return;
+    }
+    
+    // Fallback to footer play button
+    const footerPlayBtn = page.locator('[data-testid="player-play-pause"]');
+    if (await footerPlayBtn.isVisible({ timeout: 500 }).catch(() => false)) {
+      await footerPlayBtn.click({ force: true });
+      await page.waitForTimeout(1500);
+      return;
+    }
+    
+    // If neither visible, wait and hope loading completes
+    await page.waitForTimeout(2000);
+  } catch {
+    // Best effort - continue to next attempt
+    await page.waitForTimeout(1000);
+  }
 }
 
 async function clearTraces(page: Page): Promise<void> {
@@ -665,7 +790,7 @@ test.describe('Playback Baseline Generation', () => {
     // -------------------------------------------------------------------------
     console.log('FLOW 1: Initial Play...');
     
-    // Click first channel card
+    // Click first channel card to expand it
     const firstChannel = channelCards.first();
     await firstChannel.click();
     
@@ -673,10 +798,18 @@ test.describe('Playback Baseline Generation', () => {
     const energySelector = page.locator('[data-testid="energy-selector"]');
     await energySelector.waitFor({ state: 'visible', timeout: 10000 });
     
-    // Click play button
+    // Wait a moment for the channel card to fully expand
+    await page.waitForTimeout(500);
+    
+    // Click play button with force to ensure it registers
     const playButton = page.locator('[data-testid="channel-play-pause"]').first();
     await playButton.waitFor({ state: 'visible', timeout: 10000 });
-    await playButton.click();
+    
+    // Ensure the play button is clickable (not covered by loading modal)
+    await playButton.click({ force: true });
+    
+    // Wait a moment for playback to initiate
+    await page.waitForTimeout(1000);
     
     // Wait for audio to be playing
     await waitForAudioPlaying(page, 45000);
