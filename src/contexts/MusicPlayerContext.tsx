@@ -221,7 +221,7 @@ type MusicPlayerContextType = {
   playbackLoadingState: PlaybackLoadingState;
   dismissLoadingError: () => void;
   setSessionTimer: (active: boolean, remaining: number) => void;
-  toggleChannel: (channel: AudioChannel, turnOn: boolean, fromPlayer?: boolean, channelImageUrl?: string) => Promise<void>;
+  toggleChannel: (channel: AudioChannel, turnOn: boolean, fromPlayer?: boolean, channelImageUrl?: string, overrideEnergyLevel?: 'low' | 'medium' | 'high') => Promise<void>;
   setChannelEnergy: (channelId: string, energyLevel: 'low' | 'medium' | 'high', channelImageUrl?: string) => void;
   loadChannels: () => Promise<void>;
   setAdminPreview: (track: AudioTrack | null, autoPlay?: boolean) => void;
@@ -1227,20 +1227,19 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
   // [PHASE 4.4] Preload slot strategy data using dedicated cache module
   // This reduces duplicate slot table fetches across playback flows
-  const preloadSlotStrategy = async (channelId: string, energyLevel: 'low' | 'medium' | 'high'): Promise<CachedSlotConfig | null> => {
+  // [PHASE 4.8] Simplified to use module-level cache as single source of truth
+  const preloadSlotStrategy = async (
+    channelId: string, 
+    energyLevel: 'low' | 'medium' | 'high'
+  ): Promise<CachedSlotConfig | null> => {
     const cacheKey = `${channelId}:${energyLevel}`;
 
-    // Check local ref cache first (for backward compatibility with existing callers)
-    const localCached = slotStrategyCache.current[cacheKey];
-    if (localCached && localCached.timestamp && (Date.now() - localCached.timestamp) < 5 * 60 * 1000) {
-      return localCached;
-    }
-
-    // Use the dedicated slot config cache module
+    // [PHASE 4.8] Use module-level cache directly (it has TTL + in-flight deduplication)
+    // The local ref cache was causing cache coherency issues
     const config = await getOrFetchSlotConfig(channelId, energyLevel, supabase);
     
     if (config) {
-      // Also store in local ref for backward compatibility
+      // Also store in local ref for fast synchronous access in generateNewPlaylist
       slotStrategyCache.current[cacheKey] = config;
     }
     
@@ -1831,7 +1830,9 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     };
   }, [audioEngine, playbackLoadingState.status, completePlaybackLoading]);
 
-  const toggleChannel = async (channel: AudioChannel, turnOn: boolean, fromPlayer: boolean = false, channelImageUrl?: string) => {
+  // [PHASE 4.8] Added optional overrideEnergyLevel to avoid duplicate slot config fetches
+  // When called from UserDashboard, pass the saved energy level directly instead of calling setChannelEnergy
+  const toggleChannel = async (channel: AudioChannel, turnOn: boolean, fromPlayer: boolean = false, channelImageUrl?: string, overrideEnergyLevel?: 'low' | 'medium' | 'high') => {
     console.log('[DIAGNOSTIC] toggleChannel called:', {
       channelName: channel.channel_name,
       turnOn,
@@ -1851,9 +1852,12 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       // Preload only this channel's image for instant modal display (not all channels)
       preloadSingleChannelImage(channelImageUrl || channel.image_url, channel.channel_name);
       
+      // [PHASE 4.8] Use overrideEnergyLevel if provided, otherwise fall back to state or default
+      // This prevents race condition where setChannelEnergy state update hasn't applied yet
+      const energyLevel = overrideEnergyLevel || channelStates[channel.id]?.energyLevel || 'medium';
+      
       // Start loading state immediately for instant visual feedback
       // Pass current isPlaying state to determine modal headline ("Loading..." vs "Changing to")
-      const energyLevel = channelStates[channel.id]?.energyLevel || 'medium';
       startPlaybackLoading('channel_switch', channel, energyLevel, undefined, channelImageUrl, isPlaying);
       
       // Clear playlistChannelId immediately to prevent stale track display during transition
@@ -1866,7 +1870,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
       newStates[channel.id] = {
         isOn: true,
-        energyLevel: channelStates[channel.id]?.energyLevel || 'medium'
+        energyLevel // [PHASE 4.8] Use the resolved energy level consistently
       };
 
       if (user) {
