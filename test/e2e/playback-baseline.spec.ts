@@ -480,15 +480,27 @@ test.describe('Playback Baseline Generation', () => {
     await clearTraces(page);
   });
 
-  test('generate baseline: initial play → energy change → channel change', async ({ page }) => {
+  test('generate baseline: initial play → energy change → channel change → slot-seq channel', async ({ page }) => {
     const channelCards = page.locator('[data-channel-id]');
     const count = await channelCards.count();
     expect(count).toBeGreaterThan(1);
 
     console.log('\n=== BASELINE GENERATION ===\n');
 
+    // Helper to find a slot sequencer channel by name
+    const findSlotSequencerChannel = async () => {
+      const slotSeqNames = ['Deep', 'The Drop', 'Tranquility'];
+      for (const name of slotSeqNames) {
+        const card = page.locator('[data-channel-id]', { hasText: name }).first();
+        if (await card.isVisible({ timeout: 500 }).catch(() => false)) {
+          return { card, name };
+        }
+      }
+      return null;
+    };
+
     // -------------------------------------------------------------------------
-    // FLOW 1: Initial Play
+    // FLOW 1: Initial Play (first channel - likely admin-curated)
     // -------------------------------------------------------------------------
     console.log('FLOW 1: Initial Play...');
     
@@ -557,6 +569,23 @@ test.describe('Playback Baseline Generation', () => {
     // Wait for audio - channel click should auto-start since audio was already playing
     await waitForAudioPlaying(page, 45000);
     console.log('  ✓ Channel change complete');
+
+    // Wait for trace to settle
+    await page.waitForTimeout(2000);
+
+    // -------------------------------------------------------------------------
+    // FLOW 4: Slot Sequencer Channel (explicit)
+    // -------------------------------------------------------------------------
+    console.log('FLOW 4: Slot Sequencer Channel...');
+    
+    const slotSeqChannel = await findSlotSequencerChannel();
+    if (slotSeqChannel) {
+      await slotSeqChannel.card.click();
+      await waitForAudioPlaying(page, 45000);
+      console.log(`  ✓ Slot sequencer channel "${slotSeqChannel.name}" complete`);
+    } else {
+      console.log('  ⚠ No slot sequencer channel found (Deep, The Drop, Tranquility)');
+    }
 
     // Wait for final trace to settle
     await page.waitForTimeout(3000);

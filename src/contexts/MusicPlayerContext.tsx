@@ -1240,9 +1240,15 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     const cacheKey = `${channelId}:${energyLevel}`;
 
 
-    // Return cached data if available
-    if (slotStrategyCache.current[cacheKey]) {
-      return slotStrategyCache.current[cacheKey];
+    // [PHASE 4.3] Return cached data if available and not expired (5 minute TTL)
+    const SLOT_STRATEGY_TTL_MS = 5 * 60 * 1000;
+    const cached = slotStrategyCache.current[cacheKey];
+    if (cached && cached.timestamp && (Date.now() - cached.timestamp) < SLOT_STRATEGY_TTL_MS) {
+      return cached;
+    }
+    // Remove stale entry if TTL expired
+    if (cached) {
+      delete slotStrategyCache.current[cacheKey];
     }
 
     try {
