@@ -251,7 +251,7 @@ describe('audioTracksCache', () => {
     });
 
     it('should report correct cache stats', () => {
-      expect(getCacheStats()).toEqual({ size: 0, inFlight: 0 });
+      expect(getCacheStats()).toMatchObject({ size: 0, inFlight: 0 });
 
       warmCache([createMockTrack('id-1', 100)]);
       

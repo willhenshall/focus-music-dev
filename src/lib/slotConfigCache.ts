@@ -96,6 +96,23 @@ const cache = new Map<string, CacheEntry>();
 const inFlightRequests = new Map<string, Promise<CachedSlotConfig | null>>();
 
 /**
+ * [PHASE 5.0] Cache statistics for debugging and baseline analysis.
+ */
+interface CacheStats {
+  hits: number;
+  misses: number;
+  inflightDedupHits: number;
+  fetches: number;
+}
+
+let stats: CacheStats = {
+  hits: 0,
+  misses: 0,
+  inflightDedupHits: 0,
+  fetches: 0,
+};
+
+/**
  * [PHASE 4.8] RequestId-scoped promises for slot config.
  * This ensures that within a single playback request, slot config is only fetched once,
  * even if multiple codepaths request it concurrently or sequentially.
@@ -167,8 +184,11 @@ export function getSlotConfig(
   const now = Date.now();
   
   if (entry && isEntryValid(entry, now)) {
+    stats.hits++; // [PHASE 5.0] Track cache hit
     return entry.config;
   }
+  
+  stats.misses++; // [PHASE 5.0] Track cache miss
   
   // Remove stale entry if exists
   if (entry) {
@@ -197,8 +217,11 @@ export async function fetchSlotConfig(
   // Check for in-flight request
   const existing = inFlightRequests.get(key);
   if (existing) {
+    stats.inflightDedupHits++; // [PHASE 5.0] Track in-flight dedup hit
     return existing;
   }
+  
+  stats.fetches++; // [PHASE 5.0] Track actual fetch
   
   // Create fetch promise
   const fetchPromise = (async () => {
@@ -388,16 +411,35 @@ export function invalidateSlotConfigByKey(channelId: string, energyLevel: string
 
 /**
  * Get cache statistics for debugging.
+ * [PHASE 5.0] Extended with hit/miss counters.
  */
 export function getSlotConfigCacheStats(): { 
   size: number; 
   inFlight: number;
   keys: string[];
+  hits: number;
+  misses: number;
+  inflightDedupHits: number;
+  fetches: number;
 } {
   return {
     size: cache.size,
     inFlight: inFlightRequests.size,
     keys: Array.from(cache.keys()),
+    ...stats,
+  };
+}
+
+/**
+ * [PHASE 5.0] Clear cache statistics (for baseline measurement).
+ * Does NOT clear the cache itself - only resets counters.
+ */
+export function clearSlotConfigCacheStats(): void {
+  stats = {
+    hits: 0,
+    misses: 0,
+    inflightDedupHits: 0,
+    fetches: 0,
   };
 }
 

@@ -177,6 +177,29 @@ interface BaselineReport {
         fetchCount: number;  // negative means fewer fetches (good)
       };
     };
+    // [PHASE 5.0] Warm repeat root cause analysis
+    warmRepeatRootCause?: {
+      flow4Endpoints: Record<string, number>;  // endpoint -> count
+      flow5Endpoints: Record<string, number>;  // endpoint -> count
+      deltaEndpoints: Record<string, number>;  // endpoint -> delta (positive = more in Flow 5)
+      unexpectedEndpoints: Array<{
+        endpoint: string;
+        count: number;
+        reason: string;
+      }>;
+      cacheStats: {
+        flow4: {
+          slotConfig: { hits: number; misses: number; fetches: number };
+          audioTracks: { hits: number; misses: number; batchFetches: number };
+          trackPool: { hits: number; misses: number; fetches: number };
+        };
+        flow5: {
+          slotConfig: { hits: number; misses: number; fetches: number };
+          audioTracks: { hits: number; misses: number; batchFetches: number };
+          trackPool: { hits: number; misses: number; fetches: number };
+        };
+      };
+    };
     totalFetches: number;
     avgFetchesPerTrace: number;
     warnings: Array<{
@@ -391,6 +414,27 @@ async function getTTFAEvents(page: Page): Promise<TTFAEvent[]> {
   });
 }
 
+// [PHASE 5.0] Cache stats helpers for warm repeat root cause analysis
+interface CacheStats {
+  slotConfig: { hits: number; misses: number; fetches: number; inflightDedupHits: number };
+  audioTracks: { hits: number; misses: number; batchFetches: number; inflightDedupHits: number };
+  trackPool: { hits: number; misses: number; fetches: number; inflightDedupHits: number };
+}
+
+async function getCacheStats(page: Page): Promise<CacheStats | null> {
+  return page.evaluate(() => {
+    const trace = (window as any).__playbackTrace;
+    return trace?.cacheStats?.() ?? null;
+  });
+}
+
+async function clearCacheStats(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const trace = (window as any).__playbackTrace;
+    trace?.clearCacheStats?.();
+  });
+}
+
 function percentile(values: number[], p: number): number {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
@@ -410,7 +454,8 @@ function getTraceEvents(trace: PlaybackTrace): NetworkEvent[] {
 
 function computeBaselineSummary(
   traces: PlaybackTrace[], 
-  ttfaEvents: TTFAEvent[]
+  ttfaEvents: TTFAEvent[],
+  capturedCacheStats?: { flow4: CacheStats | null; flow5: CacheStats | null }
 ): BaselineReport['summary'] {
   // TTFA stats from successful events
   const successTTFA = ttfaEvents
@@ -689,6 +734,134 @@ function computeBaselineSummary(
     }
   }
 
+  // [PHASE 5.0] Compute warm repeat root cause analysis
+  let warmRepeatRootCause: BaselineReport['summary']['warmRepeatRootCause'] = undefined;
+  
+  // Find Flow 4 and Flow 5 traces for endpoint comparison
+  for (const [channelName, channelTraces] of Object.entries(slotSeqChannelOccurrences)) {
+    if (channelTraces.length >= 2) {
+      const coldTrace = channelTraces[0];
+      const warmTrace = channelTraces[1];
+      
+      const coldSummary = getTraceSummary(coldTrace);
+      const warmSummary = getTraceSummary(warmTrace);
+      
+      const flow4Endpoints = coldSummary?.byEndpoint || {};
+      const flow5Endpoints = warmSummary?.byEndpoint || {};
+      
+      // Compute delta (positive = more in Flow 5)
+      const deltaEndpoints: Record<string, number> = {};
+      const allEndpoints = new Set([...Object.keys(flow4Endpoints), ...Object.keys(flow5Endpoints)]);
+      for (const ep of allEndpoints) {
+        const f4 = flow4Endpoints[ep] || 0;
+        const f5 = flow5Endpoints[ep] || 0;
+        if (f5 !== f4) {
+          deltaEndpoints[ep] = f5 - f4;
+        }
+      }
+      
+      // Identify unexpected endpoints during warm repeat
+      const unexpectedEndpoints: Array<{ endpoint: string; count: number; reason: string }> = [];
+      const slotConfigEndpoints = ['slot_strategies', 'slot_definitions', 'slot_rule_groups', 'slot_boosts'];
+      
+      for (const endpoint of slotConfigEndpoints) {
+        const count = Object.entries(flow5Endpoints)
+          .filter(([ep]) => ep.includes(endpoint))
+          .reduce((sum, [, c]) => sum + c, 0);
+        if (count > 0) {
+          unexpectedEndpoints.push({
+            endpoint,
+            count,
+            reason: 'Slot config should be cached from Flow 4',
+          });
+        }
+      }
+      
+      // Check for excessive audio_tracks calls
+      const audioTracksCount = Object.entries(flow5Endpoints)
+        .filter(([ep]) => ep.includes('audio_tracks'))
+        .reduce((sum, [, c]) => sum + c, 0);
+      if (audioTracksCount > 2) {
+        unexpectedEndpoints.push({
+          endpoint: 'audio_tracks',
+          count: audioTracksCount,
+          reason: 'Warm repeat should have ≤2 audio_tracks calls (track pool + metadata should be cached)',
+        });
+      }
+      
+      // Check for writes during TTFA
+      const writesEndpoints = ['user_preferences', 'listening_sessions', 'track_play_events'];
+      for (const endpoint of writesEndpoints) {
+        const count = Object.entries(flow5Endpoints)
+          .filter(([ep]) => ep.includes(endpoint))
+          .reduce((sum, [, c]) => sum + c, 0);
+        if (count > 0) {
+          unexpectedEndpoints.push({
+            endpoint,
+            count,
+            reason: 'Should be deferred after TTFA',
+          });
+        }
+      }
+      
+      // Build cache stats from captured stats
+      const cacheStats = {
+        flow4: capturedCacheStats?.flow4 ? {
+          slotConfig: {
+            hits: capturedCacheStats.flow4.slotConfig?.hits || 0,
+            misses: capturedCacheStats.flow4.slotConfig?.misses || 0,
+            fetches: capturedCacheStats.flow4.slotConfig?.fetches || 0,
+          },
+          audioTracks: {
+            hits: capturedCacheStats.flow4.audioTracks?.hits || 0,
+            misses: capturedCacheStats.flow4.audioTracks?.misses || 0,
+            batchFetches: capturedCacheStats.flow4.audioTracks?.batchFetches || 0,
+          },
+          trackPool: {
+            hits: capturedCacheStats.flow4.trackPool?.hits || 0,
+            misses: capturedCacheStats.flow4.trackPool?.misses || 0,
+            fetches: capturedCacheStats.flow4.trackPool?.fetches || 0,
+          },
+        } : {
+          slotConfig: { hits: 0, misses: 0, fetches: 0 },
+          audioTracks: { hits: 0, misses: 0, batchFetches: 0 },
+          trackPool: { hits: 0, misses: 0, fetches: 0 },
+        },
+        flow5: capturedCacheStats?.flow5 ? {
+          slotConfig: {
+            hits: capturedCacheStats.flow5.slotConfig?.hits || 0,
+            misses: capturedCacheStats.flow5.slotConfig?.misses || 0,
+            fetches: capturedCacheStats.flow5.slotConfig?.fetches || 0,
+          },
+          audioTracks: {
+            hits: capturedCacheStats.flow5.audioTracks?.hits || 0,
+            misses: capturedCacheStats.flow5.audioTracks?.misses || 0,
+            batchFetches: capturedCacheStats.flow5.audioTracks?.batchFetches || 0,
+          },
+          trackPool: {
+            hits: capturedCacheStats.flow5.trackPool?.hits || 0,
+            misses: capturedCacheStats.flow5.trackPool?.misses || 0,
+            fetches: capturedCacheStats.flow5.trackPool?.fetches || 0,
+          },
+        } : {
+          slotConfig: { hits: 0, misses: 0, fetches: 0 },
+          audioTracks: { hits: 0, misses: 0, batchFetches: 0 },
+          trackPool: { hits: 0, misses: 0, fetches: 0 },
+        },
+      };
+      
+      warmRepeatRootCause = {
+        flow4Endpoints,
+        flow5Endpoints,
+        deltaEndpoints,
+        unexpectedEndpoints,
+        cacheStats,
+      };
+      
+      break; // Only compute for first repeated channel found
+    }
+  }
+
   return {
     traceCount: traces.length,
     successCount,
@@ -702,6 +875,7 @@ function computeBaselineSummary(
     byTriggerType: byTriggerTypeSummary,
     byChannelType,
     slotSeqRepeatPerformance, // [PHASE 4.9] Cold vs warm comparison
+    warmRepeatRootCause, // [PHASE 5.0] Root cause analysis
     totalFetches,
     avgFetchesPerTrace: traces.length > 0 ? Math.round(totalFetches / traces.length) : 0,
     warnings: Object.entries(warningCounts).map(([type, count]) => ({ type, count })),
@@ -856,6 +1030,66 @@ function writeBaselineReport(report: BaselineReport): void {
     summaryLines.push(`| Flow 4 (Cold) | ${perf.coldPlay.ttfaMs}ms | ${perf.coldPlay.fetchCount} | First play, caches empty |`);
     summaryLines.push(`| Flow 5 (Warm) | ${perf.warmRepeat.ttfaMs}ms | ${perf.warmRepeat.fetchCount} | Repeat within TTL, cache hit expected |`);
     summaryLines.push(`| **Delta** | **${ttfaDeltaSign}${perf.delta.ttfaMs}ms** | **${fetchDeltaSign}${perf.delta.fetchCount}** | ${perf.delta.fetchCount < 0 ? '✅ Fewer fetches' : perf.delta.fetchCount === 0 ? '⚠️ Same fetches' : '❌ More fetches'} |`);
+  }
+
+  // [PHASE 5.0] Add warm repeat root cause analysis
+  if (report.summary.warmRepeatRootCause) {
+    const rca = report.summary.warmRepeatRootCause;
+    
+    summaryLines.push(``);
+    summaryLines.push(`## Warm Repeat Root Cause Analysis`);
+    summaryLines.push(``);
+    summaryLines.push(`### Endpoint Comparison (Flow 4 vs Flow 5)`);
+    summaryLines.push(``);
+    summaryLines.push(`| Endpoint | Flow 4 | Flow 5 | Delta |`);
+    summaryLines.push(`|----------|--------|--------|-------|`);
+    
+    const allEndpoints = new Set([
+      ...Object.keys(rca.flow4Endpoints), 
+      ...Object.keys(rca.flow5Endpoints)
+    ]);
+    const sortedEndpoints = Array.from(allEndpoints).sort();
+    
+    for (const ep of sortedEndpoints) {
+      const f4 = rca.flow4Endpoints[ep] || 0;
+      const f5 = rca.flow5Endpoints[ep] || 0;
+      const delta = f5 - f4;
+      const deltaStr = delta > 0 ? `+${delta} ❌` : delta < 0 ? `${delta} ✅` : '0';
+      summaryLines.push(`| ${ep} | ${f4} | ${f5} | ${deltaStr} |`);
+    }
+    
+    if (rca.unexpectedEndpoints.length > 0) {
+      summaryLines.push(``);
+      summaryLines.push(`### Unexpected Endpoints During Warm Repeat`);
+      summaryLines.push(``);
+      for (const ue of rca.unexpectedEndpoints) {
+        summaryLines.push(`- **${ue.endpoint}**: ${ue.count}x - ${ue.reason}`);
+      }
+    }
+    
+    summaryLines.push(``);
+    summaryLines.push(`### Cache Statistics`);
+    summaryLines.push(``);
+    summaryLines.push(`| Cache | Metric | Flow 4 | Flow 5 | Interpretation |`);
+    summaryLines.push(`|-------|--------|--------|--------|----------------|`);
+    
+    const f4sc = rca.cacheStats.flow4.slotConfig;
+    const f5sc = rca.cacheStats.flow5.slotConfig;
+    summaryLines.push(`| Slot Config | Hits | ${f4sc.hits} | ${f5sc.hits} | ${f5sc.hits > 0 ? '✅ Cache working' : f5sc.fetches > 0 ? '❌ Cache miss' : '-'} |`);
+    summaryLines.push(`| Slot Config | Misses | ${f4sc.misses} | ${f5sc.misses} | ${f5sc.misses > 0 ? '❌ Unexpected miss' : '✅ No misses'} |`);
+    summaryLines.push(`| Slot Config | Fetches | ${f4sc.fetches} | ${f5sc.fetches} | ${f5sc.fetches > 0 ? '❌ Should be 0' : '✅ No fetches'} |`);
+    
+    const f4at = rca.cacheStats.flow4.audioTracks;
+    const f5at = rca.cacheStats.flow5.audioTracks;
+    summaryLines.push(`| Audio Tracks | Hits | ${f4at.hits} | ${f5at.hits} | ${f5at.hits > f4at.hits ? '✅ More cache hits' : '-'} |`);
+    summaryLines.push(`| Audio Tracks | Misses | ${f4at.misses} | ${f5at.misses} | ${f5at.misses < f4at.misses ? '✅ Fewer misses' : '-'} |`);
+    summaryLines.push(`| Audio Tracks | Batch Fetches | ${f4at.batchFetches} | ${f5at.batchFetches} | ${f5at.batchFetches < f4at.batchFetches ? '✅ Fewer fetches' : f5at.batchFetches > 0 ? '⚠️ Still fetching' : '-'} |`);
+    
+    const f4tp = rca.cacheStats.flow4.trackPool;
+    const f5tp = rca.cacheStats.flow5.trackPool;
+    summaryLines.push(`| Track Pool | Hits | ${f4tp.hits} | ${f5tp.hits} | ${f5tp.hits > 0 ? '✅ Cache working' : f5tp.fetches > 0 ? '❌ Cache miss' : '-'} |`);
+    summaryLines.push(`| Track Pool | Misses | ${f4tp.misses} | ${f5tp.misses} | ${f5tp.misses > 0 ? '❌ Unexpected miss' : '✅ No misses'} |`);
+    summaryLines.push(`| Track Pool | Fetches | ${f4tp.fetches} | ${f5tp.fetches} | ${f5tp.fetches > 0 ? '❌ Should be 0' : '✅ No fetches'} |`);
   }
 
   if (report.summary.warnings.length > 0) {
@@ -1037,7 +1271,13 @@ test.describe('Playback Baseline Generation', () => {
     // -------------------------------------------------------------------------
     console.log('FLOW 4: Slot Sequencer Channel (cold)...');
     
+    // [PHASE 5.0] Clear cache stats before Flow 4
+    await clearCacheStats(page);
+    
     const slotSeqChannel = await findSlotSequencerChannel();
+    let flow4CacheStats: CacheStats | null = null;
+    let flow5CacheStats: CacheStats | null = null;
+    
     if (slotSeqChannel) {
       // [PHASE 4.5] Guardrail: Assert Flow 4 uses a canonical slot-seq channel
       expect(
@@ -1048,6 +1288,9 @@ test.describe('Playback Baseline Generation', () => {
       await slotSeqChannel.card.click();
       await waitForAudioPlaying(page, 45000);
       console.log(`  ✓ Slot sequencer channel "${slotSeqChannel.name}" cold play complete`);
+      
+      // [PHASE 5.0] Capture cache stats after Flow 4
+      flow4CacheStats = await getCacheStats(page);
     } else {
       console.log('  ⚠ No slot sequencer channel found in preferred list: ' + PREFERRED_SLOT_SEQ_CHANNELS.join(', '));
     }
@@ -1083,10 +1326,16 @@ test.describe('Playback Baseline Generation', () => {
         // Wait a moment for the transition
         await page.waitForTimeout(1000);
         
+        // [PHASE 5.0] Clear cache stats before Flow 5 (but NOT the caches themselves)
+        await clearCacheStats(page);
+        
         // Step 2: Return to the slot sequencer channel (should be cache hit)
         await slotSeqChannel.card.click();
         await waitForAudioPlaying(page, 45000);
         console.log(`  ✓ Returned to slot sequencer channel "${slotSeqChannel.name}" (warm repeat)`);
+        
+        // [PHASE 5.0] Capture cache stats after Flow 5
+        flow5CacheStats = await getCacheStats(page);
       } else {
         console.log('  ⚠ No admin channel found for intermediate switch');
       }
@@ -1096,6 +1345,9 @@ test.describe('Playback Baseline Generation', () => {
 
     // Wait for final trace to settle
     await page.waitForTimeout(3000);
+    
+    // [PHASE 5.0] Store cache stats for report
+    const capturedCacheStats = { flow4: flow4CacheStats, flow5: flow5CacheStats };
 
     // -------------------------------------------------------------------------
     // EXPORT DATA
@@ -1109,7 +1361,8 @@ test.describe('Playback Baseline Generation', () => {
     console.log(`  Captured ${ttfaEvents.length} TTFA events`);
 
     // Compute summary and verdict
-    const summary = computeBaselineSummary(traces, ttfaEvents);
+    // [PHASE 5.0] Pass cache stats for warm repeat root cause analysis
+    const summary = computeBaselineSummary(traces, ttfaEvents, capturedCacheStats);
     const verdict = computeVerdict(summary);
 
     const report: BaselineReport = {

@@ -229,7 +229,7 @@ describe('slotConfigCache', () => {
     });
 
     it('should report correct cache stats', () => {
-      expect(getSlotConfigCacheStats()).toEqual({
+      expect(getSlotConfigCacheStats()).toMatchObject({
         size: 0,
         inFlight: 0,
         keys: [],

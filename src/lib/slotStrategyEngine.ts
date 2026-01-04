@@ -448,6 +448,23 @@ const TRACK_POOL_CACHE_TTL_MS = 5 * 60 * 1000;
 const inFlightTrackPoolRequests = new Map<string, Promise<any[] | null>>();
 
 /**
+ * [PHASE 5.0] Track pool cache statistics for debugging and baseline analysis.
+ */
+interface TrackPoolCacheStats {
+  hits: number;
+  misses: number;
+  inflightDedupHits: number;
+  fetches: number;
+}
+
+let trackPoolStats: TrackPoolCacheStats = {
+  hits: 0,
+  misses: 0,
+  inflightDedupHits: 0,
+  fetches: 0,
+};
+
+/**
  * [PHASE 4.6] Prefetch the track pool based on genre filter from rule groups.
  * Uses in-memory caching to avoid duplicate fetches within the same playback session.
  * 
@@ -474,14 +491,20 @@ export async function prefetchTrackPool(
   const now = Date.now();
   const cached = trackPoolCache.get(cacheKey);
   if (cached && (now - cached.cachedAt) < TRACK_POOL_CACHE_TTL_MS) {
+    trackPoolStats.hits++; // [PHASE 5.0] Track cache hit
     return cached.tracks;
   }
+  
+  trackPoolStats.misses++; // [PHASE 5.0] Track cache miss
   
   // Check in-flight request
   const inFlight = inFlightTrackPoolRequests.get(cacheKey);
   if (inFlight) {
+    trackPoolStats.inflightDedupHits++; // [PHASE 5.0] Track in-flight dedup hit
     return inFlight;
   }
+  
+  trackPoolStats.fetches++; // [PHASE 5.0] Track actual fetch
   
   // Fetch and cache
   const fetchPromise = (async () => {
@@ -520,6 +543,37 @@ export async function prefetchTrackPool(
 export function clearTrackPoolCache(): void {
   trackPoolCache.clear();
   inFlightTrackPoolRequests.clear();
+}
+
+/**
+ * [PHASE 5.0] Get track pool cache statistics for debugging.
+ */
+export function getTrackPoolCacheStats(): { 
+  size: number; 
+  inFlight: number;
+  hits: number;
+  misses: number;
+  inflightDedupHits: number;
+  fetches: number;
+} {
+  return {
+    size: trackPoolCache.size,
+    inFlight: inFlightTrackPoolRequests.size,
+    ...trackPoolStats,
+  };
+}
+
+/**
+ * [PHASE 5.0] Clear track pool cache statistics (for baseline measurement).
+ * Does NOT clear the cache itself - only resets counters.
+ */
+export function clearTrackPoolCacheStats(): void {
+  trackPoolStats = {
+    hits: 0,
+    misses: 0,
+    inflightDedupHits: 0,
+    fetches: 0,
+  };
 }
 
 /**

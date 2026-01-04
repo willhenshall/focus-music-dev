@@ -13,6 +13,20 @@
  * - View traces via window.__playbackTrace in dev tools
  */
 
+// [PHASE 5.0] Import cache stats functions for warm repeat diagnosis
+import { 
+  getSlotConfigCacheStats, 
+  clearSlotConfigCacheStats 
+} from './slotConfigCache';
+import { 
+  getCacheStats as getAudioTracksCacheStats, 
+  clearCacheStats as clearAudioTracksCacheStats 
+} from './audioTracksCache';
+import { 
+  getTrackPoolCacheStats, 
+  clearTrackPoolCacheStats 
+} from './slotStrategyEngine';
+
 // ============================================================================
 // TYPES
 // ============================================================================
@@ -835,6 +849,17 @@ if (typeof window !== 'undefined' && import.meta.env.DEV) {
       } else {
         console.warn('No trace found');
       }
+    },
+    // [PHASE 5.0] Cache stats for warm repeat diagnosis
+    cacheStats: () => ({
+      slotConfig: getSlotConfigCacheStats(),
+      audioTracks: getAudioTracksCacheStats(),
+      trackPool: getTrackPoolCacheStats(),
+    }),
+    clearCacheStats: () => {
+      clearSlotConfigCacheStats();
+      clearAudioTracksCacheStats();
+      clearTrackPoolCacheStats();
     },
   };
 }
