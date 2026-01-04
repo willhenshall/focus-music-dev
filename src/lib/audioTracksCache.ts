@@ -88,6 +88,23 @@ const cache = new Map<string, CacheEntry>();
  */
 const inFlightRequests = new Map<string, Promise<CachedAudioTrack | null>>();
 
+/**
+ * [PHASE 5.0] Cache statistics for debugging and baseline analysis.
+ */
+interface CacheStats {
+  hits: number;
+  misses: number;
+  inflightDedupHits: number;
+  batchFetches: number;
+}
+
+let stats: CacheStats = {
+  hits: 0,
+  misses: 0,
+  inflightDedupHits: 0,
+  batchFetches: 0,
+};
+
 // ============================================================================
 // CORE API
 // ============================================================================
@@ -108,8 +125,10 @@ export function getMany(ids: string[]): { hits: CachedAudioTrack[]; misses: stri
     const entry = cache.get(id);
     if (entry && (now - entry.cachedAt) < CACHE_TTL_MS) {
       hits.push(entry.track);
+      stats.hits++; // [PHASE 5.0] Track cache hit
     } else {
       misses.push(id);
+      stats.misses++; // [PHASE 5.0] Track cache miss
       // Remove stale entry if exists
       if (entry) {
         cache.delete(id);
@@ -145,6 +164,7 @@ export async function fetchMissing(
     const existing = inFlightRequests.get(id);
     if (existing) {
       inFlightPromises.push(existing);
+      stats.inflightDedupHits++; // [PHASE 5.0] Track in-flight dedup hit
     } else {
       toFetch.push(id);
     }
@@ -154,6 +174,8 @@ export async function fetchMissing(
   let fetchedTracks: CachedAudioTrack[] = [];
   
   if (toFetch.length > 0) {
+    stats.batchFetches++; // [PHASE 5.0] Track batch fetch
+    
     // Create individual promises for each id to track in-flight status
     const fetchPromise = (async () => {
       try {
@@ -311,11 +333,33 @@ export function invalidate(ids: string[]): void {
 
 /**
  * Get cache statistics for debugging.
+ * [PHASE 5.0] Extended with hit/miss counters.
  */
-export function getCacheStats(): { size: number; inFlight: number } {
+export function getCacheStats(): { 
+  size: number; 
+  inFlight: number;
+  hits: number;
+  misses: number;
+  inflightDedupHits: number;
+  batchFetches: number;
+} {
   return {
     size: cache.size,
     inFlight: inFlightRequests.size,
+    ...stats,
+  };
+}
+
+/**
+ * [PHASE 5.0] Clear cache statistics (for baseline measurement).
+ * Does NOT clear the cache itself - only resets counters.
+ */
+export function clearCacheStats(): void {
+  stats = {
+    hits: 0,
+    misses: 0,
+    inflightDedupHits: 0,
+    batchFetches: 0,
   };
 }
 
