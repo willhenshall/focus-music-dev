@@ -270,7 +270,6 @@ export async function selectNextTrack(
 ): Promise<SelectionResult | null> {
   const { channelId, energyTier, slotIndex, history } = params;
 
-
   // Load strategy configuration
   const { data: strategy, error: strategyError } = await supabase
     .from('slot_strategies')
