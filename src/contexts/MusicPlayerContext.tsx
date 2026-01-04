@@ -1010,7 +1010,6 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       // If not cached, preload it now
       if (!cachedStrategy) {
         cachedStrategy = await preloadSlotStrategy(activeChannel.id, energyLevel);
-      } else {
       }
 
       if (!cachedStrategy?.strategy) {

@@ -214,13 +214,18 @@ export async function fetchSlotConfig(
 ): Promise<CachedSlotConfig | null> {
   const key = getCacheKey(channelId, energyLevel);
   
+  // [PHASE 5.1 DEBUG] Log when fetchSlotConfig is called
+  console.warn('[PHASE 5.1 DEBUG] fetchSlotConfig CALLED', { channelId, energyLevel, key });
+  
   // Check for in-flight request
   const existing = inFlightRequests.get(key);
   if (existing) {
+    console.log('[PHASE 5.1 DEBUG] fetchSlotConfig returning in-flight promise');
     stats.inflightDedupHits++; // [PHASE 5.0] Track in-flight dedup hit
     return existing;
   }
   
+  console.warn('[PHASE 5.1 DEBUG] fetchSlotConfig ACTUALLY FETCHING - THIS SHOULD NOT HAPPEN IN WARM REPEAT');
   stats.fetches++; // [PHASE 5.0] Track actual fetch
   
   // Create fetch promise

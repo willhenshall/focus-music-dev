@@ -672,8 +672,11 @@ function computeBaselineSummary(
   // Find a channel with at least 2 occurrences (cold + warm)
   for (const [channelName, channelTraces] of Object.entries(slotSeqChannelOccurrences)) {
     if (channelTraces.length >= 2) {
-      const coldTrace = channelTraces[0];
-      const warmTrace = channelTraces[1];
+      // [PHASE 5.1 FIX] Sort traces by startedAt to correctly identify cold (first) vs warm (second)
+      // Traces come from getAllTraces() which returns newest-first, so we need to sort chronologically
+      const sortedTraces = [...channelTraces].sort((a, b) => a.startedAt - b.startedAt);
+      const coldTrace = sortedTraces[0];  // First occurrence = cold play
+      const warmTrace = sortedTraces[1];  // Second occurrence = warm repeat
       
       const coldSummary = getTraceSummary(coldTrace);
       const warmSummary = getTraceSummary(warmTrace);
@@ -740,8 +743,10 @@ function computeBaselineSummary(
   // Find Flow 4 and Flow 5 traces for endpoint comparison
   for (const [channelName, channelTraces] of Object.entries(slotSeqChannelOccurrences)) {
     if (channelTraces.length >= 2) {
-      const coldTrace = channelTraces[0];
-      const warmTrace = channelTraces[1];
+      // [PHASE 5.1 FIX] Sort traces by startedAt to correctly identify cold (first) vs warm (second)
+      const sortedRootCauseTraces = [...channelTraces].sort((a, b) => a.startedAt - b.startedAt);
+      const coldTrace = sortedRootCauseTraces[0];  // First occurrence = cold play
+      const warmTrace = sortedRootCauseTraces[1];  // Second occurrence = warm repeat
       
       const coldSummary = getTraceSummary(coldTrace);
       const warmSummary = getTraceSummary(warmTrace);
